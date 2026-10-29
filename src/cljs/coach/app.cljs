@@ -4,6 +4,7 @@
             [coach.views.activities :as activities]
             [coach.views.activity :as activity]
             [coach.views.calendar :as calendar]
+            [coach.views.plan :as plan]
             [coach.views.load :as load]
             [coach.views.today :as today]
             [replicant.dom :as r]))
@@ -27,6 +28,7 @@
                      {:page :activities :params params})
       "load"       {:page :load :params params}
       "calendar"   {:page :calendar :params params}
+      "plan"       {:page :plan :params params}
       {:page :today})))
 
 (defn route-hash [{:keys [page id params]}]
@@ -47,6 +49,7 @@
     :activities [(str "/api/activities?from=" (range-from route))]
     :activity   [(str "/api/activities/" id "?streams=true")]
     :calendar   (calendar/urls route)
+    :plan       (plan/urls)
     :load       [(str "/api/load?from=" (range-from route))
                  (str "/api/volume?from=" (range-from route))]
     []))
@@ -56,19 +59,37 @@
 
 (defn fetch! [url & [{:keys [force]}]]
   (when (or force (not (contains? (:data @state) url)))
-    (swap! state update :loading conj url)
+    (when-not (contains? (:data @state) url) ; refetches keep the old render, no fade
+      (swap! state update :loading conj url))
     (-> (js/fetch url)
         (.then (fn [res]
                  (if (.-ok res) (.json res) (throw (js/Error. (str "HTTP " (.-status res)))))))
         (.then (fn [body]
-                 (swap! state #(-> % (assoc-in [:data url] (js->clj body :keywordize-keys true))
-                                   (update :loading disj url) (update :errors dissoc url)))))
+                 (let [data (js->clj body :keywordize-keys true)]
+                   (swap! state #(-> % (assoc-in [:data url] data)
+                                     (update :loading disj url) (update :errors dissoc url)))
+                   ;; a proposal is being generated: check again shortly
+                   (when (= "running" (:status data))
+                     (js/setTimeout #(fetch! url {:force true}) 4000)))))
         (.catch (fn [e]
                   (swap! state #(-> % (update :loading disj url)
                                     (assoc-in [:errors url] (.-message e)))))))))
 
 (defn load-route! [& [opts]]
   (run! #(fetch! % opts) (urls (:route @state))))
+
+(defn api!
+  "Sends a write request (JSON body), then reloads the current page's data."
+  [method url body]
+  (-> (js/fetch url #js {:method method
+                         :headers #js {"Content-Type" "application/json"}
+                         :body (when body (js/JSON.stringify (clj->js body)))})
+      (.then (fn [res]
+               (if (.-ok res)
+                 (load-route! {:force true})
+                 (-> (.json res)
+                     (.then #(swap! state assoc :flash (str "Error: " (.-error %))))))))
+      (.catch #(swap! state assoc :flash (str "Error: " (.-message %))))))
 
 (defonce sync-timer (atom nil))
 
@@ -104,6 +125,10 @@
                       (set! (.-hash js/location)
                             (route-hash (assoc-in (:route @state) [:params k] v))))
       :set-ui       (swap! state assoc-in [:ui (first args)] (second args))
+      :set-in-ui    (swap! state assoc-in (into [:ui] (butlast args)) (last args))
+      :api          (let [[method url body] args]
+                      (swap! state dissoc :flash)
+                      (api! method url body))
       :sync         (start-sync!)
       (js/console.warn "unknown action" (pr-str action)))))
 
@@ -117,7 +142,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Shell
 
-(def nav-items [[:today "#/" "Today"] [:calendar "#/calendar" "Calendar"] [:activities "#/activities" "Activities"]
+(def nav-items [[:today "#/" "Today"] [:plan "#/plan" "Plan"] [:calendar "#/calendar" "Calendar"] [:activities "#/activities" "Activities"]
                 [:load "#/load" "Training load"]])
 
 (defn view [{:keys [route loading] :as s}]
@@ -134,7 +159,8 @@
         :activities (activities/view s (first (urls route)))
         :activity   (activity/view s (first (urls route)))
         :load       (let [[l v] (urls route)] (load/view s l v))
-        :calendar   (calendar/view s (urls route)))]]))
+        :calendar   (calendar/view s (urls route))
+        :plan       (plan/view s (urls route)))]]))
 
 (defn render! []
   (r/render (js/document.getElementById "app") (view @state)))

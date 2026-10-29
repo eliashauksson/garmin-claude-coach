@@ -250,7 +250,8 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
 .cal-dow { display: none; }
 .cal-item { display: block; text-decoration: none; color: var(--text); background: var(--surface-2); border-left: 4px solid; border-radius: 8px; padding: 5px 7px; min-width: 0; }
 .cal-item:hover { background: var(--row-hover); color: var(--text); }
-.cal-item.planned { background: transparent; border: 1.5px dashed var(--text-3); border-left-width: 4px; }
+.cal-item.planned { background: transparent; border: 1.5px dashed var(--text-3); border-left: 4px solid; }
+.cal-item.planned.skipped { opacity: .5; text-decoration: line-through; }
 .cal-item-name { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-item-meta, .cal-item-tss { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-item-tss { font-weight: 700; }
@@ -263,4 +264,26 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
   .cal-date { flex: 0 0 64px; }
   .cal-dow { display: inline; margin-right: 4px; }
   .cal-item { flex: 1 1 200px; }
+}
+
+/* Plan page */
+.week-title { font-size: 20px; font-weight: 800; color: var(--text); letter-spacing: -.01em; }
+.plan-list { display: flex; flex-direction: column; }
+.plan-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 10px 0; border-top: 1px solid var(--row-line); }
+.plan-row:first-child { border-top: 0; }
+.plan-row.skipped .plan-what, .plan-row.rejected .plan-what { opacity: .5; text-decoration: line-through; }
+.plan-row.done .plan-what b { color: var(--green-ink); }
+.plan-when { font-weight: 700; font-size: 13px; }
+.plan-what { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.plan-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.plan-actions .btn-ink { padding: 6px 12px; font-size: 13px; }
+button.pill { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
+.plan-footer { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.proposal { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.plan-edit { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; font-size: 12px; color: var(--text-2); }
+.plan-edit input { width: 70px; font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text); }
+.plan-edit select { padding: 4px 8px; border-radius: 8px; }
+@media (max-width: 640px) {
+  .plan-row { grid-template-columns: 1fr; gap: 6px; }
+  .plan-actions { justify-content: flex-start; }
 }

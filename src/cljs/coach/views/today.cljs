@@ -1,7 +1,8 @@
 (ns coach.views.today
   (:require [clojure.string :as str]
             [coach.charts :as c]
-            [coach.ui :as ui]))
+            [coach.ui :as ui]
+            [coach.views.plan :as plan]))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -270,7 +271,37 @@
                                                       :data [[{:yAxis low} {:yAxis high}]]})})})
                (no-data))})))
 
-(defn- last-activity-card [a]
+(defn- apply-change
+  "PATCH body for one readiness suggestion."
+  [{:keys [to slot]}]
+  (cond (= "REST" to) {:status "skipped"}
+        :else (cond-> {}
+                to   (assoc :session_id to :title (plan/session-names to))
+                slot (assoc :slot slot))))
+
+(defn- planned-today [{:keys [workouts signals changes level]}]
+  (let [by-id (into {} (map (juxt :workout_id identity)) changes)]
+    [:div.divider
+     [:div.lab "Planned today"]
+     (if (seq workouts)
+       (for [w workouts
+             :let [c (by-id (:id w))]]
+         [:div {:replicant/key (:id w) :style {:display "flex" :flex-direction "column" :gap "4px"}}
+          [:div (plan/session-chip (:session_id w)) " " [:b (:title w)]
+           [:span.sub (str " · " (:slot w) (when (pos? (:duration_min w)) (str " · " (:duration_min w) " min")))]]
+          (when c
+            [:div {:style {:display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap"}}
+             [:span.sub (str "Readiness suggests: "
+                             (cond (= "REST" (:to c)) "rest instead"
+                                   :else (str/join ", " (remove nil? [(some->> (:to c) plan/session-names (str "change to "))
+                                                                      (when (:slot c) "move to the evening")]))))]
+             [:button.pill {:on {:click [[:api "PATCH" (str "/api/plan/workouts/" (:id w)) (apply-change c)]]}} "Apply"]])])
+       [:div.sub "Nothing planned today."])
+     (when (seq signals)
+       [:div.sub {:style {:color (if (= "rest" (name level)) "var(--red)" "var(--text-2)")}}
+        (str/join " · " signals)])]))
+
+(defn- last-activity-card [a check]
   (ui/card {:flex "1 1 300px"}
            (ui/label-row {:icon :mountain :accent "--text" :tint "--surface-2" :soft? true :label "Last activity"})
            (if a
@@ -282,7 +313,7 @@
                         (some-> (ui/hm (or (:moving_s a) (:duration_s a))) ui/pill)
                         (some-> (:avg_hr a) js/Math.round (str " bpm") ui/pill))]
              [:div.empty "No activities yet."])
-           [:div.divider [:div.lab "Planned today"] [:div.sub "No plan yet. Planning arrives in Phase 5."]]))
+           (planned-today check)))
 
 ;; ---------------------------------------------------------------------------
 
@@ -308,4 +339,4 @@
          (stress-card w day i) (steps-card w day i)]
         [:div.row {:replicant/key "r4"}
          (sleep-nights-card (:nights d)) (hrv-nights-card w (:nights d))
-         (last-activity-card (:last_activity d))]))]))
+         (last-activity-card (:last_activity d) (:readiness_check d))]))]))

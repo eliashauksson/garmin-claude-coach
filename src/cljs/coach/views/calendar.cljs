@@ -30,7 +30,8 @@
 (defn urls [route]
   (let [[from to] (window route)]
     [(str "/api/activities?from=" from "&to=" to)
-     (str "/api/load?from=" from "&to=" (min-date to (ui/iso-today)))]))
+     (str "/api/load?from=" from "&to=" (min-date to (ui/iso-today)))
+     (str "/api/plan?from=" from "&to=" to)]))
 
 ;; ---------------------------------------------------------------------------
 
@@ -55,6 +56,16 @@
       (str/join " · " (remove nil? [(ui/hm (secs a))
                                     (when (and distance_m (pos? distance_m)) (str (ui/km distance_m) " km"))]))]
      (when tss [:div.cal-item-tss (str (js/Math.round tss) " TSS")])]))
+
+(defn- planned-item [{:keys [id session_id title slot duration_min distance_km status]}]
+  (let [gym? (re-find #"^(GYM|CALF)" session_id)]
+    [:a.cal-item.planned {:replicant/key (str "p" id) :href "#/plan" :class status
+                          :title (str slot " · " title)
+                          :style {:border-left-color (if gym? "var(--fam-other)" "var(--fam-run)")}}
+     [:div.cal-item-name (ui/session-names session_id session_id)]
+     [:div.cal-item-meta (str/join " · " (remove nil? [slot
+                                                     (when (pos? duration_min) (str duration_min " min"))
+                                                     (when (pos? distance_km) (str distance_km " km"))]))]]))
 
 (defn- week-summary [monday acts load-by-date today]
   (let [sunday   (add-days monday 6)
@@ -87,7 +98,7 @@
      (when (and l (not future?))
        [:div.cal-load (str "Fitness " (js/Math.round (:ctl l)) " · Form " (js/Math.round (:tsb l)))])]))
 
-(defn- week-row [monday acts-by-date load-by-date today]
+(defn- week-row [monday acts-by-date plan-by-date load-by-date today]
   (let [days (mapv #(add-days monday %) (range 7))]
     [:div.cal-week {:replicant/key monday}
      (week-summary monday (mapcat acts-by-date days) load-by-date today)
@@ -95,14 +106,16 @@
        [:div.cal-day {:replicant/key d
                       :class (remove nil? [(when (= d today) "today") (when (pos? (compare d today)) "future")])}
         [:div.cal-date [:span.cal-dow (day-names i)] (day-label d)]
-        (map activity-item (acts-by-date d))])]))
+        (map activity-item (acts-by-date d))
+        (map planned-item (remove #(= "done" (:status %)) (plan-by-date d)))])]))
 
-(defn view [{:keys [data errors route]} [acts-url load-url]]
+(defn view [{:keys [data errors route]} [acts-url load-url plan-url]]
   (let [[from to mondays] (window route)
         acts    (get data acts-url)
         today   (ui/iso-today)
         by-date (group-by :date (sort-by :start_time_local acts))
         load-by (into {} (map (juxt :date identity)) (get data load-url))
+        plan-by (group-by :date (:workouts (get data plan-url)))
         this-monday (monday today)
         anchor  (monday (get-in route [:params :week] today))
         d1 (ui/parse-date from) d2 (ui/parse-date to)]
@@ -120,5 +133,5 @@
      (some (fn [u] (when-let [e (get errors u)] [:div.error (str "Could not load: " e)])) [acts-url load-url])
      [:div.card.cal
       [:div.cal-head [:div "Week"] (for [d day-names] [:div {:replicant/key d} d])]
-      (for [m mondays] (week-row m by-date load-by today))]
-     [:div.sub "Planned workouts will appear here, with a dashed outline, once planning arrives in Phase 5."]]))
+      (for [m mondays] (week-row m by-date plan-by load-by today))]
+     [:div.sub "Planned sessions have a dashed outline; once done they're replaced by the recorded activity. Plan them on the Plan page."]]))

@@ -4,6 +4,10 @@
             [coach.analysis :as analysis]
             [coach.auth :as auth]
             [coach.db :as db]
+            [coach.plan :as plan]
+            [coach.planner :as planner]
+            [coach.readiness :as readiness]
+            [coach.season :as season]
             [coach.sync :as sync]
             [clojure.java.io :as io]
             [reitit.ring :as ring]
@@ -57,11 +61,71 @@
       (and err (re-find #"(?i)auth|login|token|401|403" err))
       (assoc :level :expired :sync_error err))))
 
+(defn- body [req]
+  (some-> (:body req) slurp not-empty (json/read-str :key-fn keyword)))
+
+(defn- guarded
+  "Turns bad input (ex-info) into a 400 instead of a 500."
+  [handler]
+  (fn [req]
+    (try (handler req)
+         (catch clojure.lang.ExceptionInfo e
+           (json-response 400 {:error (ex-message e)})))))
+
+(defn readiness-today
+  "§8.1 check for today's planned workouts."
+  [ds]
+  (let [t    (today)
+        days (analysis/wellness ds (season/add-days t -1) t)
+        ws   (filter #(= "planned" (:status %)) (plan/workouts ds t t))]
+    (assoc (readiness/check days ws (:week (season/week-info t)))
+           :date t :workouts ws)))
+
+(defn plan-routes [ds]
+  ["/plan"
+   ["" {:get (fn [{:keys [query-params]}]
+               (let [[from to] (date-range query-params 0)]
+                 (ok {:weeks (plan/weeks ds from to)
+                      :workouts (plan/workouts ds from to)
+                      :season (season/week-info (today))})))}]
+   ["/weeks/:monday" {:put (guarded (fn [{:keys [path-params] :as req}]
+                                      (plan/set-week! ds (:monday path-params) (body req))
+                                      (ok (first (plan/weeks ds (:monday path-params) (:monday path-params))))))}]
+   ["/readiness" {:get (fn [_] (ok (readiness-today ds)))}]
+   ["/proposals"
+    ["" {:get  (fn [{:keys [query-params]}]
+                 (ok (plan/latest-proposal ds (season/monday (get query-params "monday" (today))))))
+         :post (guarded (fn [req]
+                          (planner/api-key) ; fail fast with a clear message
+                          (json-response 202 {:id (planner/propose! ds (:monday (body req)))})))}]
+    ["/:id" {:get (fn [{:keys [path-params]}]
+                    (if-let [p (plan/proposal ds (parse-long (:id path-params)))]
+                      (ok p)
+                      (json-response 404 {:error "not found"})))}]
+    ["/:id/items/:idx" {:post (guarded (fn [{:keys [path-params] :as req}]
+                                         (let [{:keys [decision edits]} (body req)
+                                               id (parse-long (:id path-params))]
+                                           (plan/decide-item! ds id (parse-long (:idx path-params)) decision edits)
+                                           (ok (plan/proposal ds id)))))}]
+    ["/:id/accept-all" {:post (guarded (fn [{:keys [path-params] :as req}]
+                                         (let [id (parse-long (:id path-params))]
+                                           (plan/accept-all! ds id (boolean (:replace (body req))))
+                                           (ok (plan/proposal ds id)))))}]]
+   ["/workouts/:id" {:patch  (guarded (fn [{:keys [path-params] :as req}]
+                                        (plan/update-workout! ds (parse-long (:id path-params)) (body req))
+                                        (ok {:ok true})))
+                     :delete (fn [{:keys [path-params]}]
+                               (plan/delete-workout! ds (parse-long (:id path-params)))
+                               (ok {:ok true}))}]])
+
 (defn routes [ds]
   [["/api"
     ["/today"       {:get (fn [_] (ok (assoc (analysis/today-summary ds)
                                              :auth (auth-status ds)
-                                             :sync (dissoc @sync-state :started_at))))}]
+                                             :sync (dissoc @sync-state :started_at)
+                                             :season (season/week-info (today))
+                                             :readiness_check (readiness-today ds))))}]
+    (plan-routes ds)
     ["/auth"        {:get (fn [_] (ok (auth-status ds)))}]
     ["/activities"  {:get (fn [{:keys [query-params]}]
                             (let [{:strs [sport from to limit]} query-params]

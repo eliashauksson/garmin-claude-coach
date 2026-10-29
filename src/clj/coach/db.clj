@@ -94,6 +94,54 @@
       date       TEXT PRIMARY KEY,
       data       BLOB,
       fetched_at TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS plan_weeks (
+      monday     TEXT PRIMARY KEY,
+      week_type  TEXT,
+      note       TEXT,
+      updated_at TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS plan_proposals (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      monday     TEXT NOT NULL,
+      status     TEXT NOT NULL,
+      model      TEXT,
+      context    TEXT,
+      response   TEXT,
+      warnings   TEXT,
+      error      TEXT,
+      usage      TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS proposal_items (
+      proposal_id  INTEGER NOT NULL,
+      idx          INTEGER NOT NULL,
+      date         TEXT NOT NULL,
+      slot         TEXT NOT NULL,
+      session_id   TEXT NOT NULL,
+      title        TEXT,
+      duration_min INTEGER,
+      distance_km  REAL,
+      intensity    TEXT,
+      description  TEXT,
+      reason       TEXT,
+      decision     TEXT NOT NULL DEFAULT 'pending',
+      workout_id   INTEGER,
+      PRIMARY KEY (proposal_id, idx))"
+   "CREATE TABLE IF NOT EXISTS planned_workouts (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      date         TEXT NOT NULL,
+      slot         TEXT NOT NULL,
+      session_id   TEXT NOT NULL,
+      title        TEXT,
+      duration_min INTEGER,
+      distance_km  REAL,
+      intensity    TEXT,
+      description  TEXT,
+      reason       TEXT,
+      status       TEXT NOT NULL DEFAULT 'planned',
+      proposal_id  INTEGER,
+      created_at   TEXT NOT NULL,
+      updated_at   TEXT NOT NULL)"
+   "CREATE INDEX IF NOT EXISTS planned_workouts_date ON planned_workouts(date)"
    "CREATE TABLE IF NOT EXISTS sync_state (
       key   TEXT PRIMARY KEY,
       value TEXT)"])

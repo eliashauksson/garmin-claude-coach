@@ -85,6 +85,15 @@
 (defn family [sport]
   (some #(when (re-find (:re %) (str sport)) %) families))
 
+;; Session library names (training-principles.md §5)
+(def session-names
+  {"EASY" "Easy run" "EASY_ST" "Easy + strides" "REC" "Recovery run" "HILL_ST" "Hill strides"
+   "HILL_2" "Hill repeats" "STEADY" "Steady block" "THR" "Threshold" "MP_BLOCK" "Marathon pace"
+   "LONG" "Long run" "LONG_MP" "Long run, MP finish" "DOUBLE" "Double day" "B2B" "Back-to-back"
+   "TRIPLE_MINI" "Mini-triple" "TRIPLE_SIM" "Full simulation" "TT5" "5 km time trial"
+   "GYM_LOWER" "Gym: lower body" "GYM_UPPER" "Gym: upper body" "GYM_BACK_SL" "Gym: back + single-leg"
+   "CALF_MIN" "Minimal strength" "REST" "Rest"})
+
 ;; ---------------------------------------------------------------------------
 ;; Icons (inline SVG, 24x24 stroke icons from the mockup)
 
