@@ -1,6 +1,6 @@
 # garmin-claude-coach
 
-A personal training dashboard that runs locally on my own Garmin data. It covers Today, Activities, Trends and Training load, with TrainingPeaks-style metrics. Today shows intraday heart rate, stress, body battery and steps; every sync keeps the last 7 days of intraday data up to date. AI training planning is coming in Phase 5. The data comes from a local [garmin_mcp](https://github.com/Taxuspt/garmin_mcp) server and is only ever **read**: nothing is written back to Garmin.
+A personal training dashboard that runs locally on my own Garmin data. It covers Today, Activities and Training load, with TrainingPeaks-style metrics. Today shows intraday heart rate, stress, body battery and steps; every sync keeps the last 7 days of intraday data up to date. AI training planning is coming in Phase 5. The data comes from a local [garmin_mcp](https://github.com/Taxuspt/garmin_mcp) server and is only ever **read**: nothing is written back to Garmin.
 
 See `garmin-coach-plan.md` for the design.
 
