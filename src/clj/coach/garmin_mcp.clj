@@ -23,6 +23,12 @@
   (let [local (str (System/getProperty "user.home") "/.local/bin/uvx")]
     (if (.exists (java.io.File. local)) local "uvx")))
 
+(defn server-cmd
+  "Command line for one of the pinned server's executables
+  (\"garmin-mcp\" or \"garmin-mcp-auth\")."
+  [exe & args]
+  (into [(uvx-path) "--python" "3.12" "--from" server-ref exe] args))
+
 (defn call
   "Calls a Garmin MCP tool, refusing anything outside the read-only allowlist."
   ([client tool] (call client tool {}))
@@ -161,7 +167,7 @@
   ([{:keys [stderr-file delay-ms] :or {stderr-file "data/mcp-server.log" delay-ms 250}}]
    (.mkdirs (.getParentFile (.getAbsoluteFile (java.io.File. ^String stderr-file))))
    (->GarminMcpSource
-    (mcp/start! {:cmd [(uvx-path) "--python" "3.12" "--from" server-ref "garmin-mcp"]
+    (mcp/start! {:cmd (server-cmd "garmin-mcp")
                  :env {"GARMIN_ENABLED_TOOLS" (str/join "," (sort read-tools))}
                  :stderr-file stderr-file})
     delay-ms)))
