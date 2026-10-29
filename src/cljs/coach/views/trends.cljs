@@ -14,9 +14,9 @@
    {:k :avg_stress  :title "Stress (daily average)" :unit ""}])
 
 (def legend-items
-  [{:label "Daily" :color "--text-muted" :kind :line}
-   {:label "28-day average" :color "--series-1" :kind :line}
-   {:label "Normal range (60-day mean ± 1 SD)" :color "--series-1" :kind :band}])
+  [{:label "Daily" :color "--text-3"}
+   {:label "28-day average" :color "--blue"}
+   {:label "Normal range (60-day mean ± 1 SD)" :color "color-mix(in srgb, var(--blue) 30%, transparent)"}])
 
 (defn- fmt [v]
   (when (ui/num? v)
@@ -31,7 +31,7 @@
 (defn- metric-card [{:keys [k title unit scale]} rows tables-open]
   (let [rows (scaled rows scale)]
     (ui/chart-card
-     {:id k :title title :tables-open tables-open
+     {:id k :title title :tables-open tables-open :flex "1 1 auto"
       :table-columns [{:label "Date" :value #(ui/date-short (:date %))}
                       {:label "Value" :value #(fmt (:value %)) :align :r}
                       {:label "7-day avg" :value #(fmt (:avg7 %)) :align :r}
@@ -51,24 +51,23 @@
                             (fn [params]
                               (let [r (nth rows (.-dataIndex (first params)) nil)]
                                 (c/tooltip-rows (ui/date-long (:date r))
-                                                [{:label (str unit " daily") :value (fmt (:value r)) :color (c/css-var "--text-muted")}
-                                                 {:label "28-day avg" :value (fmt (:avg28 r)) :color (c/css-var "--series-1")}
+                                                [{:label (str unit " daily") :value (fmt (:value r)) :color (c/css-var "--text-3")}
+                                                 {:label "28-day avg" :value (fmt (:avg28 r)) :color (c/css-var "--blue")}
                                                  {:label "normal range" :value (when (:base_low r) (str (fmt (:base_low r)) "–" (fmt (:base_high r))))}])))})
                    {:series (concat
-                             (c/band "base" "--series-1" rows :base_low :base_high)
-                             [(c/line "Daily" "--text-muted" (mapv (juxt :date :value) rows) :lineStyle {:width 1 :opacity 0.6})
-                              (c/line "28-day average" "--series-1" (mapv (juxt :date :avg28) rows))])}))}))})))
+                             (c/band "base" "--blue" rows :base_low :base_high)
+                             [(c/line "Daily" "--text-3" (mapv (juxt :date :value) rows) :lineStyle {:width 1 :opacity 0.6})
+                              (c/line "28-day average" "--blue" (mapv (juxt :date :avg28) rows) :lineStyle {:width 2.5})])}))}))})))
 
 (defn view [{:keys [data errors route tables-open]} url]
   (let [d     (get data url)
         range (get-in route [:params :range] "365")]
-    [:div
-     [:div.page-head [:h1 "Trends"]]
-     [:div.filters (ui/seg range ranges [:set-param :range])]
+    [:div {:style {:display "contents"}}
+     [:div.page-head [:h1.title "Trends"] (ui/seg range ranges [:set-param :range])]
      (when-let [e (get errors url)] [:div.error (str "Could not load: " e)])
      (ui/legend legend-items)
      (when d
-       [:div.grid.two
+       [:div.row
         (for [m metrics]
-          [:div {:replicant/key (name (:k m))}
+          [:div {:replicant/key (name (:k m)) :style {:flex "1 1 420px" :min-width 0 :display "flex"}}
            (metric-card m (get d (:k m)) tables-open)])])]))
