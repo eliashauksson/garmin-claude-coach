@@ -1,87 +1,332 @@
 (ns coach.views.today
   (:require [clojure.string :as str]
+            [coach.charts :as c]
             [coach.ui :as ui]))
 
+;; ---------------------------------------------------------------------------
+;; Helpers
+
+(def long-days ["Sunday" "Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday"])
+(def long-months ["January" "February" "March" "April" "May" "June" "July" "August"
+                  "September" "October" "November" "December"])
+
+(defn- header-date [iso]
+  (when iso (let [d (ui/parse-date iso)]
+              (str (long-days (.getDay d)) ", " (.getDate d) " " (long-months (.getMonth d))))))
+
+(defn- greeting []
+  (let [h (.getHours (js/Date.))]
+    (cond (< h 12) "Good morning" (< h 18) "Good afternoon" :else "Good evening")))
+
+(defn- clock [minute]
+  (let [m (js/Math.round minute)]
+    (str (.padStart (str (quot m 60)) 2 "0") ":" (.padStart (str (mod m 60)) 2 "0"))))
+
+(defn- sentence [s] (some-> s str/lower-case str/capitalize))
+
+(def day-axis [:div.ax [:span "00:00"] [:span "06:00"] [:span "12:00"] [:span "18:00"] [:span "24:00"]])
+
+(defn- no-data [] [:div.empty "No data yet — run Sync."])
+
+(defn- day-series-option
+  "A whole-day (0–1440 min) chart with hidden axes."
+  [{:keys [series y-min y-max tip]}]
+  (-> (c/base {:x-type "value"
+               :tooltip-fmt (fn [params]
+                              (let [p (first params) [m v] (js->clj (.-value p))]
+                                (c/tooltip-rows (clock m) [{:label tip :value (str v)}])))})
+      (assoc :grid {:left 0 :right 0 :top 4 :bottom 0})
+      (assoc-in [:xAxis :min] 0) (assoc-in [:xAxis :max] 1440)
+      (assoc-in [:xAxis :show] false)
+      (assoc :yAxis {:type "value" :show false :min y-min :max y-max})
+      (assoc :series series)))
+
+(defn- minute-table-columns [unit]
+  [{:label "Time" :value #(clock (first %))} {:label unit :value second :align :r}])
+
+;; ---------------------------------------------------------------------------
+;; Header, auth
+
 (defn- auth-notice
-  "Small chip normally; a banner with the renew command from 30 days out."
   [{:keys [level days_left expires_on renew_command sync_error]}]
   (when (#{"warn" "urgent" "expired"} level)
     [:div.banner {:class (if (= level "warn") "warn" "critical")}
      [:span.icon "!"]
      [:div
-      [:div [:b (case level
-                  "warn"    (str "Garmin login expires in about " days_left " days")
-                  "urgent"  (str "Garmin login expires in about " days_left " days")
-                  "Garmin login has expired")]
-       (when expires_on [:span.secondary (str " · estimated " (ui/date-short expires_on))])]
-      (when sync_error [:div.secondary (str "Last sync failed: " sync_error)])
-      [:div.secondary "Renew in a terminal: " [:code renew_command]]]]))
+      [:div [:b (if (= level "expired")
+                  "Garmin login has expired"
+                  (str "Garmin login expires in about " days_left " days"))]
+       (when expires_on [:span.sub (str " · estimated " (ui/date-short expires_on))])]
+      (when sync_error [:div.sub (str "Last sync failed: " sync_error)])
+      [:div.sub "Renew in a terminal: " [:code renew_command]]]]))
 
-(defn- auth-chip [{:keys [level days_left]}]
+(defn- auth-pill [{:keys [level days_left]}]
   (case level
-    "ok"      (ui/status-chip :ok (str "Garmin login · " days_left " days left"))
-    "warn"    (ui/status-chip :warn (str "Garmin login · " days_left " days left"))
-    "urgent"  (ui/status-chip :critical (str "Garmin login · " days_left " days left"))
-    "expired" (ui/status-chip :critical "Garmin login expired")
+    "ok"      (ui/status-pill :ok (str "Garmin login · " days_left " days left"))
+    "warn"    (ui/status-pill :warn (str "Garmin login · " days_left " days left"))
+    "urgent"  (ui/status-pill :critical (str "Garmin login · " days_left " days left"))
+    "expired" (ui/status-pill :critical "Garmin login expired")
     nil))
 
-(defn sync-button [{:keys [running last_result finished_at]}]
-  [:span {:style {:display "inline-flex" :gap "8px" :align-items "center"}}
-   (cond
-     running                        [:span.muted "Syncing…"]
-     (false? (:ok last_result))     [:span.error "Sync failed"]
-     finished_at                    [:span.muted "Synced"])
-   [:button.btn {:disabled running :on {:click [[:sync]]}} "Sync"]])
+(defn sync-button [{:keys [running last_result]}]
+  [:span {:style {:display "inline-flex" :gap "10px" :align-items "center"}}
+   (when (and (not running) (false? (:ok last_result))) [:span.error "Sync failed"])
+   [:button.btn-ink {:disabled running :on {:click [[:sync]]}} (if running "Syncing…" "Sync now")]])
 
-(defn view [{:keys [data errors sync]}]
+;; ---------------------------------------------------------------------------
+;; Row 1
+
+(defn- readiness-card [w]
+  (let [score (:readiness w)]
+    (ui/card {:tint "green" :flex "1 1 260px"}
+             (ui/label-row {:icon :bolt :accent "--green" :label "Training readiness"})
+             [:div.big.xl (or score "—")]
+             [:div.sub {:style {:color "var(--green-text)" :font-weight 600}}
+              (if (:readiness_level w) (str (sentence (:readiness_level w)) " · this morning") "No reading this morning")]
+             [:div.track [:div {:style {:width (str (or score 0) "%") :background "var(--green)"}}]])))
+
+(defn- body-battery-card [w day intraday tables-open]
+  (let [bb (:body_battery intraday)]
+    (ui/chart-card
+     {:id :bb :title "Body battery" :icon :battery :accent "--blue" :tint "blue" :flex "1 1 260px"
+      :tables-open tables-open
+      :table-columns (minute-table-columns "Level") :table-rows bb
+      :header [:div.baseline [:span.big (or (:bb_current day) "—")]
+               [:span.sub (str "high " (or (:body_battery_high w) "—"))]]
+      :chart (if (seq bb)
+               (c/echart {:key "bb" :class "h90"
+                          :option-fn #(day-series-option
+                                       {:y-min 0 :y-max 100 :tip "body battery"
+                                        :series [(-> (c/line "Body battery" "--blue" bb :lineStyle {:width 2.5})
+                                                     (c/area-wash 0.25))]})})
+               (no-data))
+      :footer (ui/pills (when (:bb_charged day) (ui/pill (str "+" (:bb_charged day) " charged")))
+                        (when (:bb_drained day) (ui/pill (str "−" (:bb_drained day) " drained"))))})))
+
+(defn- sleep-card [w day]
+  (let [stages (filter (fn [[_ s _]] (and s (pos? s)))
+                       [["Deep" (:deep_sleep_s w) "--deep"] ["Light" (:sleep_light_s day) "--purple-2"]
+                        ["REM" (:rem_sleep_s w) "--pink"] ["Awake" (:sleep_awake_s day) "--amber"]])]
+    (ui/card {:tint "purple" :flex "1 1 260px"}
+             (ui/label-row {:icon :moon :accent "--purple" :label "Sleep"})
+             [:div.baseline [:span.big (or (:sleep_score w) "—")]
+              (when (:sleep_s w) [:span.sub (str (ui/hm (:sleep_s w)) " asleep")])]
+             (if (seq stages)
+               [:div.stages {:role "img"
+                             :aria-label (str/join ", " (for [[l s] stages] (str l " " (ui/hm s))))}
+                (for [[l s color] stages]
+                  [:div {:replicant/key l :style {:flex s :background (str "var(" color ")")}}])]
+               (no-data))
+             (into [:div.pills] (for [[l s] stages] (ui/pill (str l " " (ui/hm s))))))))
+
+;; ---------------------------------------------------------------------------
+;; Row 2: heart rate
+
+(defn- heart-rate-card [w day intraday tables-open]
+  (let [hr (:hr intraday)]
+    (ui/chart-card
+     {:id :hr :title "Heart rate" :icon :heart :accent "--red" :tint "red"
+      :tables-open tables-open :table-columns (minute-table-columns "bpm") :table-rows hr
+      :header [:div.baseline
+               [:span.big (or (:rhr w) "—") [:small "bpm resting"]]
+               (ui/pills (when (:hr_min day) (ui/pill (str "Low " (:hr_min day))))
+                         (when (:hr_max day) (ui/pill (str "High " (:hr_max day))))
+                         (when (:rhr_7d day) (ui/pill (str "7-day resting " (:rhr_7d day)))))]
+      :chart (if (seq hr)
+               [:div
+                (c/echart {:key "hr" :class "h170"
+                           :option-fn #(day-series-option
+                                        {:tip "bpm"
+                                         :series [(c/area-wash (c/line "Heart rate" "--red" hr) 0.18)]})})
+                day-axis]
+               (no-data))})))
+
+;; ---------------------------------------------------------------------------
+;; Row 3: stress, steps
+
+(def stress-buckets
+  [["Rest" #(<= 0 % 25)] ["Low" #(<= 26 % 50)] ["Medium" #(<= 51 % 75)] ["High" #(<= 76 % 100)]
+   ["Unmeasured" neg?]])
+
+(defn- stress-card [w day intraday tables-open]
+  (let [st    (:stress intraday)
+        n     (count st)
+        rest  (count (filter #(<= 0 (second %) 25) st))]
+    (ui/chart-card
+     {:id :stress :title "Stress" :icon :pulse :accent "--amber" :tint "amber" :flex "2 1 460px"
+      :tables-open tables-open
+      :table-columns [{:label "Time" :value #(clock (first %))}
+                      {:label "Level" :value #(if (neg? (second %)) "unmeasured" (second %)) :align :r}]
+      :table-rows st
+      :header [:div.baseline
+               [:span.big (or (:avg_stress w) "—") [:small "average"]]
+               (ui/pills (when (:stress_max day) (ui/pill (str "Peak " (:stress_max day))))
+                         (when (pos? n) (ui/pill (str (ui/hm (* rest 180)) " at rest"))))]
+      :chart (if (seq st)
+               [:div
+                (c/echart {:key "stress" :class "h120"
+                           :option-fn #(day-series-option
+                                        {:y-min 0 :y-max 100 :tip "stress"
+                                         :series [(c/bars "Rest" "--blue" (filterv (fn [[_ v]] (<= 0 v 25)) st)
+                                                          :barWidth 2 :barMaxWidth nil :itemStyle {:color (c/css-var "--blue") :borderRadius 1})
+                                                  (c/bars "Stress" "--amber" (filterv (fn [[_ v]] (> v 25)) st)
+                                                          :barWidth 2 :barMaxWidth nil :barGap "-100%"
+                                                          :itemStyle {:color (c/css-var "--amber") :borderRadius 1})]})})
+                day-axis]
+               (no-data))
+      :footer (when (pos? n)
+                (into [:div.pills]
+                      (for [[label pred] stress-buckets]
+                        (ui/pill (when (= label "Rest") "--blue")
+                                 (str label " " (js/Math.round (* 100 (/ (count (filter #(pred (second %)) st)) n))) "%")))))})))
+
+(defn- steps-card [w day intraday tables-open]
+  (let [steps (:steps intraday)
+        goal  (:step_goal day)
+        total (:steps w)]
+    (ui/chart-card
+     {:id :steps :title "Steps" :icon :footprints :accent "--green" :tint "green-2" :flex "1 1 260px"
+      :tables-open tables-open
+      :table-columns [{:label "Hour" :value #(str (.padStart (str (first %)) 2 "0") ":00")}
+                      {:label "Steps" :value #(ui/thousands (second %)) :align :r}]
+      :table-rows (map-indexed vector steps)
+      :header [:div
+               [:div.big (or (ui/thousands total) "—")]
+               [:div.sub {:style {:margin-top "8px"}}
+                (str/join " · " (remove nil? [(when (and total goal (pos? goal))
+                                                (str (js/Math.round (* 100 (/ total goal))) "% of " (ui/thousands goal)))
+                                              (some-> (:distance_m day) ui/km (str " km"))
+                                              (some-> (:floors day) js/Math.round (str " floors"))]))]]
+      :chart (if (seq steps)
+               [:div
+                (c/echart {:key "steps" :class "h90"
+                           :option-fn (fn []
+                                        (-> (c/base {:x-type "category"
+                                                     :tooltip-fmt (fn [params]
+                                                                    (let [p (first params)]
+                                                                      (c/tooltip-rows (str (.padStart (str (.-dataIndex p)) 2 "0") ":00")
+                                                                                      [{:label "steps" :value (ui/thousands (or (.-value p) 0))}])))})
+                                            (assoc :grid {:left 0 :right 0 :top 4 :bottom 0})
+                                            (assoc :xAxis {:type "category" :show false :data (vec (range 24))})
+                                            (assoc :yAxis {:type "value" :show false :min 0})
+                                            (assoc :series [(c/bars "Steps" "--green" (mapv #(when (pos? %) %) steps)
+                                                                    :barMaxWidth nil :barCategoryGap "15%" :barMinHeight 4)])))})
+                [:div.ax [:span "00"] [:span "06"] [:span "12"] [:span "18"] [:span "24"]]]
+               (no-data))})))
+
+;; ---------------------------------------------------------------------------
+;; Row 4: 7 nights, last activity
+
+(defn- weekday [iso] (ui/weekdays (.getDay (ui/parse-date iso))))
+
+(defn- seven-night-option
+  "Bars per night with the value and weekday as two-line category labels."
+  [{:keys [nights value-fn color-fn y-max bar-width radius mark-area]}]
+  (-> (c/base {:x-type "category"
+               :tooltip-fmt (fn [params]
+                              (let [n (nth nights (.-dataIndex (first params)))]
+                                (c/tooltip-rows (ui/date-long (:date n)) [{:label "" :value (str (value-fn n))}])))})
+      (assoc :grid {:left 0 :right 0 :top 4 :bottom 40})
+      (assoc :xAxis {:type "category" :axisLine {:show false} :axisTick {:show false}
+                     :data (mapv #(str "{s|" (or (value-fn %) "—") "}\n{d|" (weekday (:date %)) "}") nights)
+                     :axisLabel {:interval 0 :fontFamily c/font
+                                 :rich {:s {:fontSize 12 :fontWeight 700 :lineHeight 18
+                                            :color (c/css-var "--text") :fontFamily c/font}
+                                        :d {:fontSize 11 :fontWeight 600 :lineHeight 16
+                                            :color (c/css-var "--text-3") :fontFamily c/font}}}})
+      (assoc :yAxis {:type "value" :show false :min 0 :max y-max})
+      (assoc :series [(cond-> {:type "bar" :barMaxWidth 40 :barWidth bar-width
+                               :data (mapv (fn [n] {:value (value-fn n)
+                                                    :itemStyle {:color (c/css-var (color-fn n)) :borderRadius radius}})
+                                           nights)}
+                        mark-area (assoc :markArea mark-area))])))
+
+(defn- sleep-nights-card [nights tables-open]
+  (let [scored (filter :sleep_score nights)
+        avg    #(when (seq %) (/ (reduce + %) (count %)))]
+    (ui/chart-card
+     {:id :nights :title "Sleep · 7 nights" :icon :moon :accent "--purple" :tint "purple" :soft? true
+      :flex "1 1 300px" :tables-open tables-open
+      :table-columns [{:label "Night" :value #(ui/date-short (:date %))}
+                      {:label "Score" :value :sleep_score :align :r}
+                      {:label "Asleep" :value #(ui/hm (:sleep_s %)) :align :r}]
+      :table-rows nights
+      :header [:div.baseline [:span.big.sm (or (some-> (avg (map :sleep_score scored)) js/Math.round) "—")]
+               [:span.sub (str "avg score · " (or (ui/hm (avg (keep :sleep_s nights))) "—") " avg")]]
+      :chart (if (seq scored)
+               (c/echart {:key "nights" :class "h150"
+                          :option-fn #(seven-night-option
+                                       {:nights nights :value-fn :sleep_score :y-max 100 :radius 10
+                                        :color-fn (fn [{:keys [sleep_score]}]
+                                                    (cond (nil? sleep_score) "--surface-2"
+                                                          (>= sleep_score 80) "--green"
+                                                          (>= sleep_score 60) "--purple-2"
+                                                          :else "--amber"))})})
+               (no-data))})))
+
+(defn- hrv-nights-card [w nights tables-open]
+  (let [low  (some :hrv_low (reverse nights))
+        high (some :hrv_high (reverse nights))
+        in?  #(and low high (<= low % high))
+        vals (keep :hrv_avg nights)]
+    (ui/chart-card
+     {:id :hrv :title "HRV · 7 nights" :icon :pulse :accent "--blue" :tint "blue" :soft? true
+      :flex "1 1 300px" :tables-open tables-open
+      :table-columns [{:label "Night" :value #(ui/date-short (:date %))}
+                      {:label "HRV (ms)" :value #(some-> (:hrv_avg %) js/Math.round) :align :r}
+                      {:label "Normal range" :value #(when (:hrv_low %) (str (:hrv_low %) "–" (:hrv_high %))) :align :r}]
+      :table-rows nights
+      :header [:div.baseline [:span.big.sm (or (some-> (:hrv_weekly_avg w) js/Math.round) "—") [:small "ms"]]
+               [:span.sub (str/join " · " (remove nil? [(some-> (:hrv_status w) str/lower-case)
+                                                        (when low (str "normal " low "–" high))]))]]
+      :chart (if (seq vals)
+               (c/echart {:key "hrv" :class "h150"
+                          :option-fn #(seven-night-option
+                                       {:nights nights :value-fn (fn [n] (some-> (:hrv_avg n) js/Math.round))
+                                        :y-max (+ 10 (apply max (or high 0) vals)) :bar-width 14 :radius 7
+                                        :color-fn (fn [n] (if (in? (:hrv_avg n)) "--blue" "--amber"))
+                                        :mark-area (when low
+                                                     {:silent true
+                                                      :itemStyle {:color (c/css-var "--tint-green") :borderRadius 8}
+                                                      :data [[{:yAxis low} {:yAxis high}]]})})})
+               (no-data))})))
+
+(defn- last-activity-card [a]
+  (ui/card {:flex "1 1 300px"}
+           (ui/label-row {:icon :mountain :accent "--text" :tint "--surface-2" :soft? true :label "Last activity"})
+           (if a
+             [:div {:style {:display "flex" :flex-direction "column" :gap "6px"}}
+              [:a {:href (str "#/activities/" (:id a)) :style {:font-size "20px" :font-weight 800 :text-decoration "none"}}
+               (:name a)]
+              [:div.sub (ui/date-short (:date a))]
+              (ui/pills (some-> (ui/km (:distance_m a)) (str " km") ui/pill)
+                        (some-> (ui/hm (or (:moving_s a) (:duration_s a))) ui/pill)
+                        (some-> (:avg_hr a) js/Math.round (str " bpm") ui/pill))]
+             [:div.empty "No activities yet."])
+           [:div.divider [:div.lab "Planned today"] [:div.sub "No plan yet. Planning arrives in Phase 5."]]))
+
+;; ---------------------------------------------------------------------------
+
+(defn view [{:keys [data errors sync tables-open]}]
   (let [url "/api/today"
         d   (get data url)
         w   (:wellness d)
-        b   (:baselines d)
-        l   (:load d)
-        a   (:last_activity d)
-        sync-state (or sync (:sync d))]
-    [:div
+        day (:day d)
+        i   (:intraday d)]
+    [:div {:style {:display "contents"}}
      [:div.page-head
-      [:h1 "Today"]
-      [:span.secondary (ui/date-long (:date d))]
-      [:span.spacer]
-      (auth-chip (:auth d))
-      (sync-button sync-state)]
+      [:div.title [:div.sub (header-date (:date d))] [:h1 (greeting)]]
+      (auth-pill (:auth d))
+      (sync-button (or sync (:sync d)))]
      (when-let [e (get errors url)] [:div.error (str "Could not load: " e)])
      (auth-notice (:auth d))
      (when d
-       [:div.stack
-        [:div.grid.tiles
-         (ui/tile "Training readiness" (:readiness w) nil
-                  (some-> (:readiness_level w) str/lower-case (str " · this morning"))
-                  {:hero true})
-         (ui/tile "Sleep score" (:sleep_score w) nil
-                  (str (ui/hm (:sleep_s w)) " asleep · 7-day avg " (or (get-in b [:sleep_score :avg7]) "—")))
-         (ui/tile "HRV last night" (:hrv_avg w) "ms"
-                  (str "normal " (or (get-in b [:hrv_avg :base_low]) "—") "–" (or (get-in b [:hrv_avg :base_high]) "—")
-                       (when (:hrv_status w) (str " · " (str/lower-case (:hrv_status w))))))
-         (ui/tile "Resting HR" (:rhr w) "bpm"
-                  (str "28-day avg " (or (get-in b [:rhr :avg28]) "—")))
-         (ui/tile "Form (TSB)" (:tsb l) nil
-                  (str "Fitness " (or (:ctl l) "—") " · Fatigue " (or (:atl l) "—")))
-         (ui/tile "Body battery" (:body_battery_high w) nil
-                  (str "low " (or (:body_battery_low w) "—") " today"))
-         (ui/tile "Stress" (:avg_stress w) nil "average today")
-         (ui/tile "Steps" (ui/thousands (:steps w)) nil nil)]
-        [:div.grid.two
-         [:div.card
-          [:h2 "Planned today"]
-          [:div.empty "No plan yet. Planning arrives in Phase 5."]]
-         [:div.card
-          [:h2 "Last activity"]
-          (if a
-            [:div
-             [:div [:a {:href (str "#/activities/" (:id a))} [:b (:name a)]]]
-             [:div.secondary (str (ui/sport-label (:sport a)) " · " (ui/date-long (:date a)))]
-             [:div {:style {:margin-top "6px"}}
-              (str/join " · " (remove nil? [(some-> (ui/km (:distance_m a)) (str " km"))
-                                            (ui/hm (or (:moving_s a) (:duration_s a)))
-                                            (some-> (:tss a) js/Math.round (str " " (:tss_method a)))
-                                            (some-> (:avg_hr a) js/Math.round (str " bpm avg"))]))]]
-            [:div.empty "No activities yet."])]]])]))
+       (list
+        [:div.row {:replicant/key "r1"}
+         (readiness-card w) (body-battery-card w day i tables-open) (sleep-card w day)]
+        [:div {:replicant/key "r2"} (heart-rate-card w day i tables-open)]
+        [:div.row {:replicant/key "r3"}
+         (stress-card w day i tables-open) (steps-card w day i tables-open)]
+        [:div.row {:replicant/key "r4"}
+         (sleep-nights-card (:nights d) tables-open) (hrv-nights-card w (:nights d) tables-open)
+         (last-activity-card (:last_activity d))]))]))
