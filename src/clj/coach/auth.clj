@@ -57,7 +57,7 @@
       (do (println "Login failed (exit" exit "); countdown unchanged.")
           false))))
 
-(defn- describe [{:keys [level days_left expires_on renew_command]}]
+(defn describe [{:keys [level days_left expires_on renew_command]}]
   (case level
     :unknown "No Garmin login date recorded."
     :expired (str "Garmin login has probably expired (est. " expires_on "). Renew: " renew_command)

@@ -5,7 +5,7 @@
   (:require [clojure.string :as str]
             [coach.mcp :as mcp]
             [coach.source :as source])
-  (:import (java.time LocalDate)))
+  (:import (java.time LocalDate LocalDateTime ZoneOffset)))
 
 (def server-ref
   "Pinned so a server update can't silently change tool names or shapes."
@@ -17,7 +17,8 @@
     "get_user_profile"
     "get_stats" "get_rhr_day" "get_hrv_data" "get_sleep_data" "get_sleep_summary_range"
     "get_training_readiness" "get_morning_training_readiness" "get_body_battery"
-    "get_stress_data" "get_training_status" "get_training_load_trend" "get_vo2max_trend"})
+    "get_stress_data" "get_training_status" "get_training_load_trend" "get_vo2max_trend"
+    "get_lactate_threshold" "get_heart_rate_zones" "get_cycling_ftp"})
 
 (defn- uvx-path []
   (let [local (str (System/getProperty "user.home") "/.local/bin/uvx")]
@@ -100,7 +101,7 @@
      :rem_sleep_s       (:rem_sleep_seconds sl)
      :readiness         (:score rd)
      :readiness_level   (:level rd)
-     :avg_stress        (:avg_stress_level st)
+     :avg_stress        (let [v (:avg_stress_level st)] (when (and (number? v) (>= v 0)) v))
      :body_battery_high (:body_battery_highest st)
      :body_battery_low  (:body_battery_lowest st)
      :steps             (:total_steps st)
@@ -113,6 +114,66 @@
     (->> (iterate #(.plusDays ^LocalDate % 1) (LocalDate/parse start))
          (take-while #(not (.isAfter ^LocalDate % e)))
          (map str))))
+
+;; Streams: FIT "record" messages -> columnar map
+
+(def ^:private record-fields
+  "stream key -> FIT field names, first present wins."
+  {:hr      ["heart_rate"]
+   :speed   ["enhanced_speed" "speed"]
+   :alt     ["enhanced_altitude" "altitude"]
+   :dist    ["distance"]
+   :power   ["power"]
+   :cadence ["cadence"]
+   :lat     ["position_lat"]
+   :lon     ["position_long"]})
+
+(defn- semicircles->deg [v] (when (number? v) (* v (/ 180.0 2147483648.0))))
+
+(defn- epoch-s [ts]
+  (when (string? ts)
+    (.toEpochSecond (LocalDateTime/parse ts) ZoneOffset/UTC)))
+
+(defn records->stream
+  "Columnar stream {:t [s from start] :hr [...] ...} from FIT record messages.
+  Channels with no values at all are left out. nil if there are no records."
+  [messages]
+  (let [recs (->> messages
+                  (map (fn [msg] (into {} (map (juxt :name :value)) (:fields msg))))
+                  (filter #(epoch-s (get % "timestamp")))
+                  (sort-by #(epoch-s (get % "timestamp"))))]
+    (when (seq recs)
+      (let [t0  (epoch-s (get (first recs) "timestamp"))
+            field (fn [rec names] (some #(let [v (get rec %)] (when (number? v) v)) names))
+            chans (into {}
+                        (for [[k names] record-fields
+                              :let [xs (mapv #(field % names) recs)
+                                    xs (if (#{:lat :lon} k) (mapv semicircles->deg xs) xs)]
+                              :when (some some? xs)]
+                          [k xs]))]
+        (assoc chans :t (mapv #(- (epoch-s (get % "timestamp")) t0) recs))))))
+
+(defn thresholds-from
+  "Threshold rows from get_lactate_threshold and get_heart_rate_zones."
+  [lt zones ftp]
+  (let [lt    (or (m lt) {})
+        z     (or (some #(when (= "DEFAULT" (:sport %)) %) (filter map? (if (sequential? zones) zones [zones])))
+                  (first (filter map? (if (sequential? zones) zones [zones]))))
+        on    (fn [ts] (some-> ts (subs 0 10)))
+        row   (fn [sport kind value measured]
+                (when (number? value)
+                  {:sport sport :kind kind :value (double value) :measured_on measured}))]
+    (vec
+     (keep identity
+           (concat
+            [(row "all" "lthr" (or (:lactate_threshold_heart_rate_bpm lt) (:lactateThresholdHeartRateUsed z))
+                  (on (:speed_hr_date lt)))
+             (row "all" "max_hr" (:maxHeartRateUsed z) nil)
+             (row "run" "threshold_speed" (:lactate_threshold_speed_mps lt) (on (:speed_hr_date lt)))
+             (row "run" "ftp" (:functional_threshold_power_watts lt) (on (:power_date lt)))
+             (row "bike" "ftp" (or (:functional_threshold_power_watts (m ftp)) (:ftp (m ftp))) nil)]
+            (map-indexed (fn [i k] (row "all" (str "hr_z" (inc i)) (get z k) nil))
+                         [:zone1Floor :zone2Floor :zone3Floor :zone4Floor :zone5Floor]))))))
 
 ;; ---------------------------------------------------------------------------
 
@@ -157,7 +218,37 @@
                              :hrv       (day "get_hrv_data" date)
                              :readiness (day "get_training_readiness" date)
                              :sleep     (get nights date)}))
-            (dates start-date end-date)))))
+            (dates start-date end-date))))
+
+  (fetch-streams [_ activity-id]
+    (let [limit 2000]
+      (loop [offset 0 msgs []]
+        (Thread/sleep (long delay-ms))
+        (let [r     (call client "get_activity_fit_messages"
+                          {"activity_id" activity-id "include_records" true
+                           "message_types" ["record"]
+                           "message_offset" offset "message_limit" limit})
+              page  (:messages r)
+              msgs  (into msgs page)
+              total (get-in r [:pagination :total_eligible_count] 0)]
+          (if (and (seq page) (< (+ offset (count page)) total))
+            (recur (+ offset (count page)) msgs)
+            (records->stream msgs))))))
+
+  (fetch-thresholds [_]
+    (let [lt      (call client "get_lactate_threshold" {})
+          zones   (call client "get_heart_rate_zones" {})
+          ftp     (call client "get_cycling_ftp" {})
+          profile (call client "get_user_profile" {})]
+      {:thresholds (thresholds-from lt zones ftp)
+       :sex        (get-in profile [:userData :gender])}))
+
+  (fetch-vo2max [_ start-date end-date]
+    (Thread/sleep (long delay-ms))
+    (let [r (call client "get_vo2max_trend" {"start_date" start-date "end_date" end-date})]
+      (vec (for [p (:trend (m r)) :when (:vo2_max p)]
+             {:date (:date p) :sport (:sport r) :value (:vo2_max p)
+              :carried_forward (boolean (:carried_forward p))})))))
 
 (defn start!
   "Starts the MCP server and returns a GarminMcpSource. Tokens are read from

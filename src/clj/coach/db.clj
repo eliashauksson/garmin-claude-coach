@@ -4,7 +4,9 @@
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [next.jdbc :as jdbc]
-            [next.jdbc.result-set :as rs]))
+            [next.jdbc.result-set :as rs])
+  (:import (java.io ByteArrayInputStream ByteArrayOutputStream)
+           (java.util.zip GZIPInputStream GZIPOutputStream)))
 
 (def default-path "data/coach.db")
 
@@ -12,7 +14,8 @@
   ([] (datasource default-path))
   ([path]
    (some-> (java.io.File. ^String path) .getAbsoluteFile .getParentFile .mkdirs)
-   (jdbc/get-datasource {:dbtype "sqlite" :dbname path})))
+   ;; sync, backfill and the API server may write concurrently
+   (jdbc/get-datasource {:dbtype "sqlite" :dbname path :busy_timeout 15000})))
 
 (def ^:private ddl
   ["CREATE TABLE IF NOT EXISTS activities (
@@ -52,13 +55,53 @@
       steps             INTEGER,
       raw               TEXT NOT NULL,
       fetched_at        TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS activity_streams (
+      activity_id INTEGER PRIMARY KEY,
+      samples     INTEGER NOT NULL,
+      data        BLOB,
+      error       TEXT,
+      fetched_at  TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS thresholds (
+      sport      TEXT NOT NULL,
+      kind       TEXT NOT NULL,
+      valid_from TEXT NOT NULL,
+      value      REAL NOT NULL,
+      source     TEXT NOT NULL,
+      PRIMARY KEY (sport, kind, valid_from))"
+   "CREATE TABLE IF NOT EXISTS vo2max (
+      date            TEXT NOT NULL,
+      sport           TEXT NOT NULL,
+      value           REAL NOT NULL,
+      carried_forward INTEGER NOT NULL,
+      PRIMARY KEY (date, sport))"
+   "CREATE TABLE IF NOT EXISTS activity_metrics (
+      activity_id  INTEGER PRIMARY KEY,
+      tss          REAL,
+      tss_method   TEXT,
+      intensity    REAL,
+      tss_per_hour REAL,
+      np           REAL,
+      ngp_mps      REAL,
+      vi           REAL,
+      ef           REAL,
+      decoupling   REAL,
+      kj           REAL,
+      hr_zones_s   TEXT,
+      peaks        TEXT,
+      inputs       TEXT,
+      computed_at  TEXT NOT NULL)"
    "CREATE TABLE IF NOT EXISTS sync_state (
       key   TEXT PRIMARY KEY,
       value TEXT)"])
 
+(def ^:private data-fixes
+  ;; Garmin reports -1/-2 stress for "not enough data"; rows stored before
+  ;; the normaliser filtered them.
+  ["UPDATE daily_wellness SET avg_stress = NULL WHERE avg_stress < 0"])
+
 (defn migrate! [ds]
   (jdbc/execute! ds ["PRAGMA journal_mode=WAL"])
-  (doseq [stmt ddl] (jdbc/execute! ds [stmt])))
+  (doseq [stmt (concat ddl data-fixes)] (jdbc/execute! ds [stmt])))
 
 (defn- now [] (str (java.time.Instant/now)))
 
@@ -106,3 +149,72 @@
   (jdbc/execute! ds ["INSERT INTO sync_state (key, value) VALUES (?, ?)
                       ON CONFLICT(key) DO UPDATE SET value = excluded.value"
                      (name k) (str v)]))
+
+;; ---------------------------------------------------------------------------
+;; Streams (gzipped JSON)
+
+(defn- gzip ^bytes [^String s]
+  (let [bos (ByteArrayOutputStream.)]
+    (with-open [gz (GZIPOutputStream. bos)]
+      (.write gz (.getBytes s "UTF-8")))
+    (.toByteArray bos)))
+
+(defn- gunzip ^String [^bytes b]
+  (with-open [gz (GZIPInputStream. (ByteArrayInputStream. b))]
+    (String. (.readAllBytes gz) "UTF-8")))
+
+(defn save-stream!
+  "Stores a stream, or a marker row (0 samples) with `error` so it isn't
+  refetched on every sync."
+  [ds activity-id stream error]
+  (jdbc/execute! ds ["INSERT INTO activity_streams (activity_id, samples, data, error, fetched_at)
+                      VALUES (?, ?, ?, ?, ?)
+                      ON CONFLICT(activity_id) DO UPDATE SET samples = excluded.samples,
+                        data = excluded.data, error = excluded.error, fetched_at = excluded.fetched_at"
+                     activity-id (count (:t stream))
+                     (when stream (gzip (json/write-str stream)))
+                     error (now)]))
+
+(defn load-stream [ds activity-id]
+  (when-let [b (:data (first (jdbc/execute! ds ["SELECT data FROM activity_streams WHERE activity_id = ?" activity-id]
+                                            {:builder-fn rs/as-unqualified-lower-maps})))]
+    (json/read-str (gunzip b) :key-fn keyword)))
+
+;; ---------------------------------------------------------------------------
+;; Thresholds, VO2 max, metrics
+
+(defn thresholds [ds]
+  (query ds ["SELECT sport, kind, valid_from, value, source FROM thresholds ORDER BY valid_from"]))
+
+(defn add-threshold! [ds {:keys [sport kind valid_from value source]}]
+  (jdbc/execute! ds ["INSERT INTO thresholds (sport, kind, valid_from, value, source) VALUES (?, ?, ?, ?, ?)
+                      ON CONFLICT(sport, kind, valid_from) DO UPDATE SET value = excluded.value,
+                        source = excluded.source"
+                     sport kind valid_from value source]))
+
+(defn upsert-vo2max! [ds rows]
+  (when (seq rows)
+    (jdbc/with-transaction [tx ds]
+      (doseq [{:keys [date sport value carried_forward]} rows]
+        (jdbc/execute! tx ["INSERT INTO vo2max (date, sport, value, carried_forward) VALUES (?, ?, ?, ?)
+                            ON CONFLICT(date, sport) DO UPDATE SET value = excluded.value,
+                              carried_forward = excluded.carried_forward"
+                           date sport value (if carried_forward 1 0)])))))
+
+(def metric-cols
+  [:activity_id :tss :tss_method :intensity :tss_per_hour :np :ngp_mps :vi :ef
+   :decoupling :kj :hr_zones_s :peaks :inputs :computed_at])
+
+(defn upsert-metrics! [ds rows]
+  (when (seq rows)
+    (let [sql (upsert-sql "activity_metrics" "activity_id" metric-cols)
+          ts  (now)]
+      (jdbc/with-transaction [tx ds]
+        (doseq [row rows]
+          (jdbc/execute! tx (into [sql]
+                                  (map (fn [c]
+                                         (case c
+                                           (:hr_zones_s :peaks :inputs) (some-> (get row c) json/write-str)
+                                           :computed_at ts
+                                           (get row c)))
+                                       metric-cols))))))))

@@ -58,6 +58,8 @@
               :body_battery_high 71 :body_battery_low 24 :steps 10952}
              (dissoc row :raw)))
       (is (not (contains? (:raw row) :date)))))
+  (testing "negative stress means not enough data"
+    (is (nil? (:avg_stress (gm/wellness-row {:date "2026-01-01" :stats {:avg_stress_level -1}})))))
   (testing "a day without data (message strings, empty stats, no sleep)"
     (let [row (gm/wellness-row {:date "2021-03-27"
                                 :stats {:date "2021-03-27"}
