@@ -90,6 +90,10 @@
       peaks        TEXT,
       inputs       TEXT,
       computed_at  TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS daily_intraday (
+      date       TEXT PRIMARY KEY,
+      data       BLOB,
+      fetched_at TEXT NOT NULL)"
    "CREATE TABLE IF NOT EXISTS sync_state (
       key   TEXT PRIMARY KEY,
       value TEXT)"])
@@ -179,6 +183,20 @@
   (when-let [b (:data (first (jdbc/execute! ds ["SELECT data FROM activity_streams WHERE activity_id = ?" activity-id]
                                             {:builder-fn rs/as-unqualified-lower-maps})))]
     (json/read-str (gunzip b) :key-fn keyword)))
+
+(defn save-intraday!
+  "Stores one day's intraday series, including :raw so they can be recomputed."
+  [ds {:keys [date] :as row}]
+  (jdbc/execute! ds ["INSERT INTO daily_intraday (date, data, fetched_at) VALUES (?, ?, ?)
+                      ON CONFLICT(date) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at"
+                     date (gzip (json/write-str row)) (now)]))
+
+(defn load-intraday
+  "Intraday series for `date` without :raw, or nil if not synced."
+  [ds date]
+  (when-let [b (:data (first (jdbc/execute! ds ["SELECT data FROM daily_intraday WHERE date = ?" date]
+                                            {:builder-fn rs/as-unqualified-lower-maps})))]
+    (dissoc (json/read-str (gunzip b) :key-fn keyword) :raw)))
 
 ;; ---------------------------------------------------------------------------
 ;; Thresholds, VO2 max, metrics

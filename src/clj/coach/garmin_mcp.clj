@@ -18,7 +18,8 @@
     "get_stats" "get_rhr_day" "get_hrv_data" "get_sleep_data" "get_sleep_summary_range"
     "get_training_readiness" "get_morning_training_readiness" "get_body_battery"
     "get_stress_data" "get_training_status" "get_training_load_trend" "get_vo2max_trend"
-    "get_lactate_threshold" "get_heart_rate_zones" "get_cycling_ftp"})
+    "get_lactate_threshold" "get_heart_rate_zones" "get_cycling_ftp"
+    "get_heart_rates" "get_steps_data"})
 
 (defn- uvx-path []
   (let [local (str (System/getProperty "user.home") "/.local/bin/uvx")]
@@ -175,6 +176,52 @@
             (map-indexed (fn [i k] (row "all" (str "hr_z" (inc i)) (get z k) nil))
                          [:zone1Floor :zone2Floor :zone3Floor :zone4Floor :zone5Floor]))))))
 
+;; Intraday series (heart rate, stress, body battery, steps per hour)
+
+(defn- ts-ms
+  "\"2026-10-28T23:00:00.0\" (no zone) -> epoch millis, read as UTC."
+  [s]
+  (when (string? s)
+    (* 1000 (.toEpochSecond (LocalDateTime/parse s) ZoneOffset/UTC))))
+
+(defn- local-midnight-gmt-ms
+  "Epoch millis of local midnight on `date`, using the UTC offset that the
+  payload itself reports (local start − GMT start), so DST days and travel
+  stay right regardless of the JVM's zone."
+  [date payload]
+  (let [local (ts-ms (:startTimestampLocal (m payload)))
+        gmt   (ts-ms (:startTimestampGMT (m payload)))]
+    (when (and local gmt)
+      (- (ts-ms (str date "T00:00:00")) (- local gmt)))))
+
+(defn- minute-of-day [midnight ms] (quot (- ms midnight) 60000))
+
+(defn intraday-row
+  "Normalised intraday series for one local day from the raw tool responses.
+  Days without data (message strings, nil arrays) give empty vectors."
+  [{:keys [date hr stress steps] :as raw}]
+  (let [hr-mid     (local-midnight-gmt-ms date hr)
+        stress-mid (local-midnight-gmt-ms date stress)
+        series     (fn [mid rows f]
+                     (if mid (into [] (keep #(f mid %)) rows) []))]
+    {:date date
+     :hr (series hr-mid (:heartRateValues (m hr))
+                 (fn [mid [ms bpm]] (when (and ms bpm) [(minute-of-day mid ms) bpm])))
+     :stress (series stress-mid (:stressValuesArray (m stress))
+                     (fn [mid [ms lvl]] (when (and ms lvl) [(minute-of-day mid ms) (if (neg? lvl) -1 lvl)])))
+     :body_battery (series stress-mid (:bodyBatteryValuesArray (m stress))
+                           (fn [mid [ms _ lvl]] (when (and ms (number? lvl)) [(minute-of-day mid ms) lvl])))
+     :steps (let [mid (or hr-mid stress-mid)]
+              (if (and mid (sequential? steps))
+                (reduce (fn [acc {:keys [startGMT] :as iv}]
+                          (let [ms (ts-ms startGMT)
+                                h  (when ms (quot (minute-of-day mid ms) 60))]
+                            (if (and h (<= 0 h 23)) (update acc h + (or (:steps iv) 0)) acc)))
+                        (vec (repeat 24 0))
+                        steps)
+                []))
+     :raw (dissoc raw :date)}))
+
 ;; ---------------------------------------------------------------------------
 
 (defn- activity-page
@@ -242,6 +289,15 @@
           profile (call client "get_user_profile" {})]
       {:thresholds (thresholds-from lt zones ftp)
        :sex        (get-in profile [:userData :gender])}))
+
+  (fetch-intraday [_ date]
+    (let [day (fn [tool]
+                (Thread/sleep (long delay-ms))
+                (call client tool {"date" date}))]
+      (intraday-row {:date   date
+                     :hr     (day "get_heart_rates")
+                     :stress (day "get_stress_data")
+                     :steps  (day "get_steps_data")})))
 
   (fetch-vo2max [_ start-date end-date]
     (Thread/sleep (long delay-ms))

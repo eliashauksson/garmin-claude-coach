@@ -94,6 +94,20 @@
        (when (zero? (mod (inc i) 25)) (println (format "  streams %d/%d" (inc i) n))))
      ids)))
 
+(def intraday-days "Today plus this many days back are kept fresh." 6)
+
+(defn sync-intraday!
+  "Fetches intraday series for each date in [start, end]. An auth error stops
+  the sync; any other failure is logged and that day skipped."
+  [src ds start end]
+  (doseq [date (reverse (map first (chunks start end 1)))]
+    (try
+      (db/save-intraday! ds (source/fetch-intraday src date))
+      (catch Exception e
+        (if (auth-error? e)
+          (throw e)
+          (println "  intraday" date "skipped:" (ex-message e)))))))
+
 (defn- sync-chunks! [src ds start end]
   (doseq [[s e] (chunks start end chunk-days)]
     (sync-range! src ds s e)))
@@ -111,6 +125,8 @@
     (db/set-state! ds :synced_through t)
     (when-not (db/get-state ds :backfill_before)
       (db/set-state! ds :backfill_before from))
+    (let [week-ago (str (.minusDays (d t) intraday-days))]
+      (sync-intraday! src ds (if (pos? (compare from week-ago)) from week-ago) t))
     (sync-vo2max! src ds from t)
     (let [changed? (sync-thresholds! src ds)
           new-ids  (sync-streams! src ds)
@@ -159,8 +175,8 @@
     :backfill_before (db/get-state ds :backfill_before)}))
 
 (defn -main
-  "clojure -M -m coach.sync [sync | backfill [max-chunks] | streams [max] | vo2max |
-                            thresholds | metrics | status]"
+  "clojure -M -m coach.sync [sync | backfill [max-chunks] | streams [max] | intraday [days] |
+                            vo2max | thresholds | metrics | status]"
   [& [cmd n]]
   (let [ds (doto (db/datasource) db/migrate!)]
     (case cmd
@@ -173,6 +189,8 @@
             "backfill"   (backfill! src ds (when n {:max-chunks (parse-long n)}))
             "streams"    (do (sync-streams! src ds (when n {:max-activities (parse-long n)}))
                              (analysis/compute-metrics! ds))
+            "intraday"   (let [days (if n (parse-long n) 7)]
+                           (sync-intraday! src ds (str (.minusDays (d (today)) (dec days))) (today)))
             "vo2max"     (sync-vo2max! src ds epoch (today))
             "thresholds" (do (println "Changed:" (sync-thresholds! src ds))
                              (run! prn (db/thresholds ds))))

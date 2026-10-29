@@ -135,12 +135,55 @@
           (for [k trend-keys]
             [k (filterv #(>= (compare (:date %) from) 0) (m/trend rows k))]))))
 
+(defn- raw-of [row] (some-> (:raw row) (json/read-str :key-fn keyword)))
+
+(defn- num-or-nil [x] (when (number? x) x))
+
+(defn day-extras
+  "Daily extras for the Today page from a daily_wellness raw map. Days
+  without data hold message strings, so every lookup tolerates that."
+  [raw]
+  (let [st (let [x (:stats raw)] (if (map? x) x {}))
+        hv (let [x (:hrv raw)] (if (map? x) x {}))
+        sl (let [x (:sleep raw)] (if (map? x) x {}))]
+    (update-vals
+     {:hr_min        (:min_heart_rate_bpm st)
+      :hr_max        (:max_heart_rate_bpm st)
+      :rhr_7d        (:last_7_days_avg_resting_hr st)
+      :bb_charged    (:body_battery_charged st)
+      :bb_drained    (:body_battery_drained st)
+      :bb_current    (:body_battery_current st)
+      :stress_max    (:max_stress_level st)
+      :step_goal     (:daily_step_goal st)
+      :distance_m    (:distance_meters st)
+      :floors        (:floors_ascended st)
+      :hrv_low       (:baseline_balanced_low_ms hv)
+      :hrv_high      (:baseline_balanced_upper_ms hv)
+      :sleep_light_s (:light_sleep_seconds sl)
+      :sleep_awake_s (:awake_seconds sl)}
+     num-or-nil)))
+
+(defn nights
+  "The 7 nights ending `date`, oldest first."
+  [ds date]
+  (let [from (str (.minusDays (LocalDate/parse date) 6))]
+    (mapv (fn [r]
+            (let [x (day-extras (raw-of r))]
+              {:date (:date r) :sleep_score (:sleep_score r) :sleep_s (:sleep_s r)
+               :hrv_avg (:hrv_avg r) :hrv_low (:hrv_low x) :hrv_high (:hrv_high x)}))
+          (db/query ds ["SELECT date, sleep_score, sleep_s, hrv_avg, raw FROM daily_wellness
+                         WHERE date BETWEEN ? AND ? ORDER BY date" from date]))))
+
 (defn today-summary [ds]
   (let [t    (today)
         well (wellness ds (str (.minusDays (LocalDate/parse t) 1)) t)
-        tr   (trends ds t t)]
+        tr   (trends ds t t)
+        raw  (raw-of (first (db/query ds ["SELECT raw FROM daily_wellness WHERE date = ?" t])))]
     {:date          t
      :wellness      (last well)
      :baselines     (into {} (for [[k v] tr] [k (dissoc (first v) :date :value)]))
      :load          (last (pmc ds t t))
-     :last_activity (first (activities ds {:limit 1}))}))
+     :last_activity (first (activities ds {:limit 1}))
+     :day           (day-extras raw)
+     :nights        (nights ds t)
+     :intraday      (some-> (db/load-intraday ds t) (dissoc :date))}))

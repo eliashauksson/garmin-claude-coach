@@ -76,3 +76,44 @@
 (deftest read-only-guard-test
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Refusing"
                         (gm/call nil "delete_activity" {"activity_id" 1}))))
+
+;; Intraday: payload shapes trimmed from real 2026-10-29 responses (UTC+1).
+(def hr-payload
+  {:startTimestampGMT "2026-10-28T23:00:00.0" :startTimestampLocal "2026-10-29T00:00:00.0"
+   :heartRateValues [[1793228400000 76] [1793228520000 66] [1793228640000 nil]]})
+
+(def stress-payload
+  {:startTimestampGMT "2026-10-28T23:00:00.0" :startTimestampLocal "2026-10-29T00:00:00.0"
+   :stressValuesArray [[1793228400000 41] [1793228580000 -2] [1793228760000 -1]]
+   :bodyBatteryValuesArray [[1793228400000 "MEASURED" 38 3.0] [1793228580000 "MEASURED" 36 3.0]]})
+
+(def steps-payload
+  [{:startGMT "2026-10-29T07:00:00.0" :endGMT "2026-10-29T07:15:00.0" :steps 100}
+   {:startGMT "2026-10-29T07:45:00.0" :endGMT "2026-10-29T08:00:00.0" :steps 23}
+   {:startGMT "2026-10-29T08:00:00.0" :endGMT "2026-10-29T08:15:00.0" :steps 5}
+   {:startGMT "2026-10-28T23:00:00.0" :endGMT "2026-10-28T23:15:00.0" :steps 0}])
+
+(deftest intraday-row-test
+  (let [r (gm/intraday-row {:date "2026-10-29" :hr hr-payload :stress stress-payload :steps steps-payload})]
+    (testing "minute of the local day, nil heart rates dropped"
+      (is (= [[0 76] [2 66]] (:hr r))))
+    (testing "unmeasured stress (-1/-2) kept as -1"
+      (is (= [[0 41] [3 -1] [6 -1]] (:stress r))))
+    (is (= [[0 38] [3 36]] (:body_battery r)))
+    (testing "steps summed into local hours: local 08 = GMT 07:00–07:59"
+      (is (= 24 (count (:steps r))))
+      (is (= 123 (get-in r [:steps 8])))
+      (is (= 5 (get-in r [:steps 9])))
+      (is (= 128 (reduce + (:steps r)))))
+    (is (= #{:hr :stress :steps} (set (keys (:raw r))))))
+  (testing "steps fall back to the stress payload's offset"
+    (is (= 123 (get-in (gm/intraday-row {:date "2026-10-29" :hr "No heart rate data" :stress stress-payload
+                                         :steps steps-payload})
+                       [:steps 8]))))
+  (testing "a day without data gives empty series and never throws"
+    (let [r (gm/intraday-row {:date "2021-03-27"
+                              :hr {:startTimestampGMT nil :heartRateValues nil}
+                              :stress "No stress data found for 2021-03-27"
+                              :steps "No steps data found for 2021-03-27"})]
+      (is (= {:date "2021-03-27" :hr [] :stress [] :body_battery [] :steps []}
+             (dissoc r :raw))))))

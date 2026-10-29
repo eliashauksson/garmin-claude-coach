@@ -18,5 +18,9 @@
     :t in seconds from the start. nil if there is none.")
   (fetch-thresholds [this]
     "Current thresholds {:thresholds [{:sport :kind :value :measured_on}] :sex}.")
+  (fetch-intraday [this date]
+    "Intraday series for one local day:
+    {:date :hr [[minute bpm]] :stress [[minute level]] :body_battery [[minute level]]
+     :steps [24 hourly totals] :raw {...}}.")
   (fetch-vo2max [this start-date end-date]
     "VO2 max per day [{:date :sport :value :carried_forward}]. Max 90 days."))
