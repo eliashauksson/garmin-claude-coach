@@ -63,6 +63,7 @@
     "warn"    (ui/status-pill :warn (str "Garmin login · " days_left " days left"))
     "urgent"  (ui/status-pill :critical (str "Garmin login · " days_left " days left"))
     "expired" (ui/status-pill :critical "Garmin login expired")
+    "unknown" (ui/status-pill :warn "Garmin login not recorded")
     nil))
 
 (defn sync-button [{:keys [running last_result]}]

@@ -34,13 +34,16 @@
         vm     (volume-metrics vm-key)
         latest (last pmc)
         weeks  (weekly-by-family vol (:key vm) (:scale vm))
-        fams   (filter (fn [f] (some #(get % (:id f)) (vals weeks))) ui/families)]
+        fams   (filter (fn [f] (some #(get % (:id f)) (vals weeks))) ui/families)
+        any?   (some #(pos? (:tss %)) pmc)]
     [:div {:style {:display "contents"}}
      [:div.page-head
       [:h1.title "Training load"]
       (ui/seg range ranges [:set-param :range])]
      (some (fn [u] (when-let [e (get errors u)] [:div.error (str "Could not load: " e)])) [load-url volume-url])
-     (when pmc
+     (when (and pmc (not any?))
+       (ui/card {} [:div.empty "No training data yet — run Sync."]))
+     (when (and pmc any?)
        (list
         [:div.row {:replicant/key "kpi"}
          (ui/tile {:label "Fitness · CTL" :tint "blue" :size "md" :value (:ctl latest) :sub "42-day load"})
