@@ -8,10 +8,20 @@
 (defn css-var [n]
   (.trim (.getPropertyValue (js/getComputedStyle js/document.documentElement) n)))
 
+(def font "Plus Jakarta Sans, system-ui, sans-serif")
+
+(defn alpha
+  "A CSS colour token at the given opacity (hex tokens only)."
+  [var-name a]
+  (let [hex (css-var var-name)]
+    (if (re-matches #"#[0-9a-fA-F]{6}" hex)
+      (let [n #(js/parseInt (subs hex % (+ % 2)) 16)]
+        (str "rgba(" (n 1) "," (n 3) "," (n 5) "," a ")"))
+      hex)))
+
 (defn- theme []
-  {:surface (css-var "--surface-1") :text (css-var "--text-primary")
-   :secondary (css-var "--text-secondary") :muted (css-var "--text-muted")
-   :grid (css-var "--grid") :axis (css-var "--axis") :border (css-var "--border")})
+  {:surface (css-var "--surface") :text (css-var "--text")
+   :text-2 (css-var "--text-2") :text-3 (css-var "--text-3") :line (css-var "--line")})
 
 ;; ---------------------------------------------------------------------------
 ;; Base option pieces
@@ -19,27 +29,30 @@
 (defn base
   "Common option: recessive hairline grid/axes, crosshair tooltip."
   [{:keys [x-type y-name y-min y-max y-inverse y-fmt x-fmt grid-left tooltip-fmt]
-    :or {x-type "time" grid-left 48}}]
-  (let [t (theme)]
+    :or {x-type "time" grid-left 44}}]
+  (let [t     (theme)
+        label {:color (:text-3 t) :fontSize 11 :fontWeight 500 :fontFamily font}]
     {:animation false
-     :textStyle {:fontFamily "system-ui, -apple-system, Segoe UI, sans-serif"}
-     :grid {:left grid-left :right 18 :top 14 :bottom 28}
+     :textStyle {:fontFamily font}
+     :grid {:left grid-left :right 14 :top 12 :bottom 24}
      :tooltip (cond-> {:trigger "axis"
-                       :axisPointer {:type "line" :lineStyle {:color (:axis t) :width 1}}
-                       :backgroundColor (:surface t) :borderColor (:border t)
-                       :textStyle {:color (:text t) :fontSize 12}
+                       :axisPointer {:type "line" :lineStyle {:color (:text-3 t) :width 1 :opacity 0.5}}
+                       :backgroundColor (:surface t) :borderWidth 0 :borderRadius 12 :padding 10
+                       :extraCssText (str "box-shadow:" (css-var "--tooltip-shadow"))
+                       :textStyle {:color (:text t) :fontSize 12 :fontFamily font}
                        :confine true}
                 tooltip-fmt (assoc :formatter tooltip-fmt))
      :xAxis {:type x-type
-             :axisLine {:lineStyle {:color (:axis t)}}
+             :axisLine {:show false}
              :axisTick {:show false}
-             :axisLabel (cond-> {:color (:muted t) :hideOverlap true}
+             :axisLabel (cond-> (assoc label :hideOverlap true)
                           x-fmt (assoc :formatter x-fmt))
              :splitLine {:show false}}
      :yAxis (cond-> {:type "value" :name y-name :scale true
-                     :nameTextStyle {:color (:muted t)}
-                     :axisLabel (cond-> {:color (:muted t)} y-fmt (assoc :formatter y-fmt))
-                     :splitLine {:lineStyle {:color (:grid t) :width 1}}}
+                     :axisLine {:show false} :axisTick {:show false}
+                     :nameTextStyle label
+                     :axisLabel (cond-> label y-fmt (assoc :formatter y-fmt))
+                     :splitLine {:lineStyle {:color (:line t) :width 1}}}
               (some? y-min) (assoc :min y-min :scale false)
               (some? y-max) (assoc :max y-max)
               y-inverse     (assoc :inverse true))}))
@@ -52,11 +65,13 @@
           :itemStyle {:color (css-var color-var)} :emphasis {:disabled true}}
          opts))
 
-(defn area-wash [s] (assoc s :areaStyle {:opacity 0.1}))
+(defn area-wash
+  ([s] (area-wash s 0.18))
+  ([s opacity] (assoc s :areaStyle {:opacity opacity})))
 
 (defn bars [name color-var data & {:as opts}]
   (merge {:type "bar" :name name :data data :barMaxWidth 24
-          :itemStyle {:color (css-var color-var) :borderRadius [4 4 0 0]}}
+          :itemStyle {:color (css-var color-var) :borderRadius 4}}
          opts))
 
 (defn band
@@ -127,14 +142,14 @@
         :replicant.life-cycle/mount
         (let [^js m (L/map node #js {:scrollWheelZoom false})
               pts  (clj->js latlngs)
-              line (L/polyline pts #js {:color (css-var "--series-1") :weight 3})]
+              line (L/polyline pts #js {:color (css-var "--blue") :weight 3})]
           (.addTo (L/tileLayer "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
                                #js {:maxZoom 19
                                     :attribution "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors"})
                   m)
           (.addTo line m)
-          (doseq [[p fill] [[(first latlngs) "--status-good"] [(last latlngs) "--status-critical"]]]
-            (.addTo (L/circleMarker (clj->js p) #js {:radius 5 :weight 2 :color (css-var "--surface-1")
+          (doseq [[p fill] [[(first latlngs) "--green"] [(last latlngs) "--red"]]]
+            (.addTo (L/circleMarker (clj->js p) #js {:radius 5 :weight 2 :color (css-var "--surface")
                                                      :fillColor (css-var fill) :fillOpacity 1})
                     m))
           (.fitBounds m (.getBounds line) #js {:padding #js [16 16]})

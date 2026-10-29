@@ -73,49 +73,94 @@
 
 ;; Sport families: a fixed colour per family, assigned by entity, never by rank.
 (def families
-  [{:id :run   :label "Run"        :color "--series-1" :re #"running"}
-   {:id :bike  :label "Bike"       :color "--series-2" :re #"cycling|biking|ride"}
-   {:id :swim  :label "Swim"       :color "--series-3" :re #"swimming"}
-   {:id :hike  :label "Hike/walk"  :color "--series-4" :re #"hiking|walking|mountaineering"}
-   {:id :ski   :label "Ski/snow"   :color "--series-5" :re #"ski|snowboard"}
-   {:id :other :label "Other"      :color "--series-6" :re #".*"}])
+  [{:id :run   :label "Run"       :plural "runs"   :color "--fam-run"   :re #"running"}
+   {:id :bike  :label "Bike"      :plural "rides"  :color "--fam-bike"  :re #"cycling|biking|ride"}
+   {:id :swim  :label "Swim"      :plural "swims"  :color "--fam-swim"  :re #"swimming"}
+   {:id :hike  :label "Hike/walk" :plural "hikes"  :color "--fam-hike"  :re #"hiking|walking|mountaineering"}
+   {:id :ski   :label "Ski/snow"  :plural "ski days" :color "--fam-ski" :re #"ski|snowboard"}
+   {:id :other :label "Other"     :plural "other"  :color "--fam-other" :re #".*"}])
+
+(def singular {:run "run" :bike "ride" :swim "swim" :hike "hike" :ski "ski day" :other "other"})
 
 (defn family [sport]
   (some #(when (re-find (:re %) (str sport)) %) families))
 
 ;; ---------------------------------------------------------------------------
+;; Icons (inline SVG, 24x24 stroke icons from the mockup)
+
+(def icon-paths
+  {:bolt       [[:path {:d "M13 2 3 14h9l-1 8 10-12h-9l1-8z"}]]
+   :battery    [[:rect {:x 2 :y 7 :width 18 :height 10 :rx 2}] [:path {:d "M22 11v2"}]]
+   :moon       [[:path {:d "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"}]]
+   :heart      [[:path {:d "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"}]]
+   :pulse      [[:path {:d "M3 12h4l3-8 4 16 3-8h4"}]]
+   :footprints [[:path {:d "M4 16v-2.4C4 11.5 3 10.5 3 8c0-2.7 1.5-6 4.5-6C9.4 2 10 3.8 10 5.5c0 3.1-2 5.7-2 8.7V16a2 2 0 1 1-4 0z"}]
+                [:path {:d "M20 20v-2.4c0-2.1 1-3.1 1-5.6 0-2.7-1.5-6-4.5-6-1.9 0-2.5 1.8-2.5 3.5 0 3.1 2 5.7 2 8.7V20a2 2 0 1 0 4 0z"}]]
+   :mountain   [[:path {:d "m8 3 4 8 5-5 5 15H2L8 3z"}]]})
+
+(defn icon-chip
+  "28px chip. Filled (accent background, white icon) on tinted cards; on white
+  cards use :soft? true (tint background, accent icon)."
+  [icon accent tint & [{:keys [soft?]}]]
+  [:span.ic {:style {:background (str "var(" (if soft? tint accent) ")")}}
+   (into [:svg {:aria-hidden "true" :width 16 :height 16 :viewBox "0 0 24 24" :fill "none"
+                :stroke (if soft? (str "var(" accent ")") "#fff") :stroke-width 2.4
+                :stroke-linecap "round" :stroke-linejoin "round"}]
+         (icon-paths icon))])
+
+;; ---------------------------------------------------------------------------
 ;; Components
 
+(defn pill
+  ([text] (pill nil text))
+  ([dot-color text]
+   [:span.pill (when dot-color
+                 [:span.dot {:style {:background (if (.startsWith dot-color "--") (str "var(" dot-color ")") dot-color)}}])
+    text]))
+
+(defn pills [& items] (into [:div.pills] (remove nil? items)))
+
+(defn label-row
+  "Icon chip, label, spacer, then optional right-hand controls."
+  [{:keys [icon accent tint soft? label right]}]
+  [:div.lab
+   (when icon (icon-chip icon accent tint {:soft? soft?}))
+   label
+   [:span.sp]
+   right])
+
+(defn card
+  "A bento card. :tint is a token suffix (\"green\", \"blue\"…) or nil for white."
+  [{:keys [tint flex class] :as opts} & children]
+  (into [:section.card {:class (remove nil? [(when tint (str "tint-" tint)) class])
+                        :style (when flex {:flex flex})}]
+        children))
+
 (defn tile
-  ([label value] (tile label value nil nil))
-  ([label value unit sub & [{:keys [hero]}]]
-   [:div.card.tile {:class (when hero "hero")}
-    [:div.label label]
-    [:div.value (or value "—") (when (and value unit) [:small unit])]
-    (when sub [:div.sub sub])]))
+  "KPI card: label, big number (with optional unit) and a sub line."
+  [{:keys [label value unit sub tint flex size]}]
+  (card {:tint tint :flex (or flex "1 1 200px")}
+        [:div.lab label]
+        [:div.big {:class size} (or value "—") (when (and value unit) [:small unit])]
+        (when sub [:div.sub sub])))
 
 (defn seg
   "Segmented control. `options` is [[value label] ...]; `action` gets the value appended."
-  [current options action]
-  [:div.seg
+  [current options action & [{:keys [soft?]}]]
+  [:div.seg {:class (when soft? "soft")}
    (for [[v label] options]
      [:button {:replicant/key v
                :class (when (= v current) "on")
-               :on {:click (conj action v)}}
+               :on {:click [(conj action v)]}}
       label])])
 
 (defn legend
-  "items: [{:label :color css-var :kind (:line :rect :band)}]"
+  "Legend as pills with a colour dot. items: [{:label :color css-var}]"
   [items]
-  [:div.legend
-   (for [{:keys [label color kind]} items]
-     [:span {:replicant/key label}
-      [(case kind :rect :span.key-rect :band :span.key-band :span.key-line)
-       {:style {:background (str "var(" color ")")}}]
-      label])])
+  (into [:div.pills] (for [{:keys [label color]} items] (pill color label))))
 
 (defn table
-  "columns: [{:label :value fn :align :r}]"
+  "columns: [{:label :value fn :align :r :class str :title fn}]"
   [columns rows & [{:keys [on-row key-fn]}]]
   [:div.table-wrap
    [:table
@@ -126,29 +171,39 @@
        [:tr {:replicant/key (if key-fn (key-fn row) i)
              :class (when on-row "click")
              :on (when on-row {:click (on-row row)})}
-        (for [{:keys [label value align]} columns]
-          [:td {:replicant/key label :class (when (= align :r) "r")} (str (or (value row) ""))])])]]])
+        (for [{:keys [label value align class title render]} columns]
+          [:td {:replicant/key label
+                :class (remove nil? [(when (= align :r) "r") class])
+                :title (when title (title row))}
+           (if render (render row) (str (or (value row) "")))])])]]])
 
 (defn chart-card
-  "A card with a title, an optional legend, the chart, and a Table toggle
-  (every chart has a table-view twin)."
-  [{:keys [id title legend-items chart table-columns table-rows tables-open]}]
+  "A bento card with a label row (icon, title, Table pill), optional legend
+  pills and extra controls, the chart, and its table-view twin."
+  [{:keys [id title icon accent tint soft? flex legend-items controls header chart footer
+           table-columns table-rows tables-open]}]
   (let [open? (contains? tables-open id)]
-    [:div.card
-     [:div.card-head
-      [:h2 title]
-      [:span.spacer]
-      (when table-columns
-        [:button.linkish {:on {:click [[:toggle-table id]]}} (if open? "Chart" "Table")])]
-     (when (and legend-items (not open?)) (legend legend-items))
-     (if open?
-       (table table-columns (reverse table-rows))
-       chart)]))
+    (card {:tint tint :flex flex}
+          (label-row {:icon icon :accent accent :tint (str "--tint-" (or tint "blue")) :soft? soft?
+                      :label title
+                      :right [:span {:style {:display "inline-flex" :gap "8px" :align-items "center"}}
+                              controls
+                              (when table-columns
+                                [:button.pill-btn {:on {:click [[:toggle-table id]]}}
+                                 (if open? "Chart" "Table")])]})
+          header
+          (when (and legend-items (not open?)) (legend legend-items))
+          (if open? (table table-columns (reverse table-rows)) chart)
+          (when-not open? footer))))
 
-(defn status-chip [level text]
-  [:span.chip
+(defn sport-chip [sport]
+  (let [f (family sport)]
+    [:span.chip {:class (name (:id f))} [:span.dot] (sport-label sport)]))
+
+(defn status-pill [level text]
+  [:span.pill {:style {:background "var(--surface)"}}
    [:span.dot {:style {:background (case level
-                                     (:ok "ok") "var(--status-good)"
-                                     (:warn "warn") "var(--status-warning)"
-                                     "var(--status-critical)")}}]
+                                     (:ok "ok") "var(--green)"
+                                     (:warn "warn") "var(--amber)"
+                                     "var(--red)")}}]
    text])

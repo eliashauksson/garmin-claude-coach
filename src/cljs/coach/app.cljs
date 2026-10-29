@@ -127,8 +127,8 @@
   (let [page (:page route)
         active (if (= page :activity) :activities page)]
     [:div.shell
-     [:nav.side
-      [:div.brand "Coach"]
+     [:nav.side {:aria-label "Main"}
+      [:div.brand [:span.logo] "Coach"]
       (for [[k href label] nav-items]
         [:a {:replicant/key k :href href :class (when (= k active) "active")} label])]
      [:main {:class (when (seq loading) "loading")}
