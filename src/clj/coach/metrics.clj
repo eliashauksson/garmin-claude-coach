@@ -151,6 +151,15 @@
 ;; ---------------------------------------------------------------------------
 ;; Activity metrics
 
+(def min-hr-coverage
+  "Below this share of recorded seconds with a heart-rate value, hrTSS from
+  the samples is scaled up to the full duration (HR dropouts, watch HR off)."
+  0.8)
+
+(def min-hr-seconds
+  "With less heart-rate data than this, use the average-HR estimate instead."
+  600)
+
 (defn sport-family [sport]
   (let [s (str sport)]
     (cond
@@ -213,6 +222,7 @@
         ngp     (when gap (normalized gap))
         avg-p   (when power (mean (map #(or % 0.0) power)))
         avg-hr  (or (mean (keep identity hr)) avg_hr)
+        hr-secs (count (keep identity hr))
         {:keys [threshold_speed ftp css hr_zones]} thresholds
         [method intensity score]
         (cond
@@ -225,8 +235,13 @@
           (and (= family :swim) speed css)
           (let [nss (mean (keep identity speed)) i (/ nss css)] ["sTSS" i (stss secs i)])
 
-          (seq (keep identity hr))
-          (when-let [t (hrtss hr thresholds)] ["hrTSS" nil t])
+          (>= hr-secs min-hr-seconds)
+          (when-let [t (hrtss hr thresholds)]
+            (if (< hr-secs (* min-hr-coverage secs))
+              ;; scale to moving time, so a watch left running isn't counted
+              (let [target (if moving_s (min secs moving_s) secs)]
+                ["hrTSS-scaled" nil (* t (/ (max target hr-secs) hr-secs))])
+              ["hrTSS" nil t]))
 
           avg_hr
           (when-let [t (hrtss-estimate avg_hr (or moving_s duration_s) thresholds)]

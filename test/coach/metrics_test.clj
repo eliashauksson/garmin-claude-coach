@@ -78,6 +78,20 @@
       (is (= 720.0 (:kj r)))
       (testing "and switches to power TSS once FTP is known"
         (is (= "TSS" (:tss_method (m/activity-metrics {:sport "cycling"} s (assoc thresholds :ftp 200))))))))
+  (testing "HR on only part of a long hike is scaled up to the full duration"
+    (let [s (stream 7200 (fn [i] {:hr (when (zero? (mod i 4)) 174) :speed 1.3}))
+          r (m/activity-metrics {:sport "hiking"} s thresholds)]
+      (is (= "hrTSS-scaled" (:tss_method r)))
+      (is (close? 200 (:tss r) 0.5))))
+  (testing "scaling stops at moving time when the watch kept recording"
+    (let [s (stream 7200 (fn [i] {:hr (when (zero? (mod i 4)) 174) :speed 1.3}))
+          r (m/activity-metrics {:sport "hiking" :moving_s 3600} s thresholds)]
+      (is (close? 100 (:tss r) 0.5))))
+  (testing "almost no HR samples: fall back to the average-HR estimate"
+    (let [s (stream 3600 (fn [i] {:hr (when (< i 100) 150) :speed 1.3}))
+          r (m/activity-metrics {:sport "hiking" :moving_s 3600 :avg_hr 174} s thresholds)]
+      (is (= "hrTSS-est" (:tss_method r)))
+      (is (close? 100 (:tss r) 0.5))))
   (testing "no stream: estimate from average HR"
     (let [r (m/activity-metrics {:sport "lap_swimming" :moving_s 1800 :avg_hr 174} nil thresholds)]
       (is (= "hrTSS-est" (:tss_method r)))
