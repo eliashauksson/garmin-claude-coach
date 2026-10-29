@@ -3,9 +3,9 @@
             [coach.ui :as ui]
             [coach.views.activities :as activities]
             [coach.views.activity :as activity]
+            [coach.views.calendar :as calendar]
             [coach.views.load :as load]
             [coach.views.today :as today]
-            [coach.views.trends :as trends]
             [replicant.dom :as r]))
 
 (defonce state (atom {:route {:page :today} :data {} :loading #{} :errors {} :ui {}}))
@@ -25,8 +25,8 @@
       "activities" (if-let [id (second segs)]
                      {:page :activity :id id}
                      {:page :activities :params params})
-      "trends"     {:page :trends :params params}
       "load"       {:page :load :params params}
+      "calendar"   {:page :calendar :params params}
       {:page :today})))
 
 (defn route-hash [{:keys [page id params]}]
@@ -35,7 +35,7 @@
     (str "#/" (case page :today "" :activity (str "activities/" id) (name page))
          (when (seq qs) (str "?" qs)))))
 
-(def default-range {:activities "365" :trends "365" :load "180"})
+(def default-range {:activities "365" :load "180"})
 
 (defn range-from [route]
   (let [r (get-in route [:params :range] (default-range (:page route)))]
@@ -46,7 +46,7 @@
     :today      ["/api/today"]
     :activities [(str "/api/activities?from=" (range-from route))]
     :activity   [(str "/api/activities/" id "?streams=true")]
-    :trends     [(str "/api/trends?from=" (range-from route))]
+    :calendar   (calendar/urls route)
     :load       [(str "/api/load?from=" (range-from route))
                  (str "/api/volume?from=" (range-from route))]
     []))
@@ -117,8 +117,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Shell
 
-(def nav-items [[:today "#/" "Today"] [:activities "#/activities" "Activities"]
-                [:trends "#/trends" "Trends"] [:load "#/load" "Training load"]])
+(def nav-items [[:today "#/" "Today"] [:calendar "#/calendar" "Calendar"] [:activities "#/activities" "Activities"]
+                [:load "#/load" "Training load"]])
 
 (defn view [{:keys [route loading] :as s}]
   (let [page (:page route)
@@ -128,13 +128,13 @@
       [:div.brand [:span.logo] "Coach"]
       (for [[k href label] nav-items]
         [:a {:replicant/key k :href href :class (when (= k active) "active")} label])]
-     [:main {:class (when (seq loading) "loading")}
+     [:main {:class (remove nil? [(when (seq loading) "loading") (when (= page :calendar) "wide")])}
       (case page
         :today      (today/view s)
         :activities (activities/view s (first (urls route)))
         :activity   (activity/view s (first (urls route)))
-        :trends     (trends/view s (first (urls route)))
-        :load       (let [[l v] (urls route)] (load/view s l v)))]]))
+        :load       (let [[l v] (urls route)] (load/view s l v))
+        :calendar   (calendar/view s (urls route)))]]))
 
 (defn render! []
   (r/render (js/document.getElementById "app") (view @state)))
