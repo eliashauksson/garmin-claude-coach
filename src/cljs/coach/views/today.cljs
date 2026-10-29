@@ -41,9 +41,6 @@
       (assoc :yAxis {:type "value" :show false :min y-min :max y-max})
       (assoc :series series)))
 
-(defn- minute-table-columns [unit]
-  [{:label "Time" :value #(clock (first %))} {:label unit :value second :align :r}])
-
 ;; ---------------------------------------------------------------------------
 ;; Header, auth
 
@@ -85,12 +82,10 @@
               (if (:readiness_level w) (str (sentence (:readiness_level w)) " · this morning") "No reading this morning")]
              [:div.track [:div {:style {:width (str (or score 0) "%") :background "var(--green)"}}]])))
 
-(defn- body-battery-card [w day intraday tables-open]
+(defn- body-battery-card [w day intraday]
   (let [bb (:body_battery intraday)]
     (ui/chart-card
-     {:id :bb :title "Body battery" :icon :battery :accent "--blue" :tint "blue" :flex "1 1 260px"
-      :tables-open tables-open
-      :table-columns (minute-table-columns "Level") :table-rows bb
+     {:title "Body battery" :icon :battery :accent "--blue" :tint "blue" :flex "1 1 260px"
       :header [:div.baseline [:span.big (or (:bb_current day) "—")]
                [:span.sub (str "high " (or (:body_battery_high w) "—"))]]
       :chart (if (seq bb)
@@ -122,11 +117,10 @@
 ;; ---------------------------------------------------------------------------
 ;; Row 2: heart rate
 
-(defn- heart-rate-card [w day intraday tables-open]
+(defn- heart-rate-card [w day intraday]
   (let [hr (:hr intraday)]
     (ui/chart-card
-     {:id :hr :title "Heart rate" :icon :heart :accent "--red" :tint "red"
-      :tables-open tables-open :table-columns (minute-table-columns "bpm") :table-rows hr
+     {:title "Heart rate" :icon :heart :accent "--red" :tint "red"
       :header [:div.baseline
                [:span.big (or (:rhr w) "—") [:small "bpm resting"]]
                (ui/pills (when (:hr_min day) (ui/pill (str "Low " (:hr_min day))))
@@ -148,16 +142,12 @@
   [["Rest" #(<= 0 % 25)] ["Low" #(<= 26 % 50)] ["Medium" #(<= 51 % 75)] ["High" #(<= 76 % 100)]
    ["Unmeasured" neg?]])
 
-(defn- stress-card [w day intraday tables-open]
+(defn- stress-card [w day intraday]
   (let [st    (:stress intraday)
         n     (count st)
         rest  (count (filter #(<= 0 (second %) 25) st))]
     (ui/chart-card
-     {:id :stress :title "Stress" :icon :pulse :accent "--amber" :tint "amber" :flex "2 1 460px"
-      :tables-open tables-open
-      :table-columns [{:label "Time" :value #(clock (first %))}
-                      {:label "Level" :value #(if (neg? (second %)) "unmeasured" (second %)) :align :r}]
-      :table-rows st
+     {:title "Stress" :icon :pulse :accent "--amber" :tint "amber" :flex "2 1 460px"
       :header [:div.baseline
                [:span.big (or (:avg_stress w) "—") [:small "average"]]
                (ui/pills (when (:stress_max day) (ui/pill (str "Peak " (:stress_max day))))
@@ -180,16 +170,12 @@
                         (ui/pill (when (= label "Rest") "--blue")
                                  (str label " " (js/Math.round (* 100 (/ (count (filter #(pred (second %)) st)) n))) "%")))))})))
 
-(defn- steps-card [w day intraday tables-open]
+(defn- steps-card [w day intraday]
   (let [steps (:steps intraday)
         goal  (:step_goal day)
         total (:steps w)]
     (ui/chart-card
-     {:id :steps :title "Steps" :icon :footprints :accent "--green" :tint "green-2" :flex "1 1 260px"
-      :tables-open tables-open
-      :table-columns [{:label "Hour" :value #(str (.padStart (str (first %)) 2 "0") ":00")}
-                      {:label "Steps" :value #(ui/thousands (second %)) :align :r}]
-      :table-rows (map-indexed vector steps)
+     {:title "Steps" :icon :footprints :accent "--green" :tint "green-2" :flex "1 1 260px"
       :header [:div
                [:div.big (or (ui/thousands total) "—")]
                [:div.sub {:style {:margin-top "8px"}}
@@ -241,16 +227,12 @@
                                            nights)}
                         mark-area (assoc :markArea mark-area))])))
 
-(defn- sleep-nights-card [nights tables-open]
+(defn- sleep-nights-card [nights]
   (let [scored (filter :sleep_score nights)
         avg    #(when (seq %) (/ (reduce + %) (count %)))]
     (ui/chart-card
-     {:id :nights :title "Sleep · 7 nights" :icon :moon :accent "--purple" :tint "purple" :soft? true
-      :flex "1 1 300px" :tables-open tables-open
-      :table-columns [{:label "Night" :value #(ui/date-short (:date %))}
-                      {:label "Score" :value :sleep_score :align :r}
-                      {:label "Asleep" :value #(ui/hm (:sleep_s %)) :align :r}]
-      :table-rows nights
+     {:title "Sleep · 7 nights" :icon :moon :accent "--purple" :tint "purple" :soft? true
+      :flex "1 1 300px"
       :header [:div.baseline [:span.big.sm (or (some-> (avg (map :sleep_score scored)) js/Math.round) "—")]
                [:span.sub (str "avg score · " (or (ui/hm (avg (keep :sleep_s nights))) "—") " avg")]]
       :chart (if (seq scored)
@@ -264,18 +246,14 @@
                                                           :else "--amber"))})})
                (no-data))})))
 
-(defn- hrv-nights-card [w nights tables-open]
+(defn- hrv-nights-card [w nights]
   (let [low  (some :hrv_low (reverse nights))
         high (some :hrv_high (reverse nights))
         in?  #(and low high (<= low % high))
         vals (keep :hrv_avg nights)]
     (ui/chart-card
-     {:id :hrv :title "HRV · 7 nights" :icon :pulse :accent "--blue" :tint "blue" :soft? true
-      :flex "1 1 300px" :tables-open tables-open
-      :table-columns [{:label "Night" :value #(ui/date-short (:date %))}
-                      {:label "HRV (ms)" :value #(some-> (:hrv_avg %) js/Math.round) :align :r}
-                      {:label "Normal range" :value #(when (:hrv_low %) (str (:hrv_low %) "–" (:hrv_high %))) :align :r}]
-      :table-rows nights
+     {:title "HRV · 7 nights" :icon :pulse :accent "--blue" :tint "blue" :soft? true
+      :flex "1 1 300px"
       :header [:div.baseline [:span.big.sm (or (some-> (:hrv_weekly_avg w) js/Math.round) "—") [:small "ms"]]
                [:span.sub (str/join " · " (remove nil? [(some-> (:hrv_status w) str/lower-case)
                                                         (when low (str "normal " low "–" high))]))]]
@@ -307,7 +285,7 @@
 
 ;; ---------------------------------------------------------------------------
 
-(defn view [{:keys [data errors sync tables-open]}]
+(defn view [{:keys [data errors sync]}]
   (let [url "/api/today"
         d   (get data url)
         w   (:wellness d)
@@ -323,10 +301,10 @@
      (when d
        (list
         [:div.row {:replicant/key "r1"}
-         (readiness-card w) (body-battery-card w day i tables-open) (sleep-card w day)]
-        [:div {:replicant/key "r2"} (heart-rate-card w day i tables-open)]
+         (readiness-card w) (body-battery-card w day i) (sleep-card w day)]
+        [:div {:replicant/key "r2"} (heart-rate-card w day i)]
         [:div.row {:replicant/key "r3"}
-         (stress-card w day i tables-open) (steps-card w day i tables-open)]
+         (stress-card w day i) (steps-card w day i)]
         [:div.row {:replicant/key "r4"}
-         (sleep-nights-card (:nights d) tables-open) (hrv-nights-card w (:nights d) tables-open)
+         (sleep-nights-card (:nights d)) (hrv-nights-card w (:nights d))
          (last-activity-card (:last_activity d))]))]))

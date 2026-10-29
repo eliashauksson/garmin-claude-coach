@@ -178,23 +178,16 @@
            (if render (render row) (str (or (value row) "")))])])]]])
 
 (defn chart-card
-  "A bento card with a label row (icon, title, Table pill), optional legend
-  pills and extra controls, the chart, and its table-view twin."
-  [{:keys [id title icon accent tint soft? flex legend-items controls header chart footer
-           table-columns table-rows tables-open]}]
-  (let [open? (contains? tables-open id)]
-    (card {:tint tint :flex flex}
-          (label-row {:icon icon :accent accent :tint (str "--tint-" (or tint "blue")) :soft? soft?
-                      :label title
-                      :right [:span {:style {:display "inline-flex" :gap "8px" :align-items "center"}}
-                              controls
-                              (when table-columns
-                                [:button.pill-btn {:on {:click [[:toggle-table id]]}}
-                                 (if open? "Chart" "Table")])]})
-          header
-          (when (and legend-items (not open?)) (legend legend-items))
-          (if open? (table table-columns (reverse table-rows)) chart)
-          (when-not open? footer))))
+  "A bento card with a label row (icon, title, optional controls), optional
+  legend pills, the chart and a footer."
+  [{:keys [title icon accent tint soft? flex legend-items controls header chart footer]}]
+  (card {:tint tint :flex flex}
+        (label-row {:icon icon :accent accent :tint (str "--tint-" (or tint "blue")) :soft? soft?
+                    :label title :right controls})
+        header
+        (when legend-items (legend legend-items))
+        chart
+        footer))
 
 (defn sport-chip [sport]
   (let [f (family sport)]

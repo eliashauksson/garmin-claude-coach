@@ -28,17 +28,10 @@
           rows)
     rows))
 
-(defn- metric-card [{:keys [k title unit scale]} rows tables-open]
+(defn- metric-card [{:keys [k title unit scale]} rows]
   (let [rows (scaled rows scale)]
     (ui/chart-card
-     {:id k :title title :tables-open tables-open :flex "1 1 auto"
-      :table-columns [{:label "Date" :value #(ui/date-short (:date %))}
-                      {:label "Value" :value #(fmt (:value %)) :align :r}
-                      {:label "7-day avg" :value #(fmt (:avg7 %)) :align :r}
-                      {:label "28-day avg" :value #(fmt (:avg28 %)) :align :r}
-                      {:label "Normal range" :value #(when (:base_low %) (str (fmt (:base_low %)) "–" (fmt (:base_high %))))
-                       :align :r}]
-      :table-rows rows
+     {:title title :flex "1 1 auto"
       :chart
       (if (not-any? :value rows)
         [:div.empty "No data in this range."]
@@ -59,7 +52,7 @@
                              [(c/line "Daily" "--text-3" (mapv (juxt :date :value) rows) :lineStyle {:width 1 :opacity 0.6})
                               (c/line "28-day average" "--blue" (mapv (juxt :date :avg28) rows) :lineStyle {:width 2.5})])}))}))})))
 
-(defn view [{:keys [data errors route tables-open]} url]
+(defn view [{:keys [data errors route]} url]
   (let [d     (get data url)
         range (get-in route [:params :range] "365")]
     [:div {:style {:display "contents"}}
@@ -70,4 +63,4 @@
        [:div.row
         (for [m metrics]
           [:div {:replicant/key (name (:k m)) :style {:flex "1 1 420px" :min-width 0 :display "flex"}}
-           (metric-card m (get d (:k m)) tables-open)])])]))
+           (metric-card m (get d (:k m)))])])]))

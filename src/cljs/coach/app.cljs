@@ -8,8 +8,7 @@
             [coach.views.trends :as trends]
             [replicant.dom :as r]))
 
-(defonce state (atom {:route {:page :today} :data {} :loading #{} :errors {}
-                      :tables-open #{} :ui {}}))
+(defonce state (atom {:route {:page :today} :data {} :loading #{} :errors {} :ui {}}))
 
 ;; ---------------------------------------------------------------------------
 ;; Routing (hash based: #/activities?range=90)
@@ -104,8 +103,6 @@
       :set-param    (let [[k v] args]
                       (set! (.-hash js/location)
                             (route-hash (assoc-in (:route @state) [:params k] v))))
-      :toggle-table (swap! state update :tables-open
-                           #(if (contains? % (first args)) (disj % (first args)) (conj % (first args))))
       :set-ui       (swap! state assoc-in [:ui (first args)] (second args))
       :sync         (start-sync!)
       (js/console.warn "unknown action" (pr-str action)))))

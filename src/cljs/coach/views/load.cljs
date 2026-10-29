@@ -26,9 +26,7 @@
                        {:label "form (TSB)" :value (:tsb r)}
                        {:label "TSS that day" :value (:tss r)}]))))
 
-(defn- date-col [] {:label "Date" :value #(ui/date-short (:date %))})
-
-(defn view [{:keys [data errors route tables-open] ui-state :ui} load-url volume-url]
+(defn view [{:keys [data errors route] ui-state :ui} load-url volume-url]
   (let [pmc    (get data load-url)
         vol    (get data volume-url)
         range  (get-in route [:params :range] "180")
@@ -51,13 +49,8 @@
          (ui/tile {:label "Ramp rate" :tint "amber" :size "md" :value (:ramp latest) :sub "CTL change / 7 days"})]
         [:div {:replicant/key "pmc"}
          (ui/chart-card
-          {:id :pmc :title "Fitness and fatigue" :tables-open tables-open
+          {:title "Fitness and fatigue"
            :legend-items [{:label "Fitness (CTL)" :color "--blue"} {:label "Fatigue (ATL)" :color "--red"}]
-           :table-columns [(date-col)
-                           {:label "TSS" :value :tss :align :r} {:label "CTL" :value :ctl :align :r}
-                           {:label "ATL" :value :atl :align :r} {:label "TSB" :value :tsb :align :r}
-                           {:label "Ramp" :value :ramp :align :r}]
-           :table-rows pmc
            :chart (c/echart
                    {:key "pmc" :class "h280" :group "load"
                     :option-fn (fn []
@@ -69,9 +62,7 @@
                                                           :lineStyle {:width 2.5})]}))})})]
         [:div.row {:replicant/key "r2"}
          (ui/chart-card
-          {:id :tsb :title "Form · TSB" :tint "green" :flex "1 1 420px" :tables-open tables-open
-           :table-columns [(date-col) {:label "TSB" :value :tsb :align :r}]
-           :table-rows pmc
+          {:title "Form · TSB" :tint "green" :flex "1 1 420px"
            :chart (c/echart
                    {:key "tsb" :class "h150" :group "load"
                     :option-fn (fn []
@@ -88,9 +79,7 @@
            :footer [:div.sub {:style {:color "var(--green-text)"}}
                     "Above 0: fresh. −10 to −30: building fitness. Below −30: high strain."]})
          (ui/chart-card
-          {:id :tss :title "Daily stress · TSS" :tint "amber" :flex "1 1 420px" :tables-open tables-open
-           :table-columns [(date-col) {:label "TSS" :value :tss :align :r}]
-           :table-rows (filter #(pos? (:tss %)) pmc)
+          {:title "Daily stress · TSS" :tint "amber" :flex "1 1 420px"
            :chart (c/echart
                    {:key "tss-bars" :class "h150" :group "load"
                     :option-fn (fn []
@@ -100,12 +89,9 @@
                                                           :itemStyle {:color (c/css-var "--amber") :borderRadius 5})]}))})})]
         [:div {:replicant/key "vol"}
          (ui/chart-card
-          {:id :volume :title "Weekly volume" :tables-open tables-open
+          {:title "Weekly volume"
            :controls (ui/seg vm-key (for [[k v] volume-metrics] [k (:label v)]) [:set-ui :volume-metric] {:soft? true})
            :legend-items (for [f fams] {:label (:label f) :color (:color f)})
-           :table-columns (into [{:label "Week of" :value #(ui/date-short (first %))}]
-                                (for [f fams] {:label (:label f) :value #(some-> (get (second %) (:id f)) ((:fmt vm))) :align :r}))
-           :table-rows (seq weeks)
            :chart (c/echart
                    {:key "volume" :class "h240"
                     :option-fn
