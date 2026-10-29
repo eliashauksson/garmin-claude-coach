@@ -103,9 +103,21 @@
   ;; the normaliser filtered them.
   ["UPDATE daily_wellness SET avg_stress = NULL WHERE avg_stress < 0"])
 
+(def ^:private added-columns
+  "Columns added after a table was first created: [table column type]."
+  [["activity_metrics" "route" "TEXT"]])
+
+(defn- ensure-column! [ds [table column type]]
+  (let [cols (set (map :name (jdbc/execute! ds [(str "PRAGMA table_info(" table ")")]
+                                            {:builder-fn rs/as-unqualified-lower-maps})))]
+    (when-not (cols column)
+      (jdbc/execute! ds [(str "ALTER TABLE " table " ADD COLUMN " column " " type)]))))
+
 (defn migrate! [ds]
   (jdbc/execute! ds ["PRAGMA journal_mode=WAL"])
-  (doseq [stmt (concat ddl data-fixes)] (jdbc/execute! ds [stmt])))
+  (doseq [stmt ddl] (jdbc/execute! ds [stmt]))
+  (doseq [c added-columns] (ensure-column! ds c))
+  (doseq [stmt data-fixes] (jdbc/execute! ds [stmt])))
 
 (defn- now [] (str (java.time.Instant/now)))
 
@@ -221,7 +233,7 @@
 
 (def metric-cols
   [:activity_id :tss :tss_method :intensity :tss_per_hour :np :ngp_mps :vi :ef
-   :decoupling :kj :hr_zones_s :peaks :inputs :computed_at])
+   :decoupling :kj :hr_zones_s :peaks :inputs :route :computed_at])
 
 (defn upsert-metrics! [ds rows]
   (when (seq rows)
@@ -232,7 +244,7 @@
           (jdbc/execute! tx (into [sql]
                                   (map (fn [c]
                                          (case c
-                                           (:hr_zones_s :peaks :inputs) (some-> (get row c) json/write-str)
+                                           (:hr_zones_s :peaks :inputs :route) (some-> (get row c) json/write-str)
                                            :computed_at ts
                                            (get row c)))
                                        metric-cols))))))))

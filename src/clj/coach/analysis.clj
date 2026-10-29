@@ -34,6 +34,25 @@
       (= 5 (count zones)) (assoc :hr_zones (vec zones)))))
 
 ;; ---------------------------------------------------------------------------
+;; Route thumbnail
+
+(def route-points "Points kept for the list-view route thumbnail." 80)
+
+(defn route-thumb
+  "A simplified track for the activity cards: up to `route-points` [lat lon]
+  pairs (evenly sampled, always keeping the last point), rounded to ~1 m.
+  nil when the stream has fewer than two positions."
+  [{:keys [lat lon]}]
+  (let [pts (vec (keep (fn [[la lo]] (when (and la lo) [la lo])) (map vector lat lon)))
+        n   (count pts)]
+    (when (>= n 2)
+      (let [step   (long (max 1 (Math/ceil (/ n (double route-points)))))
+            picked (cond-> (vec (take-nth step pts))
+                     (not= 0 (mod (dec n) step)) (conj (peek pts)))
+            r5     #(/ (Math/round (* % 100000.0)) 100000.0)]
+        (mapv (fn [[la lo]] [(r5 la) (r5 lo)]) picked)))))
+
+;; ---------------------------------------------------------------------------
 ;; Per-activity metrics
 
 (defn- rest-hr-lookup
@@ -61,10 +80,12 @@
        (db/upsert-metrics!
         ds
         (for [a batch]
-          (let [th (assoc (thresholds-at rows (:date a)) :rest_hr (rest-hr (:date a)) :sex sex)]
-            (assoc (m/activity-metrics a (db/load-stream ds (:id a)) th)
+          (let [th     (assoc (thresholds-at rows (:date a)) :rest_hr (rest-hr (:date a)) :sex sex)
+                stream (db/load-stream ds (:id a))]
+            (assoc (m/activity-metrics a stream th)
                    :activity_id (:id a)
-                   :inputs th)))))
+                   :inputs th
+                   :route (route-thumb stream))))))
      (count acts))))
 
 ;; ---------------------------------------------------------------------------
@@ -78,7 +99,7 @@
           a.moving_s, a.elev_gain_m, a.avg_hr, a.max_hr, a.calories,
           a.training_load AS garmin_load, a.aerobic_te,
           m.tss, m.tss_method, m.intensity, m.tss_per_hour, m.np, m.ngp_mps, m.vi, m.ef,
-          m.decoupling, m.kj, m.hr_zones_s, m.peaks
+          m.decoupling, m.kj, m.hr_zones_s, m.peaks, m.route
    FROM activities a LEFT JOIN activity_metrics m ON m.activity_id = a.id")
 
 (defn activities
@@ -92,12 +113,12 @@
                    (when (seq where) (str " WHERE " (str/join " AND " (map first where))))
                    " ORDER BY a.start_time_local DESC"
                    (when limit (str " LIMIT " (long limit))))]
-    (mapv #(parse-json-cols % [:hr_zones_s :peaks])
+    (mapv #(parse-json-cols % [:hr_zones_s :peaks :route])
           (db/query ds (into [sql] (map second where))))))
 
 (defn activity [ds id]
   (when-let [a (first (db/query ds [(str activity-select " WHERE a.id = ?") id]))]
-    (-> (parse-json-cols a [:hr_zones_s :peaks])
+    (-> (parse-json-cols a [:hr_zones_s :peaks :route])
         (assoc :thresholds (some-> (:inputs (first (db/query ds ["SELECT inputs FROM activity_metrics WHERE activity_id = ?" id])))
                                    (json/read-str :key-fn keyword))))))
 

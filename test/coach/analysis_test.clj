@@ -32,3 +32,18 @@
       (is (= ["2026-10-23" "2026-10-28" "2026-10-29"] (map :date n)) "7 nights ending today, oldest first")
       (is (= {:date "2026-10-29" :sleep_score 75 :sleep_s 20000 :hrv_avg 53.0 :hrv_low 50 :hrv_high 70}
              (last n))))))
+
+(deftest route-thumb-test
+  (testing "short tracks are kept, rounded, nil positions dropped"
+    (is (= [[47.12346 7.1] [47.2 7.2]]
+           (map (fn [[a b]] [(double a) (double b)])
+                (analysis/route-thumb {:lat [47.1234567 nil 47.2] :lon [7.1 7.15 7.2]})))))
+  (testing "long tracks are sampled down and keep their last point"
+    (let [n 1000
+          r (analysis/route-thumb {:lat (mapv #(+ 47.0 (* % 1e-4)) (range n))
+                                   :lon (mapv #(+ 7.0 (* % 1e-4)) (range n))})]
+      (is (<= (count r) (inc analysis/route-points)))
+      (is (= [47.0 7.0] (first r)))
+      (is (= [47.0999 7.0999] (last r)))))
+  (is (nil? (analysis/route-thumb {:lat [47.0] :lon [7.0]})))
+  (is (nil? (analysis/route-thumb nil))))

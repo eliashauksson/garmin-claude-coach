@@ -204,3 +204,27 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
 .divider { border-top: 1px solid var(--line); padding-top: 10px; margin-top: auto; display: flex; flex-direction: column; gap: 4px; }
 .empty { color: var(--text-2); font-size: 13px; padding: 12px 0; }
 .error { color: var(--red); font-weight: 600; }
+
+/* Activity feed */
+.month { display: flex; flex-direction: column; gap: 10px; }
+.month + .month { margin-top: 10px; }
+.month-title { display: flex; align-items: baseline; gap: 10px; font-size: 16px; font-weight: 800; color: var(--text); margin: 4px 2px 0; }
+.feed { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); gap: 14px; }
+.card.activity { cursor: pointer; transition: box-shadow .15s; }
+.card.activity:hover { box-shadow: 0 6px 24px rgba(22,24,29,.08); }
+.activity-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.activity-title { font-size: 20px; font-weight: 800; letter-spacing: -.01em; text-decoration: none; line-height: 1.25; }
+.activity-body { display: flex; gap: 16px; align-items: stretch; flex-wrap: wrap; }
+.stats { flex: 1 1 220px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 14px; align-content: start; }
+.stat-label { font-size: 12px; font-weight: 600; color: var(--text-3); }
+.stat-value { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stat-value small { font-size: 12px; font-weight: 600; color: var(--text-2); margin-left: 3px; }
+.route-box { flex: 0 0 160px; height: 110px; border-radius: 14px; overflow: hidden; }
+.route-box.run { background: var(--chip-run-bg); }   .route-box.bike { background: var(--chip-bike-bg); }
+.route-box.swim { background: var(--chip-swim-bg); } .route-box.hike { background: var(--chip-hike-bg); }
+.route-box.ski { background: var(--chip-ski-bg); }   .route-box.other { background: var(--chip-other-bg); }
+.route { display: block; width: 100%; height: 100%; }
+@media (max-width: 480px) {
+  .route-box { flex: 1 1 100%; height: 140px; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
