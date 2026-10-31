@@ -37,9 +37,9 @@
   (is (close? 25 (m/tss 3600 0.5) 1e-9))
   (is (close? 100 (m/stss 3600 1.0) 1e-9))
   (testing "one hour at LTHR = 100 hrTSS"
-    (is (close? 100 (m/hrtss (repeat 3600 174) thresholds) 1e-6)))
+    (is (close? 100 (m/hrtss (repeat 3600 170) thresholds) 1e-6)))
   (is (< (m/hrtss (repeat 3600 140) thresholds) 100))
-  (is (close? 50 (m/hrtss-estimate 174 1800 thresholds) 1e-6))
+  (is (close? 50 (m/hrtss-estimate 170 1800 thresholds) 1e-6))
   (is (nil? (m/hrtss (repeat 10 150) (dissoc thresholds :lthr)))))
 
 (deftest minetti-test
@@ -65,7 +65,7 @@
           r (m/activity-metrics {:sport "trail_running"} s thresholds)]
       (is (> (:ngp_mps r) 3.0))))
   (testing "hike with HR uses hrTSS"
-    (let [s (stream 3600 (fn [_] {:hr 174 :speed 1.3}))
+    (let [s (stream 3600 (fn [_] {:hr 170 :speed 1.3}))
           r (m/activity-metrics {:sport "hiking"} s thresholds)]
       (is (= "hrTSS" (:tss_method r)))
       (is (close? 100 (:tss r) 0.2))))
@@ -79,21 +79,21 @@
       (testing "and switches to power TSS once FTP is known"
         (is (= "TSS" (:tss_method (m/activity-metrics {:sport "cycling"} s (assoc thresholds :ftp 200))))))))
   (testing "HR on only part of a long hike is scaled up to the full duration"
-    (let [s (stream 7200 (fn [i] {:hr (when (zero? (mod i 4)) 174) :speed 1.3}))
+    (let [s (stream 7200 (fn [i] {:hr (when (zero? (mod i 4)) 170) :speed 1.3}))
           r (m/activity-metrics {:sport "hiking"} s thresholds)]
       (is (= "hrTSS-scaled" (:tss_method r)))
       (is (close? 200 (:tss r) 0.5))))
   (testing "scaling stops at moving time when the watch kept recording"
-    (let [s (stream 7200 (fn [i] {:hr (when (zero? (mod i 4)) 174) :speed 1.3}))
+    (let [s (stream 7200 (fn [i] {:hr (when (zero? (mod i 4)) 170) :speed 1.3}))
           r (m/activity-metrics {:sport "hiking" :moving_s 3600} s thresholds)]
       (is (close? 100 (:tss r) 0.5))))
   (testing "almost no HR samples: fall back to the average-HR estimate"
     (let [s (stream 3600 (fn [i] {:hr (when (< i 100) 150) :speed 1.3}))
-          r (m/activity-metrics {:sport "hiking" :moving_s 3600 :avg_hr 174} s thresholds)]
+          r (m/activity-metrics {:sport "hiking" :moving_s 3600 :avg_hr 170} s thresholds)]
       (is (= "hrTSS-est" (:tss_method r)))
       (is (close? 100 (:tss r) 0.5))))
   (testing "no stream: estimate from average HR"
-    (let [r (m/activity-metrics {:sport "lap_swimming" :moving_s 1800 :avg_hr 174} nil thresholds)]
+    (let [r (m/activity-metrics {:sport "lap_swimming" :moving_s 1800 :avg_hr 170} nil thresholds)]
       (is (= "hrTSS-est" (:tss_method r)))
       (is (close? 50 (:tss r) 0.1))))
   (testing "nothing usable"

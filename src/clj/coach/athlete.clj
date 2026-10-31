@@ -7,14 +7,24 @@
             [clojure.string :as str])
   (:import (java.time Instant)))
 
-(def ^:dynamic *doc-file* "athlete.md")
+(def ^:dynamic *doc-file*
+  "Personal, so it lives in data/ (not in git)."
+  "data/athlete.md")
+(def old-doc-file "Where the document used to be (project root); moved on first read." "athlete.md")
 (def ^:dynamic *backup-dir* "data/athlete-backups")
 (def ^:dynamic *summary-file* "data/athlete-summary.json")
 (def keep-backups 3)
 
+(defn- move-old-doc! []
+  (let [old (io/file old-doc-file) f (io/file *doc-file*)]
+    (when (and (= *doc-file* "data/athlete.md") (.exists old) (not (.exists f)))
+      (io/make-parents f)
+      (.renameTo old f))))
+
 (defn content
   "The document text, or nil when there is none."
   []
+  (move-old-doc!)
   (let [f (io/file *doc-file*)]
     (when (.exists f) (not-empty (str/trim (slurp f))))))
 
@@ -98,3 +108,22 @@
    :content (content)
    :summary (summary)
    :backups (backups)})
+
+;; ---------------------------------------------------------------------------
+;; What the code needs from the document, via its summary (Claude reads the
+;; file and fills these in). Nothing personal is hard-coded.
+
+(defn settings
+  "Personal thresholds for the rule checks, from the summary. Keys:
+  :easy_hr_max (top of the Easy zone), :steady_hr (avg HR above which an easy
+  run counts as steady), :hrv_low, :rhr_high (readiness, §7.1),
+  :peak_week_km. Unknown values are left out, and their checks skipped."
+  []
+  (into {} (filter #(and (number? (val %)) (pos? (val %)))) (:settings (summary))))
+
+(defn race
+  "{:name :date} of the goal race, from the summary; :date nil when not set."
+  []
+  (let [{:keys [race race_date]} (summary)]
+    {:name (not-empty race)
+     :date (when (and race_date (re-matches #"\d{4}-\d{2}-\d{2}" race_date)) race_date)}))

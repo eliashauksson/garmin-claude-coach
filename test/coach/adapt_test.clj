@@ -13,7 +13,8 @@
 (defn- ids [sigs] (set (map :id sigs)))
 (defn- by [sigs id] (first (filter #(= id (:id %)) sigs)))
 
-(def calm {:today today :acts [] :wellness [] :workouts [] :tsb 0})
+(def calm {:today today :acts [] :wellness [] :workouts [] :tsb 0 :phase "Build 1"
+           :settings {:steady_hr 150 :rhr_high 57}})
 
 (deftest signals-test
   (is (= [] (adapt/signals calm)))
@@ -99,5 +100,5 @@
                                        (ch "remove" 99 "2027-01-15" "EASY")  ; unknown id: dropped
                                        (ch "add" 0 "2027-01-12" "EASY")      ; before today: dropped
                                        (ch "add" 0 "2027-01-18" "EASY")]}    ; ok
-                            in-scope)]
+                            in-scope (constantly {}))]
     (is (= [["change" 1] ["add" 0]] (map (juxt :op :workout_id) (:changes response))))))

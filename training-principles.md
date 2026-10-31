@@ -73,7 +73,7 @@ A season runs through these phases toward the goal race. The athlete's dates, we
 
 ## 4. Session library
 
-Use these session types. Durations and distances scale with the phase (§3, §A5). Goal-specific sessions are in §A6.
+Use these session types. Durations and distances scale with the phase (§3, §A5). How the race simulations look for the athlete's goal is in §A6.
 
 ### 4.1 Running
 | ID | Session | Structure | Phase |
@@ -90,6 +90,8 @@ Use these session types. Durations and distances scale with the phase (§3, §A5
 | `LONG_MP` | Long run with MP finish | Long run, last 6–10 km at MP | Build 1–2 |
 | `DOUBLE` | Double day | Morning long run + evening easy 6–10 km | Build 2, Specific |
 | `B2B` | Back-to-back | Sat long run + Sun easy 12–16 km | Build 2, Specific |
+| `RACE_SIM_PART` | Race simulation (part) | Part of the race at race pace, with race fuelling and kit; structure for the goal in §A6 | Specific |
+| `RACE_SIM` | Full race simulation | Race-day rehearsal: start times, pacing, fuelling and kit; structure for the goal in §A6 | Specific |
 | `TT5` | 5 km time trial | 15 min warm-up + strides · 5 km max effort · 10 min cool-down | End of Build 1 (+ optional later) |
 
 ### 4.2 Strength (3 sessions/week from Reset to mid Build 2)

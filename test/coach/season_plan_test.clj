@@ -8,11 +8,11 @@
 
 (deftest mondays-test
   (testing "from the current week to race week, inclusive"
-    (let [ms (sp/mondays "2026-10-26" "2030-04-07")]
+    (let [ms (sp/mondays "2026-10-26" "2027-03-28")]
       (is (= "2026-10-26" (first ms)))
-      (is (= "2027-04-05" (last ms)))
-      (is (= 24 (count ms)))))
-  (is (= ["2027-04-05"] (sp/mondays "2027-04-05" "2030-04-07"))))
+      (is (= "2027-03-22" (last ms)))
+      (is (= 22 (count ms)))))
+  (is (= ["2027-03-22"] (sp/mondays "2027-03-22" "2027-03-28"))))
 
 (deftest weekly-tss-test
   (is (= {"2026-10-26" 150 "2026-10-19" 40}
@@ -32,11 +32,20 @@
       (is (thrown? Exception (sp/validate (assoc-in good [:weeks 0 :phase] "Peak") ctx)))
       (is (thrown? Exception (sp/validate (assoc-in good [:weeks 0 :tss] -5) ctx))))))
 
+(defn- with-season!
+  "A current season plan with race day `race` (default 28 Mar 2027); the weeks don't matter here."
+  [ds & [race]]
+  (let [id (coach.plan/create-season-plan! ds (or race "2027-03-28") "2026-10-26" "m")]
+    (coach.plan/finish-season-plan! ds id {:response {:summary "s" :warnings [] :weeks []}})))
+
 (deftest weeks-to-plan-test
   (let [f  (java.io.File/createTempFile "coach-test" ".db")
         ds (coach.db/datasource (.getPath f))]
     (try
       (coach.db/migrate! ds)
+      (testing "nothing without a season plan"
+        (is (= [] (coach.planner/weeks-to-plan ds "2026-10-31"))))
+      (with-season! ds)
       (testing "the two weeks after the current one"
         (is (= ["2026-11-02" "2026-11-09"] (coach.planner/weeks-to-plan ds "2026-10-31"))))
       (testing "a week with a proposal (running, open or recently failed) is left alone"
@@ -47,15 +56,15 @@
       (testing "on Monday the new second week is due"
         (is (= ["2026-11-16"] (coach.planner/weeks-to-plan ds "2026-11-02"))))
       (testing "nothing after race week"
-        (is (= ["2027-04-05"] (coach.planner/weeks-to-plan ds "2027-03-31")))
-        (is (= [] (coach.planner/weeks-to-plan ds "2027-04-06"))))
+        (is (= ["2027-03-22"] (coach.planner/weeks-to-plan ds "2027-03-17")))
+        (is (= [] (coach.planner/weeks-to-plan ds "2027-03-23"))))
       (finally (.delete f)))))
 
 (deftest backups-test
   (let [f  (java.io.File/createTempFile "coach-test" ".db")
         ds (coach.db/datasource (.getPath f))
         draft! (fn [tss]
-                 (let [id (coach.plan/create-season-plan! ds "2030-04-07" "2026-10-26" "m")]
+                 (let [id (coach.plan/create-season-plan! ds "2027-03-28" "2026-10-26" "m")]
                    (coach.plan/finish-season-plan! ds id {:response {:summary "s" :warnings []
                                                                      :weeks [(wk "2026-10-26" "Base" tss)]}})
                    id))
@@ -98,6 +107,7 @@
         status #(:status (first (coach.db/query ds ["SELECT status FROM planned_workouts WHERE id = ?" %])))]
     (try
       (coach.db/migrate! ds)
+      (with-season! ds (day 365))
       (let [m1 (coach.season/add-days (coach.season/monday today) 7)
             m2 (coach.season/add-days m1 7)
             past (add! (day -2)) now (add! today) later (add! today) skipped (add! today)

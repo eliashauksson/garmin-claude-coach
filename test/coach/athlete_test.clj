@@ -18,9 +18,9 @@
 (deftest save-backup-delete-restore-test
   (with-temp
     (testing "save keeps a backup and the summary for the new text"
-      (athlete/save! "# Athlete\nLTHR 172" {:race "City Marathon" :stats [{:label "LTHR" :value "176 bpm"}]})
+      (athlete/save! "# Athlete\nLTHR 172" {:race "City Marathon" :stats [{:label "LTHR" :value "172 bpm"}]})
       (is (= "# Athlete\nLTHR 172" (athlete/content)))
-      (is (= {:race "City Marathon" :stats [{:label "LTHR" :value "176 bpm"}]} (athlete/summary)))
+      (is (= {:race "City Marathon" :stats [{:label "LTHR" :value "172 bpm"}]} (athlete/summary)))
       (is (= ["edit"] (map :action (athlete/backups)))))
     (testing "only the newest 3 backups stay"
       (doseq [n [177 178 179]]

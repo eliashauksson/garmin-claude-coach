@@ -85,7 +85,7 @@
   (let [t    (today)
         days (analysis/wellness ds (season/add-days t -1) t)
         ws   (filter #(= "planned" (:status %)) (plan/workouts ds t t))]
-    (assoc (readiness/check days ws (:week (season/week-info t)))
+    (assoc (readiness/check days ws (:phase (plan/week-info ds t)) (athlete/settings))
            :date t :workouts ws)))
 
 (defn plan-routes [ds]
@@ -94,14 +94,15 @@
                (let [[from to] (date-range query-params 0)]
                  (ok {:weeks (plan/weeks ds from to)
                       :workouts (plan/workouts ds from to)
-                      :season (season/week-info (today))})))}]
+                      :season (plan/week-info ds (today))})))}]
    ["/readiness" {:get (fn [_] (ok (readiness-today ds)))}]
    ["/season"
     ["" {:get    (fn [_] (ok (season-plan/overview ds (today))))
-         :post   (fn [_]
-                   (planner/api-key) ; fail fast with a clear message
-                   (planner/principles)
-                   (json-response 202 {:id (season-plan/draft! ds)}))
+         :post   (guarded (fn [_]
+                            (planner/api-key) ; fail fast with a clear message
+                            (planner/principles)
+                            (season-plan/race-date!)
+                            (json-response 202 {:id (season-plan/draft! ds)})))
          :delete (guarded (fn [_] (season-plan/delete! ds (today)) (ok (season-plan/overview ds (today)))))}]
     ["/restore" {:post (guarded (fn [req]
                                   (season-plan/restore! ds (:id (body req)))
@@ -171,7 +172,7 @@
     ["/today"       {:get (fn [_] (ok (assoc (analysis/today-summary ds)
                                              :auth (auth-status ds)
                                              :sync (dissoc @sync-state :started_at)
-                                             :season (season/week-info (today))
+                                             :season (plan/week-info ds (today))
                                              :readiness_check (readiness-today ds)
                                              :open_proposals (plan/open-proposals ds))))}]
     (plan-routes ds)

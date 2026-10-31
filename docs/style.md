@@ -1,8 +1,8 @@
 # Coach style guide (bento)
 
 This guide describes the app's visual style precisely enough to rebuild it in another system and
-get the same result. It replaces `docs/bento-redesign.md` as the reference for how the app looks;
-that brief is the original implementation plan and is out of date in places (see §11).
+get the same result. It replaces the original bento implementation brief, which is not in git
+(it contained personal data) and is out of date in places (see §11).
 
 The live source of truth is `resources/public/css/app.css`, with chart styling in
 `src/cljs/coach/charts.cljs` and small components in `src/cljs/coach/ui.cljs`. If this file and the
@@ -545,7 +545,7 @@ only).
 
 ---
 
-## 11. Differences from `docs/bento-redesign.md`
+## 11. Differences from the original bento brief
 
 - The per-chart **Table** toggle has been removed. Do not add it back.
 - Dark mode is chosen by `data-theme` (toggle or system setting), not only by

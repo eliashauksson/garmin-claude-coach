@@ -19,8 +19,8 @@
    "LONG_MP"     {:kind :run :long? true :key? true :quality? true}
    "DOUBLE"      {:kind :run :long? true :key? true}
    "B2B"         {:kind :run :long? true :key? true}
-   "TRIPLE_MINI" {:kind :run :long? true :key? true}
-   "TRIPLE_SIM"  {:kind :run :long? true :key? true}
+   "RACE_SIM_PART" {:kind :run :long? true :key? true :race-sim? true}
+   "RACE_SIM"      {:kind :run :long? true :key? true :race-sim? true}
    "TT5"         {:kind :run :key? true :quality? true}
    "GYM_LOWER"   {:kind :strength :heavy-legs? true}
    "GYM_UPPER"   {:kind :strength}
@@ -31,11 +31,16 @@
 
 (defn run? [w] (= :run (get-in sessions [(:session_id w) :kind])))
 
+(def long-key-phases
+  "Phases in which LONG counts as a key session (§5.2: from Build 1 on)."
+  #{"Build 1" "Build 2" "Specific" "Taper" "Race week"})
+
 (defn key-session?
-  "Key sessions; LONG counts as key from Build 1 (week 9) on (§5.2)."
-  [w week-no]
+  "Key sessions; LONG counts as key from Build 1 on (§5.2). `phase` is the
+  week's phase in the season plan (nil without one)."
+  [w phase]
   (let [s (sessions (:session_id w))]
-    (or (:key? s) (and (:long? s) week-no (>= week-no 9)))))
+    (or (:key? s) (and (:long? s) (contains? long-key-phases phase)))))
 
 (defn- run-km [ws] (reduce + 0 (keep #(when (run? %) (:distance_km %)) ws)))
 
@@ -43,11 +48,11 @@
   "Warnings for `workouts` planned in the week starting `monday`.
   `prev` is {:run_km :longest_km :peak_km} for the week before, from what was
   actually done (or planned, if it hasn't happened yet); :peak_km is the
-  highest weekly volume of the recent weeks."
-  [monday workouts {:keys [prev]}]
-  (let [info    (season/week-info monday)
-        wk      (:week info)
-        sunday  (season/add-days monday 6)
+  highest weekly volume of the recent weeks. `phase` and `race-date` come
+  from the season plan, `peak-km` from the athlete's settings; checks
+  without their value are skipped."
+  [monday workouts {:keys [prev phase race-date peak-km]}]
+  (let [sunday  (season/add-days monday 6)
         km      (run-km workouts)
         by-date (group-by :date workouts)
         dates   (map #(season/add-days monday %) (range 7))
@@ -56,7 +61,7 @@
                                    workouts))
         ;; back up to a level already done, e.g. after time away: +20% (§9.1)
         cap     (if (<= km (or (:peak_km prev) 0)) 1.2 1.1)
-        key-days (set (keep #(when (key-session? % wk) (:date %)) workouts))]
+        key-days (set (keep #(when (key-session? % phase) (:date %)) workouts))]
     (vec
      (remove nil?
              (concat
@@ -65,10 +70,11 @@
                (when (and (:run_km prev) (pos? (:run_km prev)) (> km (* cap (:run_km prev))))
                      (format "Running volume %.0f km is more than +%d%% over last week's %.0f km (§9.1)."
                              (double km) (Math/round (* 100 (- cap 1))) (double (:run_km prev))))
-               (when (> km 80) (format "Running volume %.0f km exceeds the 80 km peak (§A5)." (double km)))
+               (when (and peak-km (> km peak-km))
+                 (format "Running volume %.0f km exceeds the %.0f km peak (§A5)." (double km) (double peak-km)))
                (when (and (:longest_km prev) (pos? (:longest_km prev)) (pos? longest)
                           (> longest (+ 3 (:longest_km prev)))
-                          (not (some #(str/starts-with? (:session_id %) "TRIPLE") workouts)))
+                          (not (some #(get-in sessions [(:session_id %) :race-sim?]) workouts)))
                      (format "Longest run %.0f km is more than +3 km over the previous longest %.0f km (§9.1)."
                              (double longest) (double (:longest_km prev))))
                (when (> (count (filter #(get-in sessions [(:session_id %) :threshold?]) workouts)) 1)
@@ -79,8 +85,8 @@
                      "Key sessions on consecutive days (§9.4).")
                (when (not-any? (fn [d] (not-any? run? (by-date d))) dates)
                      "No day without running (§5.2: at least one full rest day).")
-               (when (some #(and (= :strength (get-in sessions [(:session_id %) :kind]))
-                                 (<= 0 (season/days-between (:date %) season/race-date) 10))
+               (when (some #(and race-date (= :strength (get-in sessions [(:session_id %) :kind]))
+                                 (<= 0 (season/days-between (:date %) race-date) 10))
                            workouts)
                      "No gym in the final 10 days before the race (§9.4).")]
               (for [long-w (filter #(get-in sessions [(:session_id %) :long?]) workouts)

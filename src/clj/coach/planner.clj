@@ -68,16 +68,18 @@
 (defn- secs [a] (or (:moving_s a) (:duration_s a) 0))
 
 (defn week-summary
-  "§8 weekly metrics from recorded activities. Easy = runs with avg HR ≤ 148 (§A3)."
+  "§8 weekly metrics from recorded activities. Easy = runs with avg HR at or
+  below the top of the athlete's Easy zone (§A3); without it, no easy share."
   [monday acts]
   (let [runs (filter run-act? acts)
         rt   (reduce + 0 (map secs runs))
-        easy (reduce + 0 (map secs (filter #(and (:avg_hr %) (<= (:avg_hr %) 148)) runs)))]
+        easy-max (:easy_hr_max (athlete/settings))
+        easy (reduce + 0 (map secs (filter #(and easy-max (:avg_hr %) (<= (:avg_hr %) easy-max)) runs)))]
     {:monday       monday
      :run_km       (r1 (/ (reduce + 0 (keep :distance_m runs)) 1000.0))
      :run_hours    (r1 (/ rt 3600.0))
      :runs         (count runs)
-     :easy_pct     (when (pos? rt) (Math/round (* 100.0 (/ easy rt))))
+     :easy_pct     (when (and easy-max (pos? rt)) (Math/round (* 100.0 (/ easy rt))))
      :longest_km   (r1 (/ (apply max 0 (keep :distance_m runs)) 1000.0))
      :marches      (count (filter march? acts))
      :march_hours  (r1 (/ (reduce + 0 (map secs (filter march? acts))) 3600.0))
@@ -103,7 +105,7 @@
                   (week-summary m (by-week m)))
         pmc     (last (analysis/pmc ds today today))]
     {:today            today
-     :target_week      (season/week-info monday)
+     :target_week      (plan/week-info ds monday)
      :last_6_weeks     weeks
      :recent_activities (vec (for [a (filter #(>= (compare (:date %) (season/add-days today -14)) 0) acts)]
                                {:date (:date a) :sport (:sport a) :name (:name a)
@@ -256,6 +258,12 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 
 ;; ---------------------------------------------------------------------------
 
+(defn rule-opts
+  "The season and athlete values coach.plan-rules/check-week needs, for a week
+  whose season position is `info` (coach.plan/week-info)."
+  [info]
+  {:phase (:phase info) :race-date (:race_date info) :peak-km (:peak_week_km (athlete/settings))})
+
 (defn validate
   "Schema check plus the hard-rule checks. Returns the response with
   sessions outside the week dropped, and all warnings."
@@ -270,7 +278,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                       :longest_km (apply max 0 (keep :longest_km (:last_6_weeks ctx)))
                       :peak_km (apply max 0 (keep :run_km (:last_6_weeks ctx))))]
     {:response (assoc response :workouts ws)
-     :warnings (rules/check-week monday ws {:prev prev})}))
+     :warnings (rules/check-week monday ws (assoc (rule-opts (:target_week ctx)) :prev prev))}))
 
 (defn- run-proposal! [ds id monday]
   (try
@@ -347,7 +355,9 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
      :acts     (reverse (analysis/activities ds {:from (season/add-days today -42) :to today}))
      :wellness (analysis/wellness ds (season/add-days today -2) today)
      :workouts (plan/workouts ds monday (season/add-days monday 13))
-     :tsb      (:tsb (last (analysis/pmc ds today today)))}))
+     :tsb      (:tsb (last (analysis/pmc ds today today)))
+     :phase    (:phase (plan/week-info ds today))
+     :settings (athlete/settings)}))
 
 (defn adjust-message [ctx today scope-end]
   (str "Adjust the planned sessions from " today " to " scope-end " in response to the signals"
@@ -373,8 +383,9 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 
 (defn validate-adjustment
   "Schema check; drops changes that target unknown or finished sessions or
-  fall outside the scope; rule-checks every affected week."
-  [today scope-end response in-scope]
+  fall outside the scope; rule-checks every affected week. `info-of` gives a
+  week's season position (coach.plan/week-info) from its Monday."
+  [today scope-end response in-scope info-of]
   (when-let [err (m/explain Adjustment response)]
     (throw (ex-info (str "Invalid adjustment from the model: " (pr-str (me/humanize err))) {:response response})))
   (let [open-ids (set (keep #(when (= "planned" (:status %)) (:id %)) in-scope))
@@ -385,7 +396,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
         after    (apply-changes (filter #(#{"planned" "done"} (:status %)) in-scope) changes)
         weeks    (distinct (map #(season/monday (:date %)) changes))]
     {:response (assoc response :changes changes)
-     :warnings (vec (distinct (mapcat (fn [m] (rules/check-week m (filter #(= m (season/monday (:date %))) after) {}))
+     :warnings (vec (distinct (mapcat (fn [m] (rules/check-week m (filter #(= m (season/monday (:date %))) after) (rule-opts (info-of m))))
                                       weeks)))}))
 
 (defn propose-adjustment!
@@ -409,7 +420,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                                                           :when (or (:rpe a) (:garmin_rpe a) (pos? (or (:pain a) 0)) (:note a))]
                                                       (select-keys a [:date :name :rpe :garmin_rpe :pain :pain_location :note]))))
               {:keys [response usage]} (call-claude (principles) (adjust-message ctx today scope-end) adjust-schema)
-              {:keys [response warnings]} (validate-adjustment today scope-end response in-scope)]
+              {:keys [response warnings]} (validate-adjustment today scope-end response in-scope
+                                                                  #(plan/week-info ds %))]
           (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
         (catch Throwable e
           (plan/fail-proposal! ds id (or (ex-message e) (str (class e)))))))
@@ -431,11 +443,12 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
   "The next `horizon-weeks` weeks after the current one (up to race week) with
   nothing planned or proposed yet."
   [ds today]
-  (let [m (season/monday today)]
+  (let [m    (season/monday today)
+        race (:race_date (plan/current-season ds))]
     (vec (for [i (range 1 (inc horizon-weeks))
                :let [mo (season/add-days m (* 7 i))
                      p  (plan/latest-proposal ds mo)]
-               :when (and (<= (compare mo (season/monday season/race-date)) 0)
+               :when (and race (<= (compare mo (season/monday race)) 0)
                           (empty? (plan/workouts ds mo (season/add-days mo 6)))
                           (or (nil? p) (= "withdrawn" (:status p)) (retry? p)))]
            mo))))

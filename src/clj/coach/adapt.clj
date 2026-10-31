@@ -7,7 +7,6 @@
             [coach.season :as season]))
 
 (def easy-sessions #{"EASY" "EASY_ST" "REC" "LONG"})
-(def easy-hr-max "Avg HR above this makes an easy run 'steady' (§A3)." 150)
 (def drift-max "Long-run HR drift (decoupling, %) above which the next long run shouldn't grow (§7.2)." 8)
 
 (defn- run? [a] (re-find #"running" (str (:sport a))))
@@ -20,8 +19,10 @@
   signal never triggers twice.
   `ctx`: {:today :acts (last 6 weeks, newest last, with metrics/feedback)
           :wellness (last 3 days, oldest first) :workouts (this + next week,
-          with status) :tsb}"
-  [{:keys [today acts wellness workouts tsb]}]
+          with status) :tsb :phase (season plan, or nil)
+          :settings (the athlete's thresholds: :steady_hr :rhr_high, §A3; a
+          signal without its threshold is skipped)}"
+  [{:keys [today acts wellness workouts tsb phase settings]}]
   (let [monday    (season/monday today)
         week-acts (filter #(<= (compare monday (:date %)) 0) acts)
         planned-by-act (into {} (keep #(when (:activity_id %) [(:activity_id %) %])) workouts)
@@ -30,7 +31,8 @@
                                       (and (nil? (session-of %)) (< (secs %) (* 75 60)))))
         long-run?  #(and (run? %) (or (= "LONG" (session-of %)) (>= (secs %) (* 75 60))))
         recent     (filter #(>= (compare (:date %) (season/add-days today -7)) 0) acts)
-        too-hard   (filter #(and (easy-run? %) (:avg_hr %) (> (:avg_hr %) easy-hr-max)) week-acts)
+        steady-hr  (:steady_hr settings)
+        too-hard   (filter #(and steady-hr (easy-run? %) (:avg_hr %) (> (:avg_hr %) steady-hr)) week-acts)
         last-long  (last (filter long-run? recent))
         upcoming-long (filter #(and (= "planned" (:status %)) (get-in rules/sessions [(:session_id %) :long?])
                                     (>= (compare (:date %) today) 0))
@@ -44,7 +46,8 @@
         last2      (take-last 2 wellness)
         hrv-bad    (and (= 2 (count last2))
                         (every? #(#{"UNBALANCED" "LOW"} (some-> (:hrv_status %) clojure.string/upper-case)) last2))
-        rhr-bad    (and (= 2 (count last2)) (every? #(some-> (:rhr %) (>= 57)) last2))
+        rhr-high   (:rhr_high settings)
+        rhr-bad    (and rhr-high (= 2 (count last2)) (every? #(some-> (:rhr %) (>= rhr-high)) last2))
         this-week  (filter #(<= (compare monday (:date %)) 0 (compare (season/add-days monday 6) (:date %))) workouts)
         missed     (filter #(= "missed" (:status %)) this-week)
         km         (fn [ws] (reduce + 0 (keep #(when (rules/run? %) (:distance_km %)) ws)))
@@ -63,7 +66,7 @@
           :severity (if (>= (count too-hard) 3) :warn :info) :trigger? (>= (count too-hard) 3)
           :principle "§7.2"
           :message (str (count too-hard) " easy run" (when (> (count too-hard) 1) "s")
-                        " this week averaged above " easy-hr-max " bpm (that's steady, not easy)")}])
+                        " this week averaged above " steady-hr " bpm (that's steady, not easy)")}])
       (when (and last-long (:decoupling last-long) (> (:decoupling last-long) drift-max))
         [{:key (str "drift:" (:id last-long)) :id :long-drift :severity :warn
           :trigger? (boolean (some #(> (or (:distance_km %) 0) (/ (or (:distance_m last-long) 0) 1000.0)) upcoming-long))
@@ -86,8 +89,8 @@
           :message "HRV unbalanced or low for 2 days: reduce the week by 20%, no key session"}])
       (when rhr-bad
         [{:key (str "rhr:" (:date (last last2))) :id :rhr-high :severity :warn :trigger? true :principle "§7.1"
-          :message "Resting HR 57 or higher for 2 days: no key sessions until it settles"}])
-      (for [w missed :when (or (rules/key-session? w (:week (season/week-info today)))
+          :message (str "Resting HR " rhr-high " or higher for 2 days: no key sessions until it settles")}])
+      (for [w missed :when (or (rules/key-session? w phase)
                                (get-in rules/sessions [(:session_id w) :long?]))]
         {:key (str "missed:" (:id w)) :id :missed-key :severity :warn :trigger? true :principle "§6.4"
          :message (str "Missed " (:title w) " (" (:session_id w) ") on " (:date w)

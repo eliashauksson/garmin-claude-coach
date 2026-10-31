@@ -62,7 +62,13 @@
         (is (= ["edited" "rejected"] (map :decision (:items p))))))
     (let [[_ plan] (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08")]
       (is (= [["EASY" 40 "planned"]] (map (juxt :session_id :duration_min :status) (:workouts plan))))
-      (is (= 1 (:week (first (:weeks plan))))))
+      (is (= "2026-11-02" (:monday (first (:weeks plan)))))
+      (is (nil? (:week (first (:weeks plan))))) ; no season plan
+      (let [sid (coach.plan/create-season-plan! ds "2026-12-20" "2026-11-02" "test")]
+        (coach.plan/finish-season-plan! ds sid {:response {:summary "s" :warnings []
+                                                            :weeks [{:monday "2026-11-02" :phase "Reset" :tss 100
+                                                                     :cutback false :focus "f"}]}})
+        (is (= [1 "Reset"] ((juxt :week :phase) (first (:weeks (second (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08")))))))))
     (testing "a run on that day marks the planned run done"
       (db/upsert-activities! ds [{:id 9 :date "2026-11-02" :start_time_local "2026-11-02T06:00:00"
                                   :sport "running" :name "Run" :raw {}}])

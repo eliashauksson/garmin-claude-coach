@@ -2,9 +2,9 @@
 
 A personal training dashboard that runs locally on my own Garmin data. It covers Today, Activities and Training load, with TrainingPeaks-style metrics. Today shows intraday heart rate, stress, body battery and steps; every sync keeps the last 7 days of intraday data up to date. The Plan page proposes training weeks with Claude and suggests adjustments when recent training, feedback or wellness call for it. The data comes from a local [garmin_mcp](https://github.com/Taxuspt/garmin_mcp) server and is only ever **read**: nothing is written back to Garmin.
 
-See `garmin-coach-plan.md` for the design.
+The planner reads two documents: `training-principles.md`, the general method for building a running plan (§0–§9), and the athlete document (§A1–§A9): the athlete, goal race and season outline. You add and edit the athlete document on the Plan page, with Claude. On the same page Claude drafts the season plan to race day; the coach then keeps the next two weeks planned.
 
-The planner reads two documents: `training-principles.md`, the general method for building a running plan (§0–§9), and `athlete.md`, the athlete, goal race and season plan (§A1–§A9). To plan for another goal or athlete, edit `athlete.md`.
+**Personal data stays local.** Only the general training principles are in git. The athlete document (`data/athlete.md`), its backups, the season plans, planned sessions and all Garmin data live in `data/`, which git ignores. Personal values the rule checks need (easy-zone top, readiness thresholds, peak volume, race date) are read from the athlete document, never hard-coded.
 
 ## Requirements
 - Clojure CLI and Java 21

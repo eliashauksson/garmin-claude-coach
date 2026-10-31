@@ -6,6 +6,7 @@
   Once it exists, the coach keeps the next two weeks proposed (coach.planner/plan-ahead!)."
   (:require [clojure.data.json :as json]
             [coach.analysis :as analysis]
+            [coach.athlete :as athlete]
             [coach.plan :as plan]
             [coach.planner :as planner]
             [coach.season :as season]
@@ -30,7 +31,14 @@
 ;; ---------------------------------------------------------------------------
 ;; Context and prompt
 
-(defn context [ds today]
+(defn race-date!
+  "The goal race date from the athlete information, or an error saying it's missing."
+  []
+  (or (:date (athlete/race))
+      (throw (ex-info "The athlete information has no goal race date yet. Add it on the Plan page first."
+                      {:type :no-race-date}))))
+
+(defn context [ds today race-date]
   (let [start (season/monday today)
         from  (season/add-days start -84)
         acts  (analysis/activities ds {:from from :to today})
@@ -38,9 +46,9 @@
         pmc   (last (analysis/pmc ds today today))
         r     #(some-> % Math/round)]
     {:today          today
-     :race_date      season/race-date
-     :days_to_race   (season/days-between today season/race-date)
-     :weeks_to_plan  (mondays start season/race-date)
+     :race_date      race-date
+     :days_to_race   (season/days-between today race-date)
+     :weeks_to_plan  (mondays start race-date)
      :load_today     {:ctl (r (:ctl pmc)) :atl (r (:atl pmc)) :tsb (r (:tsb pmc))}
      :last_12_weeks  (vec (for [i (range 12 0 -1) :let [mo (season/add-days start (* -7 i))]]
                             (planner/week-summary mo (by-wk mo))))
@@ -119,10 +127,11 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
     (if running
       (:id running)
       (let [today (str (LocalDate/now))
-            id    (plan/create-season-plan! ds season/race-date (season/monday today) planner/model)]
+            race  (race-date!)
+            id    (plan/create-season-plan! ds race (season/monday today) planner/model)]
         (future
           (try
-            (let [ctx (context ds today)
+            (let [ctx (context ds today race)
                   {:keys [response usage]}
                   (planner/request {:system   (str system-intro (planner/principles))
                                     :messages [[:user (str "Draft the season plan. The athlete's data as JSON:\n\n"
@@ -159,6 +168,7 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
         newest  (plan/latest-season-plan ds)
         failed  (when (and (= "failed" (:status newest)) (> (:id newest) (or (:id current) 0))) newest)
         weeks   (get-in current [:response :weeks])
+        race    (or (:race_date current) (:date (athlete/race)))
         actual  (when (seq weeks)
                   (weekly-tss (analysis/activities ds {:from (:monday (first weeks)) :to today})))]
     {:status         (cond running "running" failed "failed" current "ready" :else "none")
@@ -169,5 +179,6 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
                                        weeks)))
      :backups        (plan/season-backups ds)
      :current_monday (season/monday today)
-     :race_date      season/race-date
-     :days_to_race   (season/days-between today season/race-date)}))
+     :race           (:name (athlete/race))
+     :race_date      race
+     :days_to_race   (some->> race (season/days-between today))}))

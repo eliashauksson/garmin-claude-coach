@@ -10,3 +10,10 @@ resources/public/fonts/
 
 # Claude Code personal settings
 .claude/settings.local.json
+
+# Personal: the athlete, their plan and data never go into git.
+# (data/ above holds the athlete document, plans, backups and the database.)
+/athlete.md
+/garmin-coach-plan.md
+/docs/bento-redesign.md
+/docs/design/

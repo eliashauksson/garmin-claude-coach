@@ -181,9 +181,15 @@
              (when (and proposal (not (#{"closed" "withdrawn"} (:status proposal))))
                (proposal-panel proposal mine ui-state monday)))))
 
-(defn- season-line [{:keys [week phase days_to_race]}]
-  (str (if week (str "Week " week " of 23 · " phase) "Season starts Mon 2 Nov")
-       " · " days_to_race " days to the the goal race"))
+(defn- season-line
+  "Header line: the week's place in the season plan and the days to the race."
+  [{:keys [week weeks_total phase days_to_race race_date]} race-name]
+  (str/join " · " (remove nil? [(cond week  (str "Week " week " of " weeks_total " · " phase)
+                                      phase phase
+                                      :else "No season plan yet")
+                                (when days_to_race
+                                  (str days_to_race " days to " (or race-name "race day")
+                                       " (" (short-date race_date) ")"))])))
 
 (def severity-color {"high" "var(--red)" "warn" "var(--amber)" "info" "var(--blue)"})
 
@@ -217,7 +223,7 @@
         props (map #(get data %) proposal-urls)]
     [:div {:style {:display "contents"}}
      [:div.page-head
-      [:div.title [:div.sub (when p (season-line (:season p)))] [:h1 "Plan"]]]
+      [:div.title [:div.sub (when p (season-line (:season p) (:race (get data season-url))))] [:h1 "Plan"]]]
      (when flash [:div.error flash])
      (when-let [e (get errors plan-url)] [:div.error (str "Could not load: " e)])
      (when-let [a (get data athlete-url)] (athlete/card a (:athlete ui-state)))

@@ -38,10 +38,15 @@ The overview is a small card on the Plan page, read at a glance. Keep only what 
 in short fragments, never sentences:
 - `race`: the goal race name only (e.g. \"City Marathon\").
 - `race_date`: its date as YYYY-MM-DD, or \"\" if there is none.
-- `race_detail`: what the race is, a few words (e.g. \"Marathon + half + 10k · ~73 km\").
+- `race_detail`: what the race is, a few words (e.g. \"Marathon · 42.2 km\").
 - `athlete`: name and a few words (e.g. \"Alex, 34 · teacher\").
 - `stats`: the 3-4 numbers that shape training most, each a short `label` and a `value` with
-  its unit (e.g. LTHR / 174 bpm, Easy zone / 135–148 bpm). No more than 4.
+  its unit (e.g. LTHR / 170 bpm, Easy zone / 133–145 bpm). No more than 4.
+- `settings`: numbers the dashboard's rule checks use, taken from the file; 0 when the file
+  doesn't give one. `easy_hr_max`: top of the Easy zone (bpm). `steady_hr`: average HR above
+  which an easy run counts as steady (bpm; the easy-zone top if no separate limit is given).
+  `hrv_low` and `rhr_high`: the readiness thresholds \"HRV too low\" (ms) and \"RHR too high\"
+  (bpm). `peak_week_km`: the peak weekly running volume (km).
 - `focus`: the single most important point for the plan, at most about 8 words.
 ")
 
@@ -56,7 +61,7 @@ in short fragments, never sentences:
                         "required" ["old_text" "new_text"]
                         "properties" {"old_text" {"type" "string"} "new_text" {"type" "string"}}}}
     "summary" {"type" "object" "additionalProperties" false
-               "required" ["race" "race_date" "race_detail" "athlete" "stats" "focus"]
+               "required" ["race" "race_date" "race_detail" "athlete" "stats" "focus" "settings"]
                "properties" {"race" {"type" "string"}
                              "race_date" {"type" "string"}
                              "race_detail" {"type" "string"}
@@ -66,7 +71,14 @@ in short fragments, never sentences:
                                                "required" ["label" "value"]
                                                "properties" {"label" {"type" "string"}
                                                              "value" {"type" "string"}}}}
-                             "focus" {"type" "string"}}}}})
+                             "focus" {"type" "string"}
+                             "settings" {"type" "object" "additionalProperties" false
+                                         "required" ["easy_hr_max" "steady_hr" "hrv_low" "rhr_high" "peak_week_km"]
+                                         "properties" {"easy_hr_max"  {"type" "integer"}
+                                                       "steady_hr"    {"type" "integer"}
+                                                       "hrv_low"      {"type" "integer"}
+                                                       "rhr_high"     {"type" "integer"}
+                                                       "peak_week_km" {"type" "integer"}}}}}}})
 
 (defn apply-edits
   "The document after `edits`, or an ex-info naming the edit that didn't match."
@@ -134,7 +146,7 @@ empty and `edits` must be [].")
   []
   (let [doc  (athlete/content)
         hash (athlete/sha doc)
-        need (and doc (nil? (athlete/summary)))
+        need (and doc (nil? (:settings (athlete/summary))))
         [old _] (swap-vals! summary-job
                             #(if (and need (not (:running %)) (not= hash (get-in % [:failed :hash])))
                                (assoc % :running true)

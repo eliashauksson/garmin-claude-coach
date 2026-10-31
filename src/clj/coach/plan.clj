@@ -17,11 +17,25 @@
 ;; ---------------------------------------------------------------------------
 ;; Weeks
 
+(declare latest-season-plan)
+
+(defn current-season
+  "The current season plan as {:race_date :weeks}, or nil."
+  [ds]
+  (when-let [p (latest-season-plan ds "ready")]
+    {:race_date (:race_date p) :weeks (get-in p [:response :weeks])}))
+
+(defn week-info
+  "Season position of the week containing `date` (coach.season/week-info)."
+  [ds date]
+  (season/week-info date (current-season ds)))
+
 (defn weeks
   "Plan weeks (with season position) for every Monday in [from, to]."
-  [_ds from to]
-  (for [m (take-while #(<= (compare % to) 0) (iterate #(season/add-days % 7) (season/monday from)))]
-    (season/week-info m)))
+  [ds from to]
+  (let [s (current-season ds)]
+    (for [m (take-while #(<= (compare % to) 0) (iterate #(season/add-days % 7) (season/monday from)))]
+      (season/week-info m s))))
 
 ;; ---------------------------------------------------------------------------
 ;; Planned workouts

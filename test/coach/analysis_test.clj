@@ -35,15 +35,15 @@
 
 (deftest route-thumb-test
   (testing "short tracks are kept, rounded, nil positions dropped"
-    (is (= [[47.12346 7.1] [47.2 7.2]]
+    (is (= [[45.12346 10.1] [45.2 10.2]]
            (map (fn [[a b]] [(double a) (double b)])
-                (analysis/route-thumb {:lat [47.1234567 nil 47.2] :lon [7.1 7.15 7.2]})))))
+                (analysis/route-thumb {:lat [45.1234567 nil 45.2] :lon [10.1 10.15 10.2]})))))
   (testing "long tracks are sampled down and keep their last point"
     (let [n 1000
-          r (analysis/route-thumb {:lat (mapv #(+ 47.0 (* % 1e-4)) (range n))
-                                   :lon (mapv #(+ 7.0 (* % 1e-4)) (range n))})]
+          r (analysis/route-thumb {:lat (mapv #(+ 45.0 (* % 1e-4)) (range n))
+                                   :lon (mapv #(+ 10.0 (* % 1e-4)) (range n))})]
       (is (<= (count r) (inc analysis/route-points)))
-      (is (= [47.0 7.0] (first r)))
-      (is (= [47.0999 7.0999] (last r)))))
-  (is (nil? (analysis/route-thumb {:lat [47.0] :lon [7.0]})))
+      (is (= [45.0 10.0] (first r)))
+      (is (= [45.0999 10.0999] (last r)))))
+  (is (nil? (analysis/route-thumb {:lat [45.0] :lon [10.0]})))
   (is (nil? (analysis/route-thumb nil))))
