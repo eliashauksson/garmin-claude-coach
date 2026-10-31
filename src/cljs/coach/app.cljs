@@ -93,26 +93,33 @@
 
 (defonce sync-timer (atom nil))
 
-(defn poll-sync! []
+(defn- sync-state! [s]
+  (let [{was :running done :finished_at} (:sync @state)]
+    (swap! state assoc :sync s)
+    ;; a sync ended since the last poll (also one shorter than the interval)
+    (when (and (not (:running s))
+               (or was (and done (not= done (:finished_at s)))))
+      ;; new data: drop the cache and reload this page
+      (swap! state assoc :data {})
+      (load-route!))))
+
+(defn poll-sync!
+  "Polls /api/sync every 3 s while a sync runs, else every 30 s, so syncs the
+  server starts on its own show up too."
+  []
+  (js/clearTimeout @sync-timer)
   (-> (js/fetch "/api/sync")
       (.then #(.json %))
-      (.then (fn [body]
-               (let [s (js->clj body :keywordize-keys true)]
-                 (swap! state assoc :sync s)
-                 (when-not (:running s)
-                   (js/clearInterval @sync-timer)
-                   (reset! sync-timer nil)
-                   ;; new data: drop the cache and reload this page
-                   (swap! state assoc :data {})
-                   (load-route!)))))))
+      (.then #(sync-state! (js->clj % :keywordize-keys true)))
+      (.catch (fn [_]))
+      (.finally #(reset! sync-timer (js/setTimeout poll-sync! (if (get-in @state [:sync :running]) 3000 30000))))))
 
 (defn start-sync! []
   (-> (js/fetch "/api/sync" #js {:method "POST"})
       (.then #(.json %))
       (.then (fn [body]
-               (swap! state assoc :sync (js->clj body :keywordize-keys true))
-               (when-not @sync-timer
-                 (reset! sync-timer (js/setInterval poll-sync! 3000)))))))
+               (sync-state! (js->clj body :keywordize-keys true))
+               (poll-sync!)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Actions (Replicant dispatches data; this interprets it)
@@ -177,4 +184,5 @@
   (.addEventListener js/window "hashchange" on-hash!)
   (.addEventListener (js/matchMedia "(prefers-color-scheme: dark)") "change" render!)
   (on-hash!)
+  (poll-sync!)
   (render!))

@@ -70,7 +70,10 @@
 (defn sync-button [{:keys [running last_result]}]
   [:span {:style {:display "inline-flex" :gap "10px" :align-items "center"}}
    (when (and (not running) (false? (:ok last_result))) [:span.error "Sync failed"])
-   [:button.btn-ink {:disabled running :on {:click [[:sync]]}} (if running "Syncing…" "Sync now")]])
+   [:button.btn-ink {:disabled running :on {:click [[:sync]]}}
+    (if running
+      (list [:span.spinner {:aria-hidden "true"}] "Syncing…")
+      "Sync now")]])
 
 ;; ---------------------------------------------------------------------------
 ;; Row 1
