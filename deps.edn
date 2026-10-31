@@ -7,7 +7,9 @@
         ring/ring-jetty-adapter {:mvn/version "1.15.6"}
         metosin/reitit-ring {:mvn/version "0.11.0"}
         metosin/malli {:mvn/version "0.20.3"}
-        com.anthropic/anthropic-java {:mvn/version "3.3.0"}}
+        com.anthropic/anthropic-java {:mvn/version "3.3.0"}
+        ;; silences the "No SLF4J providers" warning (Jetty logs through SLF4J)
+        org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}
  :aliases
  {:dev {:extra-paths ["dev"]}
   :test {:extra-paths ["test"]
