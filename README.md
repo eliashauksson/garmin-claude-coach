@@ -1,6 +1,6 @@
 # garmin-claude-coach
 
-A personal training dashboard that runs locally on my own Garmin data. It covers Today, Activities and Training load, with TrainingPeaks-style metrics. Today shows intraday heart rate, stress, body battery and steps; every sync keeps the last 7 days of intraday data up to date. AI training planning is coming in Phase 5. The data comes from a local [garmin_mcp](https://github.com/Taxuspt/garmin_mcp) server and is only ever **read**: nothing is written back to Garmin.
+A personal training dashboard that runs locally on my own Garmin data. It covers Today, Activities and Training load, with TrainingPeaks-style metrics. Today shows intraday heart rate, stress, body battery and steps; every sync keeps the last 7 days of intraday data up to date. The Plan page proposes training weeks with Claude and suggests adjustments when recent training, feedback or wellness call for it. The data comes from a local [garmin_mcp](https://github.com/Taxuspt/garmin_mcp) server and is only ever **read**: nothing is written back to Garmin.
 
 See `garmin-coach-plan.md` for the design.
 
@@ -23,10 +23,20 @@ clojure -M -m coach.sync vo2max
 
 ## Run
 ```sh
-clojure -M -m coach.api               # http://127.0.0.1:8080/ and syncs new data on start
-clojure -M -m coach.api 8090 --no-sync
+make run                              # http://127.0.0.1:8080/, syncs on start and every 2 h (06-22 h)
+make offline                          # port 8090, no syncing
 ```
-For frontend development, run `npm run watch` and reload the page.
+`make start` is the same as `make run`. For frontend development, run `make watch` and reload the page.
+
+| Make target | Runs |
+|---|---|
+| `make run` / `make start` | `clojure -M -m coach.api` |
+| `make offline` | `clojure -M -m coach.api 8090 --no-sync` |
+| `make watch` | `npm run watch` |
+| `make build` | `npm run release` |
+| `make sync` | `clojure -M -m coach.sync sync` |
+| `make status` | `clojure -M -m coach.sync status` |
+| `make test` | `clojure -M:test` |
 
 ## Other commands
 | Command | What it does |
