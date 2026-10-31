@@ -105,6 +105,7 @@
                                    (select-keys w [:date :hrv_avg :hrv_status :rhr :sleep_s :sleep_score
                                                    :readiness :body_battery_high])))
      :load_today       (select-keys pmc [:ctl :atl :tsb])
+     :season_plan_target (plan/season-target ds monday)
      :planned_previous_and_target_weeks
      (vec (for [w (plan/workouts ds (season/add-days monday -7) (season/add-days monday 6))]
             (select-keys w [:date :slot :session_id :title :distance_km :duration_min :status])))}))
@@ -122,6 +123,9 @@ Follow the principles. The hard rules (§9) are never broken; when rules conflic
 priority order in §0. Remember that Garmin-recorded load underestimates the athlete's real load (§A2).
 Availability isn't known in advance: plan the full week for the current phase (§5.1, §6.1).
 The recent activities show what the athlete actually did; a gap means time away (§6.2, §A2).
+`season_plan_target`, when present, is the target week from the long-term season plan: its phase
+and weekly TSS. Aim the week at it; when readiness or recent training say otherwise, the hard rules
+and readiness win - say so in `warnings`.
 
 Return only sessions (rest days have no entry). Dates must fall inside the target week. Two
 sessions on one day use the AM and PM slots. Give every session an estimated duration; use

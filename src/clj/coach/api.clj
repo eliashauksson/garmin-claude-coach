@@ -11,6 +11,7 @@
             [coach.planner :as planner]
             [coach.readiness :as readiness]
             [coach.season :as season]
+            [coach.season-plan :as season-plan]
             [coach.sync :as sync]
             [clojure.java.io :as io]
             [reitit.ring :as ring]
@@ -95,6 +96,11 @@
                       :workouts (plan/workouts ds from to)
                       :season (season/week-info (today))})))}]
    ["/readiness" {:get (fn [_] (ok (readiness-today ds)))}]
+   ["/season"    {:get  (fn [_] (ok (season-plan/overview ds (today))))
+                  :post (fn [_]
+                          (planner/api-key) ; fail fast with a clear message
+                          (planner/principles)
+                          (json-response 202 {:id (season-plan/draft! ds)}))}]
    ["/signals"   {:get (fn [_] (ok (adapt/signals (planner/adapt-inputs ds (today)))))}]
    ["/adjust"    {:post (guarded (fn [req]
                                    (planner/api-key)

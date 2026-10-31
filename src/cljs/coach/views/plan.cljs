@@ -4,7 +4,8 @@
   (:require [clojure.string :as str]
             [coach.ui :as ui]
             [coach.views.athlete :as athlete]
-            [coach.views.calendar :as cal]))
+            [coach.views.calendar :as cal]
+            [coach.views.season :as season]))
 
 (def weeks-shown 4)
 
@@ -20,7 +21,8 @@
     (into [(str "/api/plan?from=" (first ms) "&to=" (cal/add-days (peek ms) 6))
            "/api/plan/signals"
            (str "/api/plan/proposals?kind=adjust&monday=" (first ms))
-           athlete/url]
+           athlete/url
+           season/url]
           (map #(str "/api/plan/proposals?monday=" %) ms))))
 
 (defn- short-date [iso]
@@ -208,7 +210,7 @@
                (if running? "Adjusting…" "Re-plan rest of week")]]
              (when open? (proposal-panel adjust workouts ui-state (:monday adjust))))))
 
-(defn view [{:keys [data errors flash] ui-state :ui} [plan-url signals-url adjust-url athlete-url & proposal-urls]]
+(defn view [{:keys [data errors flash] ui-state :ui} [plan-url signals-url adjust-url athlete-url season-url & proposal-urls]]
   (let [p     (get data plan-url)
         props (map #(get data %) proposal-urls)]
     [:div {:style {:display "contents"}}
@@ -217,6 +219,7 @@
      (when flash [:div.error flash])
      (when-let [e (get errors plan-url)] [:div.error (str "Could not load: " e)])
      (when-let [a (get data athlete-url)] (athlete/card a (:athlete ui-state)))
+     (when-let [s (get data season-url)] (season/card s))
      (when p (coach-card (get data signals-url) (get data adjust-url) (:workouts p) ui-state))
      (when p
        (for [[wk prop] (map vector (:weeks p) props)]

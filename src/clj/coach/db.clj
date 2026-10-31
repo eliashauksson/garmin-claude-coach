@@ -111,6 +111,19 @@
       usage      TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS season_plans (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      race_date    TEXT NOT NULL,
+      start_monday TEXT NOT NULL,
+      status       TEXT NOT NULL,
+      model        TEXT,
+      context      TEXT,
+      response     TEXT,
+      warnings     TEXT,
+      error        TEXT,
+      usage        TEXT,
+      created_at   TEXT NOT NULL,
+      updated_at   TEXT NOT NULL)"
    "CREATE TABLE IF NOT EXISTS proposal_items (
       proposal_id  INTEGER NOT NULL,
       idx          INTEGER NOT NULL,

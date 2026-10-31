@@ -195,3 +195,36 @@
     (doseq [i items :when (= "pending" (:decision i))]
       (decide-item! ds proposal-id (:idx i) "accepted" nil))
     (jdbc/execute! ds ["UPDATE plan_proposals SET status = 'closed', updated_at = ? WHERE id = ?" (now) proposal-id])))
+
+;; ---------------------------------------------------------------------------
+;; Season plans (the long-term plan to race day; coach.season-plan drafts them)
+
+(defn create-season-plan! [ds race-date start-monday model]
+  (:id (exec! ds ["INSERT INTO season_plans (race_date, start_monday, status, model, created_at, updated_at)
+                   VALUES (?, ?, 'running', ?, ?, ?) RETURNING id"
+                  race-date start-monday model (now) (now)])))
+
+(defn fail-season-plan! [ds id error]
+  (jdbc/execute! ds ["UPDATE season_plans SET status = 'failed', error = ?, updated_at = ? WHERE id = ?"
+                     error (now) id]))
+
+(defn finish-season-plan! [ds id {:keys [context response warnings usage]}]
+  (jdbc/execute! ds ["UPDATE season_plans SET status = 'ready', context = ?, response = ?, warnings = ?,
+                        usage = ?, updated_at = ? WHERE id = ?"
+                     (json/write-str context) (json/write-str response) (json/write-str warnings)
+                     (json/write-str usage) (now) id]))
+
+(defn latest-season-plan
+  "The newest season plan, or the newest with `status`."
+  ([ds] (latest-season-plan ds nil))
+  ([ds status]
+   (some-> (first (db/query ds (cond-> [(str "SELECT id, race_date, start_monday, status, model, response, warnings,
+                                                    error, usage, created_at, updated_at FROM season_plans"
+                                              (when status " WHERE status = ?") " ORDER BY id DESC LIMIT 1")]
+                                 status (conj status))))
+           (parse :response :warnings :usage))))
+
+(defn season-target
+  "The current season plan's entry for the week of `monday`, if there is one."
+  [ds monday]
+  (some #(when (= monday (:monday %)) %) (get-in (latest-season-plan ds "ready") [:response :weeks])))
