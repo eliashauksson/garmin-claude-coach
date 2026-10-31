@@ -46,9 +46,10 @@
 ;; Header, auth
 
 (defn- auth-notice
+  "Shown only in the final week (urgent) or once expired."
   [{:keys [level days_left expires_on renew_command sync_error]}]
-  (when (#{"warn" "urgent" "expired"} level)
-    [:div.banner {:class (if (= level "warn") "warn" "critical")}
+  (when (#{"urgent" "expired"} level)
+    [:div.banner {:class "critical"}
      [:span.icon "!"]
      [:div
       [:div [:b (if (= level "expired")
@@ -58,10 +59,10 @@
       (when sync_error [:div.sub (str "Last sync failed: " sync_error)])
       [:div.sub "Renew in a terminal: " [:code renew_command]]]]))
 
-(defn- auth-pill [{:keys [level days_left]}]
+(defn- auth-pill
+  "Hidden until the final week of the login."
+  [{:keys [level days_left]}]
   (case level
-    "ok"      (ui/status-pill :ok (str "Garmin login · " days_left " days left"))
-    "warn"    (ui/status-pill :warn (str "Garmin login · " days_left " days left"))
     "urgent"  (ui/status-pill :critical (str "Garmin login · " days_left " days left"))
     "expired" (ui/status-pill :critical "Garmin login expired")
     "unknown" (ui/status-pill :warn "Garmin login not recorded")
