@@ -1,5 +1,5 @@
 (ns coach.season
-  "The season structure from training-principles.md §4: which week of the
+  "The season structure from athlete.md §A5: which week of the
   plan a date falls in and which phase that is. Targets inside each phase
   are left to the planner, which reads the principles."
   (:import (java.time DayOfWeek LocalDate)

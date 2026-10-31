@@ -77,7 +77,7 @@
            (json-response 400 {:error (ex-message e)})))))
 
 (defn readiness-today
-  "§8.1 check for today's planned workouts."
+  "§7.1 check for today's planned workouts."
   [ds]
   (let [t    (today)
         days (analysis/wellness ds (season/add-days t -1) t)

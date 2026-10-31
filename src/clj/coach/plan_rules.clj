@@ -1,12 +1,12 @@
 (ns coach.plan-rules
   "Checks a proposed or planned week against the hard rules and sequencing
-  rules in training-principles.md (§6.2, §10). Pure; returns warnings, it
+  rules in training-principles.md (§5.2, §9) and athlete.md. Pure; returns warnings, it
   never rejects - the athlete decides."
   (:require [clojure.string :as str]
             [coach.season :as season]))
 
 (def sessions
-  "Session library (§5): id -> {:kind :run/:strength, :key? bool, :quality? bool}."
+  "Session library (§4, §A6): id -> {:kind :run/:strength, :key? bool, :quality? bool}."
   {"EASY"        {:kind :run}
    "EASY_ST"     {:kind :run}
    "REC"         {:kind :run}
@@ -32,7 +32,7 @@
 (defn run? [w] (= :run (get-in sessions [(:session_id w) :kind])))
 
 (defn key-session?
-  "Key sessions; LONG counts as key from Build 1 (week 9) on (§6.2)."
+  "Key sessions; LONG counts as key from Build 1 (week 9) on (§5.2)."
   [w week-no]
   (let [s (sessions (:session_id w))]
     (or (:key? s) (and (:long? s) week-no (>= week-no 9)))))
@@ -54,7 +54,7 @@
         longest (apply max 0 (keep #(when (and (run? %) (get-in sessions [(:session_id %) :long?]))
                                       (:distance_km %))
                                    workouts))
-        ;; back up to a level already done, e.g. after time away: +20% (§10.1)
+        ;; back up to a level already done, e.g. after time away: +20% (§9.1)
         cap     (if (<= km (or (:peak_km prev) 0)) 1.2 1.1)
         key-days (set (keep #(when (key-session? % wk) (:date %)) workouts))]
     (vec
@@ -63,26 +63,26 @@
               [(when (some #(or (neg? (compare (:date %) monday)) (pos? (compare (:date %) sunday))) workouts)
                      "Some sessions fall outside this week.")
                (when (and (:run_km prev) (pos? (:run_km prev)) (> km (* cap (:run_km prev))))
-                     (format "Running volume %.0f km is more than +%d%% over last week's %.0f km (§10.1)."
+                     (format "Running volume %.0f km is more than +%d%% over last week's %.0f km (§9.1)."
                              (double km) (Math/round (* 100 (- cap 1))) (double (:run_km prev))))
-               (when (> km 80) (format "Running volume %.0f km exceeds the 80 km peak (§10.1)." (double km)))
+               (when (> km 80) (format "Running volume %.0f km exceeds the 80 km peak (§A5)." (double km)))
                (when (and (:longest_km prev) (pos? (:longest_km prev)) (pos? longest)
                           (> longest (+ 3 (:longest_km prev)))
                           (not (some #(str/starts-with? (:session_id %) "TRIPLE") workouts)))
-                     (format "Longest run %.0f km is more than +3 km over the previous longest %.0f km (§10.1)."
+                     (format "Longest run %.0f km is more than +3 km over the previous longest %.0f km (§9.1)."
                              (double longest) (double (:longest_km prev))))
                (when (> (count (filter #(get-in sessions [(:session_id %) :threshold?]) workouts)) 1)
-                     "More than one threshold session (§10.1).")
+                     "More than one threshold session (§9.1).")
                (when (> (count (filter #(get-in sessions [(:session_id %) :quality?]) workouts)) 2)
-                     "More than two quality elements (§10.1).")
+                     "More than two quality elements (§9.1).")
                (when (some #(and (key-days %) (key-days (season/add-days % 1))) key-days)
-                     "Key sessions on consecutive days (§10.4).")
+                     "Key sessions on consecutive days (§9.4).")
                (when (not-any? (fn [d] (not-any? run? (by-date d))) dates)
-                     "No day without running (§6.2: at least one full rest day).")
+                     "No day without running (§5.2: at least one full rest day).")
                (when (some #(and (= :strength (get-in sessions [(:session_id %) :kind]))
                                  (<= 0 (season/days-between (:date %) season/race-date) 10))
                            workouts)
-                     "No gym in the final 10 days before the race (§10.4).")]
+                     "No gym in the final 10 days before the race (§9.4).")]
               (for [long-w (filter #(get-in sessions [(:session_id %) :long?]) workouts)
                     gym    workouts
                     :let [s    (sessions (:session_id gym))
@@ -90,6 +90,6 @@
                           hrs  (- (* 24 gap) (if (= "PM" (:slot gym)) 10 0))]
                     :when (and (or (:heavy-legs? s) (:legs? s)) (<= 0 gap)
                                (< hrs (if (:heavy-legs? s) 48 36)))]
-                (format "%s on %s is less than %d h before %s on %s (§6.2)."
+                (format "%s on %s is less than %d h before %s on %s (§5.2)."
                         (:session_id gym) (:date gym) (if (:heavy-legs? s) 48 36)
                         (:session_id long-w) (:date long-w))))))))

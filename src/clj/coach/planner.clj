@@ -1,6 +1,6 @@
 (ns coach.planner
-  "Asks Claude to propose one week of training from training-principles.md
-  and the athlete's recent data. The proposal is stored for review; nothing
+  "Asks Claude to propose one week of training from training-principles.md,
+  athlete.md and the athlete's recent data. The proposal is stored for review; nothing
   enters the plan until the athlete accepts it."
   (:require [clojure.data.json :as json]
             [coach.adapt :as adapt]
@@ -40,7 +40,12 @@
   (let [per-m #(* (or %1 0) (prices %2) 1e-6)]
     (+ (per-m input_tokens :input) (per-m output_tokens :output)
        (per-m cache_read :cache_read) (per-m cache_write :cache_write))))
-(def principles-file "training-principles.md")
+(def principles-files ["training-principles.md" "athlete.md"])
+
+(defn principles
+  "The general principles and the athlete file, as one text for the cached system block."
+  []
+  (str/join "\n\n---\n\n" (map slurp principles-files)))
 (def key-file (str (System/getProperty "user.home") "/.config/coach/anthropic-key"))
 
 (defn api-key []
@@ -60,7 +65,7 @@
 (defn- secs [a] (or (:moving_s a) (:duration_s a) 0))
 
 (defn week-summary
-  "§9 weekly metrics from recorded activities. Easy = runs with avg HR ≤ 148 (§3)."
+  "§8 weekly metrics from recorded activities. Easy = runs with avg HR ≤ 148 (§A3)."
   [monday acts]
   (let [runs (filter run-act? acts)
         rt   (reduce + 0 (map secs runs))
@@ -105,14 +110,15 @@
 ;; Prompt and response schema
 
 (def system-intro
-  "You are the running coach for the athlete described in the training principles below.
+  "You are the running coach for the athlete described below. Two documents follow: the general
+training principles (§0-§9) and the athlete's profile, goal and season plan (§A1-§A9).
 You plan one week at a time; the athlete reviews every session before it enters the plan.
 The plan lives only in the athlete's dashboard - nothing is sent to the Garmin watch.
 
-Follow the principles. The hard rules (§10) are never broken; when rules conflict, use the
-priority order in §0. Remember that Garmin-recorded load underestimates the athlete's real load (§1).
-Availability isn't known in advance: plan the full week for the current phase (§6.1, §7.1).
-The recent activities show what the athlete actually did; a gap means time away (§7.2).
+Follow the principles. The hard rules (§9) are never broken; when rules conflict, use the
+priority order in §0. Remember that Garmin-recorded load underestimates the athlete's real load (§A2).
+Availability isn't known in advance: plan the full week for the current phase (§5.1, §6.1).
+The recent activities show what the athlete actually did; a gap means time away (§6.2, §A2).
 
 Return only sessions (rest days have no entry). Dates must fall inside the target week. Two
 sessions on one day use the AM and PM slots. Give every session an estimated duration; use
@@ -124,7 +130,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 - `summary`: 2-3 sentences on the week's intent.
 - `warnings`: only what the athlete must know (readiness concerns, rule tensions, missing information), one line each.
 
-# Training principles
+# Coaching documents
 
 ")
 
@@ -249,7 +255,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
     (future
       (try
         (let [ctx (context ds monday)
-              {:keys [response usage]} (call-claude (slurp principles-file) (user-message ctx) response-schema)
+              {:keys [response usage]} (call-claude (principles) (user-message ctx) response-schema)
               {:keys [response warnings]} (validate monday response ctx)]
           (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
         (catch Throwable e
@@ -311,7 +317,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
   (str "Adjust the planned sessions from " today " to " scope-end " in response to the signals"
        " (and the athlete's note, if there is one). Change, remove or add sessions only as far as the"
        " signals and the principles justify; leave everything else alone and don't list it."
-       " Don't touch sessions before today or ones already done. Never make up missed sessions (§7.4)."
+       " Don't touch sessions before today or ones already done. Never make up missed sessions (§6.4)."
        " For op change and remove, use the workout_id from plan_in_scope and give the session's new"
        " fields (for remove, its current ones). For op add, use workout_id 0."
        " If nothing should change, return no changes and explain why in the summary.\n\n"
@@ -366,7 +372,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                               :recent_feedback (vec (for [a (analysis/activities ds {:from (season/add-days today -14) :to today})
                                                           :when (or (:rpe a) (:garmin_rpe a) (pos? (or (:pain a) 0)) (:note a))]
                                                       (select-keys a [:date :name :rpe :garmin_rpe :pain :pain_location :note]))))
-              {:keys [response usage]} (call-claude (slurp principles-file) (adjust-message ctx today scope-end) adjust-schema)
+              {:keys [response usage]} (call-claude (principles) (adjust-message ctx today scope-end) adjust-schema)
               {:keys [response warnings]} (validate-adjustment today scope-end response in-scope)]
           (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
         (catch Throwable e

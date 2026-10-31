@@ -1,5 +1,5 @@
 (ns coach.readiness
-  "Morning readiness check (training-principles.md §8.1). Pure: takes the
+  "Morning readiness check (training-principles.md §7.1, thresholds in athlete.md §A3). Pure: takes the
   recent wellness rows and today's planned workouts, returns the signals and
   a suggested change per workout. Nothing is applied without approval."
   (:require [coach.plan-rules :as rules]))

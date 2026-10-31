@@ -85,7 +85,7 @@
 (defn family [sport]
   (some #(when (re-find (:re %) (str sport)) %) families))
 
-;; Session library names (training-principles.md §5)
+;; Session library names (training-principles.md §4, athlete.md §A6)
 (def session-names
   {"EASY" "Easy run" "EASY_ST" "Easy + strides" "REC" "Recovery run" "HILL_ST" "Hill strides"
    "HILL_2" "Hill repeats" "STEADY" "Steady block" "THR" "Threshold" "MP_BLOCK" "Marathon pace"

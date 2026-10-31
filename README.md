@@ -4,6 +4,8 @@ A personal training dashboard that runs locally on my own Garmin data. It covers
 
 See `garmin-coach-plan.md` for the design.
 
+The planner reads two documents: `training-principles.md`, the general method for building a running plan (§0–§9), and `athlete.md`, the athlete, goal race and season plan (§A1–§A9). To plan for another goal or athlete, edit `athlete.md`.
+
 ## Requirements
 - Clojure CLI and Java 21
 - Node 18 or newer, for the ClojureScript build
