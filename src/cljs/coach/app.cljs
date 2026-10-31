@@ -157,6 +157,27 @@
                       (swap! state update-in path assoc :busy? false :messages messages :input text
                              :error (str "Error: " (.-message e))))))))))
 
+(def max-upload-chars "Same limit as the server (coach.athlete/max-chars)." 200000)
+
+(defn read-athlete-file!
+  "Reads the file picked for upload into [:ui :athlete :upload] for a preview;
+  nothing is saved until the athlete confirms."
+  [^js ev]
+  (let [input (.-target ev)
+        f     (aget (.-files input) 0)
+        put!  #(swap! state assoc-in [:ui :athlete :upload] %)]
+    (set! (.-value input) "") ; picking the same file again fires a new change
+    (when f
+      (-> (.text f)
+          (.then (fn [text]
+                   (put! (cond
+                           (str/includes? text "\u0000")
+                           {:error (str (.-name f) " doesn't look like a text file. Upload Markdown (.md) or plain text (.txt).")}
+                           (str/blank? text)  {:error (str (.-name f) " is empty.")}
+                           (> (count text) max-upload-chars) {:error (str (.-name f) " is too long (over 200,000 characters).")}
+                           :else {:name (.-name f) :content text}))))
+          (.catch #(put! {:error (str "Could not read the file: " (.-message %))}))))))
+
 (defn summarise-athlete! []
   (swap! state assoc-in [:ui :athlete :summarising?] true)
   (-> (post-json (str athlete/url "/summary") {})
@@ -205,6 +226,7 @@
       :athlete-chat-send (send-athlete-chat!)
       :athlete-chat-key  (when (= "Enter" (.-key (first args))) (send-athlete-chat!))
       :athlete-summary   (summarise-athlete!)
+      :athlete-upload    (read-athlete-file! (first args))
       (js/console.warn "unknown action" (pr-str action)))))
 
 (defn dispatch [event-data actions]
@@ -213,6 +235,7 @@
       (handle (cond
                 (= :event/target-value (last action)) (conj (vec (butlast action)) (.. ev -target -value))
                 (= :athlete-chat-key (first action))  [:athlete-chat-key ev]
+                (= :athlete-upload (first action))    [:athlete-upload ev]
                 :else action)))))
 
 ;; ---------------------------------------------------------------------------

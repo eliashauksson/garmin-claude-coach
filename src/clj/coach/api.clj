@@ -148,8 +148,8 @@
    ["" {:get    (fn [_] (ok (merge (athlete/status)
                                        (when (planner/api-key?) (athlete-chat/ensure-summary!)))))
         :put    (guarded (fn [req]
-                           (let [{:keys [content summary]} (body req)]
-                             (athlete/save! content summary)
+                           (let [{:keys [content summary source]} (body req)]
+                             (athlete/save! content summary source)
                              (ok (athlete/status)))))
         :delete (guarded (fn [_] (athlete/delete!) (ok (athlete/status))))}]
    ["/chat"    {:post (guarded (fn [req]

@@ -51,3 +51,17 @@
     (testing "no match or several matches is an error"
       (is (thrown? clojure.lang.ExceptionInfo (chat/apply-edits doc [{:old_text "LTHR 999" :new_text "x"}])))
       (is (thrown? clojure.lang.ExceptionInfo (chat/apply-edits doc [{:old_text "## A" :new_text "x"}]))))))
+
+(deftest upload-test
+  (with-temp
+    (testing "an upload replaces the document, backs up the old one and asks for a new summary"
+      (athlete/save! "# Athlete\nLTHR 170" {:race "Old" :settings {:hrv_low 40}})
+      (athlete/save! "# My notes\nGoal: autumn marathon\n" nil "upload")
+      (is (= "# My notes\nGoal: autumn marathon" (athlete/content)))
+      (is (nil? (athlete/summary)))
+      (is (= "upload" (:action (first (athlete/backups))))))
+    (testing "binary, empty and very long files are refused"
+      (is (thrown? Exception (athlete/save! "PK\u0003\u0004\u0000\u0000" nil "upload")))
+      (is (thrown? Exception (athlete/save! "   " nil "upload")))
+      (is (thrown? Exception (athlete/save! (apply str (repeat (inc athlete/max-chars) "x")) nil "upload")))
+      (is (= "# My notes\nGoal: autumn marathon" (athlete/content))))))
