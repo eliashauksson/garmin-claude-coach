@@ -39,6 +39,9 @@
   --shadow-nav: 0 1px 2px rgba(22,24,29,.06);
   --track: rgba(255,255,255,.8);
   --tooltip-shadow: 0 6px 24px rgba(22,24,29,.12);
+  /* route map: the OSM tiles muted to sit quietly under the track */
+  --map-filter: saturate(.3) contrast(.85) brightness(1.06);
+  --map-casing: #ffffff;
   /* sport families: chip background / text, and chart series */
   --chip-run-bg: #e3f0fc;   --chip-run-fg: #1b5fae;   --fam-run: var(--blue);
   --chip-bike-bg: #fff2dc;  --chip-bike-fg: #9a5a00;  --fam-bike: var(--amber);
@@ -81,6 +84,9 @@
   --shadow-nav: none;
   --track: rgba(255,255,255,.1);
   --tooltip-shadow: 0 6px 24px rgba(0,0,0,.45);
+  /* inverted and turned back so water stays blue and land goes dark slate */
+  --map-filter: invert(1) hue-rotate(180deg) saturate(.35) brightness(.85) contrast(.9);
+  --map-casing: #0f1115;
   --chip-run-bg: rgba(27,95,174,.18);   --chip-run-fg: #4c8dff;
   --chip-bike-bg: rgba(154,90,0,.18);   --chip-bike-fg: #ffb547;
   --chip-swim-bg: rgba(14,106,117,.18); --chip-swim-fg: #4fd1db; --fam-swim: #2bb8c4;
@@ -170,7 +176,28 @@ select { font: inherit; font-size: 13px; font-weight: 600; color: var(--text); b
 .chart.h170 { height: 170px; } .chart.h240 { height: 240px; } .chart.h280 { height: 280px; }
 .chart.tall { height: 300px; } .chart.short { height: 170px; }
 .ax { display: flex; justify-content: space-between; font-size: 11px; font-weight: 500; color: var(--text-3); }
-.map { width: 100%; height: 340px; border-radius: 14px; }
+.map { width: 100%; height: 340px; border-radius: 14px; overflow: hidden; isolation: isolate; }
+
+/* Route map (coach.charts/route-map). Same OSM tiles, restyled: nothing new leaves the laptop. */
+.map.leaflet-container { background: var(--surface-2); font: 500 12px/1.4 var(--font); }
+.map .map-tiles { filter: var(--map-filter); }
+.map .route-casing { stroke: var(--map-casing); stroke-opacity: .9; }
+.map .route-line { stroke: var(--fam-other); stroke-opacity: 1; }
+.map .route-line.run { stroke: var(--fam-run); }   .map .route-line.bike { stroke: var(--fam-bike); }
+.map .route-line.swim { stroke: var(--fam-swim); } .map .route-line.hike { stroke: var(--fam-hike); }
+.map .route-line.ski { stroke: var(--fam-ski); }
+.map .route-dot { stroke: var(--map-casing); stroke-opacity: 1; fill-opacity: 1; }
+.map .route-dot.start { fill: var(--green); } .map .route-dot.end { fill: var(--red); }
+.map .leaflet-bar { border: 0; border-radius: 12px; overflow: hidden; box-shadow: var(--tooltip-shadow); }
+.map .leaflet-bar a { width: 36px; height: 36px; line-height: 36px; font: 600 18px/36px var(--font);
+  color: var(--text); background: var(--surface); border-bottom: 1px solid var(--line); }
+.map .leaflet-bar a:last-child { border-bottom: 0; }
+.map .leaflet-bar a:hover { background: var(--row-hover); color: var(--text); }
+.map .leaflet-bar a.leaflet-disabled { color: var(--text-3); background: var(--surface); opacity: .6; }
+.map .leaflet-control-zoom { margin: 12px 12px 0 0; }
+.map .leaflet-control-attribution { margin: 0 10px 10px 0; padding: 3px 9px; border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent); color: var(--text-2); font: 500 10px/1.4 var(--font); }
+.map .leaflet-control-attribution a { color: var(--text-2); }
 .track { height: 10px; background: var(--track); border-radius: 5px; overflow: hidden; }
 .track > div { height: 10px; border-radius: 5px; }
 .stages { display: flex; gap: 4px; height: 14px; }

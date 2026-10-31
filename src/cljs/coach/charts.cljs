@@ -131,8 +131,11 @@
             (echarts/connect group))))))}])
 
 (defn route-map
-  "Leaflet map with OpenStreetMap tiles and the track as a polyline."
-  [{:keys [latlngs key]}]
+  "Leaflet map of the track. The OpenStreetMap tiles are muted to the theme
+  by a CSS filter, and the track, its casing and the start/end dots are
+  coloured by CSS classes (.map in app.css), so the theme toggle restyles
+  the map without remounting it. `family` is a ui/families id."
+  [{:keys [latlngs key family]}]
   [:div.map
    {:replicant/key key
     :replicant/on-render
@@ -140,19 +143,24 @@
       (let [^js node (:replicant/node hook)]
       (case life-cycle
         :replicant.life-cycle/mount
-        (let [^js m (L/map node #js {:scrollWheelZoom false})
+        (let [^js m (L/map node #js {:scrollWheelZoom false :zoomControl false :attributionControl false})
               pts  (clj->js latlngs)
-              line (L/polyline pts #js {:color (css-var "--blue") :weight 3})]
+              path (fn [class weight]
+                     #js {:className class :weight weight :lineCap "round" :lineJoin "round" :interactive false})
+              line (L/polyline pts (path (str "route-line " (name (or family :other))) 4))]
           (.addTo (L/tileLayer "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-                               #js {:maxZoom 19
-                                    :attribution "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors"})
+                               #js {:maxZoom 19 :className "map-tiles"})
                   m)
+          (.addTo (.. L -control (zoom #js {:position "topright"})) m)
+          (.addTo (doto (.. L -control (attribution #js {:prefix false}))
+                    (.addAttribution "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a>"))
+                  m)
+          (.addTo (L/polyline pts (path "route-casing" 8)) m)
           (.addTo line m)
-          (doseq [[p fill] [[(first latlngs) "--green"] [(last latlngs) "--red"]]]
-            (.addTo (L/circleMarker (clj->js p) #js {:radius 5 :weight 2 :color (css-var "--surface")
-                                                     :fillColor (css-var fill) :fillOpacity 1})
+          (doseq [[p class] [[(first latlngs) "route-dot start"] [(last latlngs) "route-dot end"]]]
+            (.addTo (L/circleMarker (clj->js p) #js {:className class :radius 6 :weight 3 :interactive false})
                     m))
-          (.fitBounds m (.getBounds line) #js {:padding #js [16 16]})
+          (.fitBounds m (.getBounds line) #js {:padding #js [24 24]})
           (set! (.-__map node) m)
           (observe-resize! node #(.invalidateSize m)))
         :replicant.life-cycle/unmount

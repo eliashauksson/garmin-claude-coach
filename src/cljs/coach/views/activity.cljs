@@ -116,7 +116,10 @@
          [:div.sub (str (ui/sport-label (:sport a)) " · " (ui/date-long (:date a))
                               (some->> (ui/time-of (:start_time_local a)) (str " · ")))]]
         [:div {:replicant/key "tiles"} (tile-row a run?)]
-        (when (seq pts) [:div {:replicant/key "map"} (ui/card {} (c/route-map {:key (str "map-" (:id a)) :latlngs pts}))])
+        (when (seq pts)
+          [:div {:replicant/key "map"}
+           (ui/card {} (c/route-map {:key (str "map-" (:id a)) :latlngs pts
+                                     :family (:id (ui/family (:sport a)))}))])
         (when (seq t)
           [:div.row {:replicant/key "streams"}
            (when (some some? (:hr s))
