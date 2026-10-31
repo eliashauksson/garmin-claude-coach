@@ -4,6 +4,8 @@
             [coach.analysis :as analysis]
             [coach.auth :as auth]
             [coach.adapt :as adapt]
+            [coach.athlete :as athlete]
+            [coach.athlete-chat :as athlete-chat]
             [coach.db :as db]
             [coach.plan :as plan]
             [coach.planner :as planner]
@@ -96,6 +98,7 @@
    ["/signals"   {:get (fn [_] (ok (adapt/signals (planner/adapt-inputs ds (today)))))}]
    ["/adjust"    {:post (guarded (fn [req]
                                    (planner/api-key)
+                                   (planner/principles) ; fails without athlete info
                                    (let [note (not-empty (:note (body req)))
                                          sigs (filter :trigger? (adapt/signals (planner/adapt-inputs ds (today))))]
                                      (json-response 202 {:id (planner/propose-adjustment! ds sigs note)}))))}]
@@ -106,6 +109,7 @@
                                            (get query-params "kind" "week"))))
          :post (guarded (fn [req]
                           (planner/api-key) ; fail fast with a clear message
+                          (planner/principles)
                           (json-response 202 {:id (planner/propose! ds (:monday (body req)))})))}]
     ["/:id" {:get (fn [{:keys [path-params]}]
                     (if-let [p (plan/proposal ds (parse-long (:id path-params)))]
@@ -127,6 +131,30 @@
                                (plan/delete-workout! ds (parse-long (:id path-params)))
                                (ok {:ok true}))}]])
 
+(defn athlete-routes []
+  ["/athlete"
+   ["" {:get    (fn [_] (ok (merge (athlete/status)
+                                       (when (planner/api-key?) (athlete-chat/ensure-summary!)))))
+        :put    (guarded (fn [req]
+                           (let [{:keys [content summary]} (body req)]
+                             (athlete/save! content summary)
+                             (ok (athlete/status)))))
+        :delete (guarded (fn [_] (athlete/delete!) (ok (athlete/status))))}]
+   ["/chat"    {:post (guarded (fn [req]
+                                 (planner/api-key)
+                                 (try (ok (athlete-chat/chat (:messages (body req))))
+                                      (catch clojure.lang.ExceptionInfo e (throw e))
+                                      (catch Exception e
+                                        (json-response 502 {:error (str "Claude request failed: " (ex-message e))})))))}]
+   ["/summary" {:post (guarded (fn [_]
+                                 (planner/api-key)
+                                 (swap! athlete-chat/summary-job assoc :failed nil) ; manual retry
+                                 (athlete-chat/summarise!)
+                                 (ok (athlete/status))))}]
+   ["/restore" {:post (guarded (fn [req]
+                                 (athlete/restore! (:id (body req)))
+                                 (ok (athlete/status))))}]])
+
 (defn routes [ds]
   [["/api"
     ["/today"       {:get (fn [_] (ok (assoc (analysis/today-summary ds)
@@ -136,6 +164,7 @@
                                              :readiness_check (readiness-today ds)
                                              :open_proposals (plan/open-proposals ds))))}]
     (plan-routes ds)
+    (athlete-routes)
     ["/auth"        {:get (fn [_] (ok (auth-status ds)))}]
     ["/activities"  {:get (fn [{:keys [query-params]}]
                             (let [{:strs [sport from to limit]} query-params]

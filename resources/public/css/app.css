@@ -299,3 +299,29 @@ button.pill { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-w
   .plan-row { grid-template-columns: 1fr; gap: 6px; }
   .plan-actions { justify-content: flex-start; }
 }
+
+/* Athlete card: summary, chat with Claude, proposed changes, backups */
+.athlete-overview { display: flex; flex-direction: column; gap: 16px; }
+.ao-top { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: flex-start; }
+.ao-race { flex: 1 1 220px; display: flex; flex-direction: column; gap: 6px; }
+.ao-eyebrow { font-size: 13px; font-weight: 700; color: var(--text-2); }
+.ao-race .big { font-variant-numeric: normal; }
+.ao-stats { flex: 1 1 280px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ao-stat { padding: 10px 14px; border-radius: 14px; background: var(--surface-2); display: flex; flex-direction: column; gap: 2px; }
+.ao-stat .stat-value { font-variant-numeric: normal; white-space: normal; }
+.ao-foot { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.ao-focus { display: inline-flex; gap: 8px; align-items: baseline; padding: 8px 14px; border-radius: 999px; background: var(--tint-blue); font-weight: 600; }
+.ao-focus b { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); }
+.athlete-chat { display: flex; flex-direction: column; gap: 10px; }
+.athlete-chat .msg { max-width: 85%; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; line-height: 1.45; }
+.athlete-chat .msg.user { align-self: flex-end; background: var(--ink); color: var(--on-ink); }
+.athlete-chat .msg.assistant { align-self: flex-start; background: var(--surface-2); }
+.athlete-chat .typing { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); }
+.athlete-chat .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .athlete-chat .spinner { animation-duration: 2.4s; } }
+.athlete-proposal { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--row-line); }
+.athlete-proposal .change { display: flex; flex-direction: column; gap: 4px; font-size: 13px; white-space: pre-wrap; }
+.athlete-proposal del { color: var(--text-2); }
+.athlete-proposal ins { text-decoration: none; font-weight: 600; }
+.athlete-backups summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.athlete-backups[open] { display: flex; flex-direction: column; gap: 6px; }

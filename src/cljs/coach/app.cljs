@@ -1,6 +1,7 @@
 (ns coach.app
   (:require [clojure.string :as str]
             [coach.ui :as ui]
+            [coach.views.athlete :as athlete]
             [coach.views.activities :as activities]
             [coach.views.activity :as activity]
             [coach.views.calendar :as calendar]
@@ -68,8 +69,8 @@
                  (let [data (js->clj body :keywordize-keys true)]
                    (swap! state #(-> % (assoc-in [:data url] data)
                                      (update :loading disj url) (update :errors dissoc url)))
-                   ;; a proposal is being generated: check again shortly
-                   (when (= "running" (:status data))
+                   ;; a proposal or the athlete summary is being generated: check again shortly
+                   (when (or (= "running" (:status data)) (:summarising data))
                      (js/setTimeout #(fetch! url {:force true}) 4000)))))
         (.catch (fn [e]
                   (swap! state #(-> % (update :loading disj url)
@@ -122,6 +123,42 @@
                (poll-sync!)))))
 
 ;; ---------------------------------------------------------------------------
+;; Athlete chat: the conversation lives in [:ui :athlete :chat] until applied or closed
+
+(defn- post-json [url body]
+  (-> (js/fetch url #js {:method "POST" :headers #js {"Content-Type" "application/json"}
+                         :body (js/JSON.stringify (clj->js body))})
+      (.then (fn [res] (.then (.json res) #(if (.-ok res) (js->clj % :keywordize-keys true)
+                                                (throw (js/Error. (.-error %)))))))))
+
+(defn send-athlete-chat! []
+  (let [path  [:ui :athlete :chat]
+        {:keys [input messages busy?]} (get-in @state path)
+        text  (str/trim (or input ""))]
+    (when-not (or busy? (str/blank? text))
+      (let [msgs (conj (vec messages) {:role "user" :text text})]
+        (swap! state update-in path assoc :messages msgs :input "" :busy? true :error nil)
+        (-> (post-json (str athlete/url "/chat") {:messages msgs})
+            (.then (fn [{:keys [reply proposal usage]}]
+                     (swap! state update-in path
+                            #(cond-> (-> % (assoc :busy? false)
+                                         (update :messages conj {:role "assistant" :text reply})
+                                         (update :cost (fnil + 0) (or (:cost_chf usage) 0)))
+                               proposal (assoc :proposal proposal)))))
+            (.catch (fn [e]
+                      ;; give the message back so it can be sent again
+                      (swap! state update-in path assoc :busy? false :messages messages :input text
+                             :error (str "Error: " (.-message e))))))))))
+
+(defn summarise-athlete! []
+  (swap! state assoc-in [:ui :athlete :summarising?] true)
+  (-> (post-json (str athlete/url "/summary") {})
+      (.then #(swap! state (fn [s] (-> s (assoc-in [:data athlete/url] %)
+                                       (assoc-in [:ui :athlete :summarising?] false)))))
+      (.catch #(swap! state (fn [s] (-> s (assoc :flash (str "Error: " (.-message %)))
+                                        (assoc-in [:ui :athlete :summarising?] false)))))))
+
+;; ---------------------------------------------------------------------------
 ;; Actions (Replicant dispatches data; this interprets it)
 
 (defn handle [action]
@@ -137,14 +174,18 @@
                       (swap! state dissoc :flash)
                       (api! method url body))
       :sync         (start-sync!)
+      :athlete-chat-send (send-athlete-chat!)
+      :athlete-chat-key  (when (= "Enter" (.-key (first args))) (send-athlete-chat!))
+      :athlete-summary   (summarise-athlete!)
       (js/console.warn "unknown action" (pr-str action)))))
 
 (defn dispatch [event-data actions]
   (let [ev (:replicant/dom-event event-data)]
     (doseq [action actions]
-      (handle (if (= :event/target-value (last action))
-                (conj (vec (butlast action)) (.. ev -target -value))
-                action)))))
+      (handle (cond
+                (= :event/target-value (last action)) (conj (vec (butlast action)) (.. ev -target -value))
+                (= :athlete-chat-key (first action))  [:athlete-chat-key ev]
+                :else action)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Shell

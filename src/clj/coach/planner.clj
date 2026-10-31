@@ -7,6 +7,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [coach.analysis :as analysis]
+            [coach.athlete :as athlete]
             [coach.db :as db]
             [coach.plan :as plan]
             [coach.plan-rules :as rules]
@@ -40,12 +41,14 @@
   (let [per-m #(* (or %1 0) (prices %2) 1e-6)]
     (+ (per-m input_tokens :input) (per-m output_tokens :output)
        (per-m cache_read :cache_read) (per-m cache_write :cache_write))))
-(def principles-files ["training-principles.md" "athlete.md"])
+(def general-file "training-principles.md")
 
 (defn principles
   "The general principles and the athlete file, as one text for the cached system block."
   []
-  (str/join "\n\n---\n\n" (map slurp principles-files)))
+  (str (slurp general-file) "\n\n---\n\n"
+       (or (athlete/content)
+           (throw (ex-info "No athlete information yet. Add it on the Plan page first." {:type :no-athlete})))))
 (def key-file (str (System/getProperty "user.home") "/.config/coach/anthropic-key"))
 
 (defn api-key []
@@ -188,22 +191,25 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 (defn- client []
   (-> (AnthropicOkHttpClient/builder) (.apiKey ^String (api-key)) (.timeout (Duration/ofMinutes 10)) (.build)))
 
-(defn call-claude
-  "One request: principles in a cached system block, data in the user turn,
-  JSON out via structured outputs. Returns {:response map :usage map}."
-  [principles user-text schema]
-  (let [params (-> (MessageCreateParams/builder)
+(defn request
+  "One Claude request: `system` in a cached block, `messages` as
+  [[:user text] [:assistant text] ...], JSON out via structured outputs.
+  Returns {:response map :usage map}."
+  [{:keys [system messages schema effort] :or {effort BetaOutputConfig$Effort/HIGH}}]
+  (let [b      (-> (MessageCreateParams/builder)
                    (.model ^String model)
                    (.maxTokens 32000)
                    (.systemOfBetaTextBlockParams
                     [(-> (BetaTextBlockParam/builder)
-                         (.text ^String (str system-intro principles))
+                         (.text ^String system)
                          (.cacheControl (.build (BetaCacheControlEphemeral/builder)))
-                         (.build))])
-                   (.addUserMessage ^String user-text)
+                         (.build))]))
+        _      (doseq [[role text] messages]
+                 (if (= :assistant role) (.addAssistantMessage b ^String text) (.addUserMessage b ^String text)))
+        params (-> b
                    (.thinking (.build (BetaThinkingConfigAdaptive/builder)))
                    (.outputConfig (-> (BetaOutputConfig/builder)
-                                      (.effort BetaOutputConfig$Effort/HIGH)
+                                      (.effort ^BetaOutputConfig$Effort effort)
                                       (.format (-> (BetaJsonOutputFormat/builder)
                                                    (.schema (-> (BetaJsonOutputFormat$Schema/builder)
                                                                 (.additionalProperties
@@ -227,6 +233,11 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                         :cache_write (.orElse (.cacheCreationInputTokens usage) 0)
                         :stop_reason stop}]
                  (assoc u :cost_usd (cost-usd u) :cost_chf (* usd->chf (cost-usd u))))}))
+
+(defn call-claude
+  "The planner's request: principles in the system block, data in one user turn."
+  [principles user-text schema]
+  (request {:system (str system-intro principles) :messages [[:user user-text]] :schema schema}))
 
 ;; ---------------------------------------------------------------------------
 
@@ -379,7 +390,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
           (plan/fail-proposal! ds id (or (ex-message e) (str (class e)))))))
     id))
 
-(defn- api-key? [] (try (api-key) true (catch Exception _ false)))
+(defn api-key? [] (try (api-key) true (catch Exception _ false)))
 
 (defn- seen? [ds k] (seq (db/query ds ["SELECT 1 FROM adapt_signals WHERE key = ?" k])))
 
@@ -394,7 +405,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
         open    (plan/open-proposals ds)
         adjust-today? (seq (db/query ds ["SELECT 1 FROM plan_proposals WHERE kind = 'adjust' AND substr(created_at, 1, 10) = ?" today]))
         proposed (atom [])]
-    (when (and (seq new) (api-key?) (not adjust-today?) (not-any? #(= "adjust" (:kind %)) open))
+    (when (and (seq new) (api-key?) (athlete/content) (not adjust-today?) (not-any? #(= "adjust" (:kind %)) open))
       (let [id (propose-adjustment! ds new nil)]
         (doseq [s new]
           (next.jdbc/execute! ds ["INSERT OR IGNORE INTO adapt_signals (key, proposal_id, first_seen) VALUES (?, ?, ?)"
@@ -403,7 +414,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
     (let [next-monday (season/add-days (season/monday today) 7)
           wk          (first (plan/weeks ds next-monday next-monday))]
       (when (and (= DayOfWeek/SUNDAY (.getDayOfWeek (LocalDate/parse today)))
-                 (:week wk) (api-key?)
+                 (:week wk) (api-key?) (athlete/content)
                  (empty? (plan/workouts ds next-monday (season/add-days next-monday 6)))
                  (nil? (plan/latest-proposal ds next-monday)))
         (swap! proposed conj (propose! ds next-monday))))
