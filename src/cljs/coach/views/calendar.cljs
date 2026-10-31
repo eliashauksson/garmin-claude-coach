@@ -59,7 +59,7 @@
 
 (defn- planned-item [{:keys [id session_id title slot duration_min distance_km status]}]
   ;; missed sessions keep the dashed card but get a red outline
-  (let [gym? (re-find #"^(GYM|CALF)" session_id)]
+  (let [gym? (re-find #"^GYM" session_id)]
     [:a.cal-item.planned {:replicant/key (str "p" id) :href "#/plan" :class status
                           :title (str slot " · " title)
                           :style {:border-left-color (if gym? "var(--fam-other)" "var(--fam-run)")}}

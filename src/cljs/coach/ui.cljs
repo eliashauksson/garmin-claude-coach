@@ -86,13 +86,15 @@
   (some #(when (re-find (:re %) (str sport)) %) families))
 
 ;; Session library names (training-principles.md: Running › Sessions; athlete.md: Overrides & specifics)
+;; (same IDs as coach.plan-rules/sessions)
 (def session-names
-  {"EASY" "Easy run" "EASY_ST" "Easy + strides" "REC" "Recovery run" "HILL_ST" "Hill strides"
-   "HILL_2" "Hill repeats" "STEADY" "Steady block" "THR" "Threshold" "MP_BLOCK" "Marathon pace"
-   "LONG" "Long run" "LONG_MP" "Long run, MP finish" "DOUBLE" "Double day" "B2B" "Back-to-back"
-   "RACE_SIM_PART" "Race simulation (part)" "RACE_SIM" "Full race simulation" "TT5" "5 km time trial"
-   "GYM_LOWER" "Gym: lower body" "GYM_UPPER" "Gym: upper body" "GYM_BACK_SL" "Gym: back + single-leg"
-   "CALF_MIN" "Minimal strength" "REST" "Rest"})
+  {"REC" "Recovery run" "EASY" "Easy run" "EASY_ST" "Easy + strides" "HILL_SPRINT" "Easy + hill sprints"
+   "DOWNHILL" "Downhill conditioning" "LONG" "Long run" "B2B" "Back-to-back" "LONG_RP" "Long run, race pace"
+   "RACE_PACE" "Race pace" "TEMPO" "Tempo" "THR" "Threshold" "VO2" "VO2max" "HILL_REP" "Hill repeats"
+   "RACE_SIM" "Race simulation" "AET_TEST" "AeT drift test" "LT_TEST" "LT test"
+   "HIKE" "Hike" "RIDE" "Ride"
+   "GYM_LOWER" "Gym: lower body" "GYM_UPPER" "Gym: upper body" "GYM_MAINT" "Gym: maintenance"
+   "REST" "Rest"})
 
 ;; ---------------------------------------------------------------------------
 ;; Icons (inline SVG, 24x24 stroke icons from the mockup)

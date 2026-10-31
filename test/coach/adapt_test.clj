@@ -5,7 +5,7 @@
             [coach.plan :as plan]
             [coach.planner :as planner]))
 
-(def today "2027-01-14") ; Thursday of week 11 (Build 1)
+(def today "2027-01-14") ; a Thursday
 
 (defn- run [id date mins & {:as m}]
   (merge {:id id :date date :sport "running" :moving_s (* 60 mins) :distance_m (* 160 mins)} m))
@@ -13,7 +13,7 @@
 (defn- ids [sigs] (set (map :id sigs)))
 (defn- by [sigs id] (first (filter #(= id (:id %)) sigs)))
 
-(def calm {:today today :acts [] :wellness [] :workouts [] :tsb 0 :phase "Build 1"
+(def calm {:today today :acts [] :wellness [] :workouts [] :tsb 0 :phase "Base"
            :settings {:steady_hr 150 :rhr_high 57}})
 
 (deftest signals-test
@@ -43,9 +43,9 @@
     (is (not (contains? (ids (adapt/signals (assoc calm :wellness [{:date "2027-01-13" :rhr 52} {:date "2027-01-14" :rhr 58}])))
                         :rhr-high))))
   (testing "missed long run and missed volume"
-    (let [ws [{:id 1 :date "2027-01-11" :session_id "EASY" :status "missed" :distance_km 8}
-              {:id 2 :date "2027-01-13" :session_id "THR" :status "missed" :distance_km 10}
-              {:id 3 :date "2027-01-16" :session_id "LONG" :status "planned" :distance_km 24}]
+    (let [ws [{:id 1 :date "2027-01-11" :session_id "EASY" :status "missed" :duration_min 45}
+              {:id 2 :date "2027-01-13" :session_id "THR" :status "missed" :duration_min 60}
+              {:id 3 :date "2027-01-16" :session_id "LONG" :status "planned" :duration_min 120}]
           s  (adapt/signals (assoc calm :workouts ws))]
       (is (= ["missed:2"] (map :key (filter #(= :missed-key (:id %)) s))))
       (is (contains? (ids s) :missed-volume))))

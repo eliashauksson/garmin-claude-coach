@@ -11,7 +11,8 @@
 
 (def session-names ui/session-names)
 
-(defn strength? [session-id] (boolean (re-find #"^(GYM|CALF)" (str session-id))))
+(defn strength? [session-id] (boolean (re-find #"^GYM" (str session-id))))
+(defn- cross? [session-id] (contains? #{"HIKE" "RIDE"} session-id))
 
 (defn mondays []
   (let [m (cal/monday (ui/iso-today))] (mapv #(cal/add-days m (* 7 %)) (range weeks-shown))))
@@ -29,7 +30,7 @@
   (let [d (ui/parse-date iso)] (str (ui/weekdays (.getDay d)) " " (.getDate d) " " (ui/months (.getMonth d)))))
 
 (defn session-chip [session-id]
-  [:span.chip {:class (if (strength? session-id) "other" "run")} [:span.dot] (session-names session-id session-id)])
+  [:span.chip {:class (if (or (strength? session-id) (cross? session-id)) "other" "run")} [:span.dot] (session-names session-id session-id)])
 
 (defn- amount [{:keys [duration_min distance_km]}]
   (str/join " · " (remove nil? [(when (and duration_min (pos? duration_min)) (str duration_min " min"))
@@ -134,7 +135,7 @@
          [:div.sub (str "Triggered by: " (str/join " · " (keep :message (:signals p))))])
        [:div (:summary response)]
        (when-let [t (:targets response)]
-         (ui/pills (ui/pill (str "Target " (:run_km t) " km running"))
+         (ui/pills (ui/pill (if (:run_min t) (str "Target " (:run_min t) " min running") (str "Target " (:run_km t) " km running")))
                    (ui/pill (str "Longest: " (:longest_run t)))
                    (ui/pill (str "Quality: " (:quality t)))))
        (let [all (concat (:warnings response) warnings)]

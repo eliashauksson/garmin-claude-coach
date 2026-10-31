@@ -14,7 +14,9 @@
             [malli.error :as me])
   (:import (java.time LocalDate)))
 
-(def phases ["Reset" "Base" "Build 1" "Build 2" "Specific" "Taper" "Race week"])
+(def phases
+  "Periodization in training-principles.md, plus the race week itself."
+  ["Transition" "Base" "Specific" "Taper" "Race week"])
 
 (defn mondays
   "Every Monday from `start` (a Monday) to the week of `race-date`, inclusive."

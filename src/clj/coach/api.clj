@@ -85,7 +85,7 @@
   (let [t    (today)
         days (analysis/wellness ds (season/add-days t -1) t)
         ws   (filter #(= "planned" (:status %)) (plan/workouts ds t t))]
-    (assoc (readiness/check days ws (:phase (plan/week-info ds t)) (athlete/settings))
+    (assoc (readiness/check days ws (athlete/settings))
            :date t :workouts ws)))
 
 (defn plan-routes [ds]

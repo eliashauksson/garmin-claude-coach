@@ -42,7 +42,9 @@
 
 (defn- activity-kind [sport]
   (cond (re-find #"running" (str sport)) :run
-        (re-find #"strength" (str sport)) :strength))
+        (re-find #"strength" (str sport)) :strength
+        (re-find #"hiking|walking" (str sport)) :hike
+        (re-find #"cycling|biking" (str sport)) :ride))
 
 (defn with-done
   "Status as seen by the athlete: a planned workout is done when an activity

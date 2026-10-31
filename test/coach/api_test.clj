@@ -47,7 +47,7 @@
         pid (coach.plan/create-proposal! ds "2026-11-02" "test")]
     (coach.plan/finish-proposal!
      ds pid {:context {} :warnings ["w"] :usage {}
-             :response {:summary "s" :targets {:run_km 30 :longest_run "60 min" :quality "strides"}
+             :response {:summary "s" :targets {:run_min 180 :longest_run "60 min" :quality "strides"}
                         :warnings []
                         :workouts [{:date "2026-11-02" :slot "AM" :session_id "EASY" :title "Easy" :duration_min 45
                                     :distance_km 7 :intensity "E" :description "d" :reason "r"}
@@ -66,9 +66,9 @@
       (is (nil? (:week (first (:weeks plan))))) ; no season plan
       (let [sid (coach.plan/create-season-plan! ds "2026-12-20" "2026-11-02" "test")]
         (coach.plan/finish-season-plan! ds sid {:response {:summary "s" :warnings []
-                                                            :weeks [{:monday "2026-11-02" :phase "Reset" :tss 100
+                                                            :weeks [{:monday "2026-11-02" :phase "Base" :tss 100
                                                                      :cutback false :focus "f"}]}})
-        (is (= [1 "Reset"] ((juxt :week :phase) (first (:weeks (second (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08")))))))))
+        (is (= [1 "Base"] ((juxt :week :phase) (first (:weeks (second (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08")))))))))
     (testing "a run on that day marks the planned run done"
       (db/upsert-activities! ds [{:id 9 :date "2026-11-02" :start_time_local "2026-11-02T06:00:00"
                                   :sport "running" :name "Run" :raw {}}])

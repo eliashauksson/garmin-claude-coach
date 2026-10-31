@@ -5,17 +5,16 @@
   (:require [coach.plan-rules :as rules]))
 
 (defn- easier [session-id key?]
-  (cond key?                     "EASY"
-        (#{"EASY" "EASY_ST"} session-id) "REC"
-        :else                    session-id))
+  (cond key?                                         "EASY"
+        (#{"EASY" "EASY_ST" "HILL_SPRINT" "DOWNHILL"} session-id) "REC"
+        :else                                        session-id))
 
 (defn check
   "`days` are wellness rows, oldest first, ending today (:hrv_avg :hrv_status
   :rhr :sleep_s :sleep_score :readiness :body_battery_high). `workouts` are
-  today's planned workouts. `phase` (season plan) decides whether LONG counts
-  as key. `settings` are the athlete's thresholds (:hrv_low :rhr_high, athlete.md: Baselines);
+  today's planned workouts. `settings` are the athlete's thresholds (:hrv_low :rhr_high, athlete.md: Baselines);
   a check without its threshold is skipped."
-  [days workouts phase {:keys [hrv_low rhr_high]}]
+  [days workouts {:keys [hrv_low rhr_high]}]
   (let [t        (last days)
         hrv      (:hrv_avg t)
         rhr      (:rhr t)
@@ -30,7 +29,7 @@
         signals  (cond-> []
                    hrv-bad   (conj (str "HRV " (Math/round (double hrv)) " ms is below " hrv_low))
                    rhr-bad   (conj (str "Resting HR " rhr " is " rhr_high " or higher"))
-                   unbal     (conj "HRV unbalanced or low for 2 days: reduce the week by 20%, no key session")
+                   unbal     (conj "HRV unbalanced or low for 2 days: rest of the week as recovery, plan next week lower")
                    sleep-bad (conj "Short or poor sleep: move morning runs to the evening, or rest")
                    ready-bad (conj (str "Training readiness " (:readiness t) " is below 30"))
                    bb-bad    (conj (str "Body battery " (:body_battery_high t) " this morning is below 30")))
@@ -40,7 +39,7 @@
      :level   (cond rest? :rest (seq signals) :adjust :else :ok)
      :changes (vec
                (for [w workouts
-                     :let [key? (rules/key-session? w phase)
+                     :let [key? (rules/key-session? w)
                            run? (rules/run? w)
                            to   (cond
                                   (and rest? run?)                   "REST"

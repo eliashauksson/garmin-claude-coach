@@ -122,9 +122,10 @@
 
 (defn settings
   "Personal thresholds for the rule checks, from the summary. Keys:
-  :easy_hr_max (top of the Easy zone), :steady_hr (avg HR above which an easy
-  run counts as steady), :hrv_low, :rhr_high (readiness, principles: Monitoring),
-  :peak_week_km. Unknown values are left out, and their checks skipped."
+  :easy_hr_max (AeT, top of Z2), :steady_hr (avg HR above which an easy run
+  is too hard), :lt_hr, :hrv_low, :rhr_high (readiness, principles: Monitoring),
+  :quality_max, :run_increase_pct, :long_run_max_min (coach.plan-rules).
+  Unknown values are left out, and their checks skipped."
   []
   (into {} (filter #(and (number? (val %)) (pos? (val %)))) (:settings (summary))))
 

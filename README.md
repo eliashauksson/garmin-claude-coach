@@ -4,7 +4,7 @@ A personal training dashboard that runs locally on my own Garmin data. It covers
 
 The planner reads two documents: `training-principles.md`, the general method for building a running plan, and the athlete document: the athlete, goal race and season outline. Both are referred to by section heading. You add and edit the athlete document on the Plan page, with Claude. On the same page Claude drafts the season plan to race day; the coach then keeps the next two weeks planned.
 
-**Personal data stays local.** Only the general training principles are in git. The athlete document (`data/athlete.md`), its backups, the season plans, planned sessions and all Garmin data live in `data/`, which git ignores. Personal values the rule checks need (easy-zone top, readiness thresholds, peak volume, race date) are read from the athlete document, never hard-coded.
+**Personal data stays local.** Only the general training principles are in git. The athlete document (`data/athlete.md`), its backups, the season plans, planned sessions and all Garmin data live in `data/`, which git ignores. Personal values the rule checks need (AeT and LT heart rates, readiness thresholds, hard-session and progression limits, long-run cap, race date) are read from the athlete document, never hard-coded.
 
 ## Requirements
 - Clojure CLI and Java 21

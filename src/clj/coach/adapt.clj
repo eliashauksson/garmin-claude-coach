@@ -6,7 +6,6 @@
             [coach.plan-rules :as rules]
             [coach.season :as season]))
 
-(def easy-sessions #{"EASY" "EASY_ST" "REC" "LONG"})
 (def drift-max "Long-run HR drift (decoupling, %) above which the next long run shouldn't grow (Monitoring)." 8)
 
 (defn- run? [a] (re-find #"running" (str (:sport a))))
@@ -27,19 +26,19 @@
         week-acts (filter #(<= (compare monday (:date %)) 0) acts)
         planned-by-act (into {} (keep #(when (:activity_id %) [(:activity_id %) %])) workouts)
         session-of #(:session_id (planned-by-act (:id %)))
-        easy-run?  #(and (run? %) (or (easy-sessions (session-of %))
+        easy-run?  #(and (run? %) (or (some-> (session-of %) rules/sessions :easy?)
                                       (and (nil? (session-of %)) (< (secs %) (* 75 60)))))
-        long-run?  #(and (run? %) (or (= "LONG" (session-of %)) (>= (secs %) (* 75 60))))
+        long-run?  #(and (run? %) (or (some-> (session-of %) rules/sessions :long?) (>= (secs %) (* 75 60))))
         recent     (filter #(>= (compare (:date %) (season/add-days today -7)) 0) acts)
         steady-hr  (:steady_hr settings)
         too-hard   (filter #(and steady-hr (easy-run? %) (:avg_hr %) (> (:avg_hr %) steady-hr)) week-acts)
         last-long  (last (filter long-run? recent))
-        upcoming-long (filter #(and (= "planned" (:status %)) (get-in rules/sessions [(:session_id %) :long?])
+        upcoming-long (filter #(and (= "planned" (:status %)) (rules/long? %)
                                     (>= (compare (:date %) today) 0))
                               workouts)
         high-rpe   (filter #(and (or (easy-run? %) (long-run? %))
                                  (some-> (analysis/effective-rpe %) (>= 8))) recent)
-        low-rpe-keys (take-last 2 (filter #(and (run? %) (some-> (session-of %) rules/sessions :key?)
+        low-rpe-keys (take-last 2 (filter #(and (run? %) (some-> (session-of %) rules/sessions :hard?)
                                                 (some-> (analysis/effective-rpe %) (<= 3)))
                                           (filter #(>= (compare (:date %) (season/add-days today -14)) 0) acts)))
         pain       (filter #(and (pos? (or (:pain %) 0)) (>= (compare (:date %) (season/add-days today -3)) 0)) acts)
@@ -50,9 +49,9 @@
         rhr-bad    (and rhr-high (= 2 (count last2)) (every? #(some-> (:rhr %) (>= rhr-high)) last2))
         this-week  (filter #(<= (compare monday (:date %)) 0 (compare (season/add-days monday 6) (:date %))) workouts)
         missed     (filter #(= "missed" (:status %)) this-week)
-        km         (fn [ws] (reduce + 0 (keep #(when (rules/run? %) (:distance_km %)) ws)))
-        week-km    (km this-week)
-        missed-km  (km missed)
+        run-min    (fn [ws] (reduce + 0 (keep #(when (rules/run? %) (:duration_min %)) ws)))
+        week-min   (run-min this-week)
+        missed-min (run-min missed)
         ef-of      (fn [from to] (mean (keep #(when (and (easy-run? %) (<= (compare from (:date %)) 0)
                                                     (neg? (compare (:date %) to)))
                                                  (:ef %))
@@ -83,22 +82,21 @@
       (for [a pain]
         {:key (str "pain:" (:id a)) :id :pain :severity :high :trigger? true :principle "Monitoring"
          :message (str "Pain reported after " (:name a) " (" (:date a) ")"
-                       (some->> (:pain_location a) (str ": ")) " - stop progression; see a doctor if > 3/10 or limping")})
+                       (some->> (:pain_location a) (str ": ")) " - stop what provokes it, use a pain-free low-impact substitute; see a professional if it lasts over a week")})
       (when hrv-bad
         [{:key (str "hrv:" (:date (last last2))) :id :hrv-unbalanced :severity :warn :trigger? true :principle "Monitoring"
-          :message "HRV unbalanced or low for 2 days: reduce the week by 20%, no key session"}])
+          :message "HRV unbalanced or low for 2 days: rest of the week as recovery, plan next week lower"}])
       (when rhr-bad
         [{:key (str "rhr:" (:date (last last2))) :id :rhr-high :severity :warn :trigger? true :principle "Monitoring"
-          :message (str "Resting HR " rhr-high " or higher for 2 days: no key sessions until it settles")}])
-      (for [w missed :when (or (rules/key-session? w phase)
-                               (get-in rules/sessions [(:session_id w) :long?]))]
+          :message (str "Resting HR " rhr-high " or higher for 2 days: swap hard sessions for easy ones or rest")}])
+      (for [w missed :when (rules/key-session? w)]
         {:key (str "missed:" (:id w)) :id :missed-key :severity :warn :trigger? true :principle "Monitoring"
          :message (str "Missed " (:title w) " (" (:session_id w) ") on " (:date w)
-                       ": move it within the rules or drop it - never make it up")})
-      (when (and (pos? week-km) (> missed-km (* 0.3 week-km)))
+                       ": move it only if the hard/easy spacing holds, or drop it - never make it up")})
+      (when (and (pos? week-min) (> missed-min (* 0.3 week-min)))
         [{:key (str "missed-vol:" monday) :id :missed-volume :severity :warn :trigger? true :principle "Monitoring"
-          :message (format "%.0f of %.0f planned km missed this week (> 30%%): don't raise volume next week"
-                           (double missed-km) (double week-km))}])
+          :message (format "%d of %d planned running minutes missed this week (> 30%%): don't raise volume next week"
+                           (long missed-min) (long week-min))}])
       (when (and ef-now ef-before (> ef-now (* 1.05 ef-before)))
         [{:key (str "ef-up:" monday) :id :fitter :severity :info :trigger? false :principle "Zones"
           :message (format "Efficiency on easy runs is up %.0f%% vs the 3 weeks before: paces may need recalibrating"

@@ -9,8 +9,7 @@
 (def url "/api/plan/season")
 
 (def phase-colors
-  {"Reset" "--fam-other" "Base" "--blue" "Build 1" "--purple-2" "Build 2" "--purple"
-   "Specific" "--amber" "Taper" "--green" "Race week" "--red"})
+  {"Transition" "--fam-other" "Base" "--blue" "Specific" "--amber" "Taper" "--green" "Race week" "--red"})
 
 (defn- day-month [iso]
   (let [d (ui/parse-date iso)] (str (.getDate d) " " (ui/months (.getMonth d)))))

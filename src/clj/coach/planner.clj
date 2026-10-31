@@ -78,6 +78,8 @@
     {:monday       monday
      :run_km       (r1 (/ (reduce + 0 (keep :distance_m runs)) 1000.0))
      :run_hours    (r1 (/ rt 3600.0))
+     :run_min      (Math/round (/ rt 60.0))
+     :longest_min  (Math/round (/ (apply max 0 (map secs runs)) 60.0))
      :runs         (count runs)
      :easy_pct     (when (and easy-max (pos? rt)) (Math/round (* 100.0 (/ easy rt))))
      :longest_km   (r1 (/ (apply max 0 (keep :distance_m runs)) 1000.0))
@@ -125,6 +127,7 @@
 ;; Prompt and response schema
 
 (def system-intro
+  (str
   "You are the running coach for the athlete described below. Two documents follow: the general
 training principles and athlete.md (the athlete's profile, goal and season plan). Refer to
 sections by their heading. Rules in athlete.md override the principles' (d) defaults.
@@ -144,6 +147,13 @@ and readiness win - say so in `warnings`.
 `proposed_previous_week`, when present, lists sessions proposed for the week before that the
 athlete hasn't reviewed yet; treat them as planned.
 
+Plan load in time per zone: give every session its duration; `targets.run_min` is the week's
+total running time in minutes. Hikes and rides count as endurance time, not running volume
+(Cross-training).
+Use these session IDs (strides and hill sprints go with an easy run; sessions not listed - e.g. a
+ski tour - are never planned):
+" rules/session-guide "
+
 Return only sessions (rest days have no entry). Dates must fall inside the target week. Two
 sessions on one day use the AM and PM slots. Give every session an estimated duration; use
 distance_km 0 when distance doesn't apply. Keep the text short - the athlete reads it on a phone:
@@ -156,7 +166,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 
 # Coaching documents
 
-")
+"))
 
 (def response-schema
   {"type" "object"
@@ -165,8 +175,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
    "properties"
    {"summary"  {"type" "string"}
     "targets"  {"type" "object" "additionalProperties" false
-                "required" ["run_km" "longest_run" "quality"]
-                "properties" {"run_km" {"type" "number"}
+                "required" ["run_min" "longest_run" "quality"]
+                "properties" {"run_min" {"type" "integer"}
                               "longest_run" {"type" "string"}
                               "quality" {"type" "string"}}}
     "warnings" {"type" "array" "items" {"type" "string"}}
@@ -187,7 +197,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 (def Response
   [:map
    [:summary :string]
-   [:targets [:map [:run_km number?] [:longest_run :string] [:quality :string]]]
+   [:targets [:map [:run_min int?] [:longest_run :string] [:quality :string]]]
    [:warnings [:vector :string]]
    [:workouts [:vector [:map
                         [:date [:re #"^\d{4}-\d{2}-\d{2}$"]]
@@ -266,7 +276,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
   "The season and athlete values coach.plan-rules/check-week needs, for a week
   whose season position is `info` (coach.plan/week-info)."
   [info]
-  {:phase (:phase info) :race-date (:race_date info) :peak-km (:peak_week_km (athlete/settings))})
+  {:phase (:phase info) :race-date (:race_date info) :settings (athlete/settings)})
 
 (defn validate
   "Schema check plus the hard-rule checks. Returns the response with
@@ -277,12 +287,13 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
   (let [sunday (season/add-days monday 6)
         inside #(<= (compare monday (:date %)) 0 (compare sunday (:date %)))
         ws     (vec (filter inside (:workouts response)))
-        prev   (assoc (last (:last_6_weeks ctx))
-                      ;; "previous longest run" = longest of the recent weeks, not just last week
-                      :longest_km (apply max 0 (keep :longest_km (:last_6_weeks ctx)))
-                      :peak_km (apply max 0 (keep :run_km (:last_6_weeks ctx))))]
+        weeks  (:last_6_weeks ctx)
+        prev   {:run_min (:run_min (last weeks))
+                ;; "previous longest run" = longest of the recent weeks, not just last week
+                :longest_min (apply max 0 (keep :longest_min weeks))
+                :peak_min (apply max 0 (keep :run_min weeks))}]
     {:response (assoc response :workouts ws)
-     :warnings (rules/check-week monday ws (assoc (rule-opts (:target_week ctx)) :prev prev))}))
+     :warnings (rules/check-week monday ws (assoc (rule-opts (:target_week ctx)) :prev prev :full-week? true))}))
 
 (defn- run-proposal! [ds id monday]
   (try

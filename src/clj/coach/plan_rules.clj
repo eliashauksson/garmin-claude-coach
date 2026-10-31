@@ -1,101 +1,135 @@
 (ns coach.plan-rules
-  "Checks a proposed or planned week against the hard rules and sequencing
-  rules in training-principles.md (Load & recovery, Intensity distribution, Strength / ME, Plan procedure step 7) and athlete.md. Pure; returns warnings, it
-  never rejects - the athlete decides."
+  "Checks a proposed or planned week against training-principles.md (Load &
+  recovery, Intensity distribution, ADS, Strength / ME, Running: Progression,
+  Plan procedure step 7) and the athlete's overrides in athlete.md. Pure;
+  returns warnings, it never rejects - the athlete decides."
   (:require [clojure.string :as str]
             [coach.season :as season]))
 
 (def sessions
-  "Session library (principles: Running › Sessions; athlete.md: Overrides & specifics): id -> {:kind :run/:strength, :key? bool, :quality? bool}."
-  {"EASY"        {:kind :run}
-   "EASY_ST"     {:kind :run}
-   "REC"         {:kind :run}
-   "HILL_ST"     {:kind :run}
-   "HILL_2"      {:kind :run :key? true :quality? true}
-   "STEADY"      {:kind :run :key? true :quality? true}
-   "THR"         {:kind :run :key? true :quality? true :threshold? true}
-   "MP_BLOCK"    {:kind :run :key? true :quality? true}
-   "LONG"        {:kind :run :long? true}
-   "LONG_MP"     {:kind :run :long? true :key? true :quality? true}
-   "DOUBLE"      {:kind :run :long? true :key? true}
-   "B2B"         {:kind :run :long? true :key? true}
-   "RACE_SIM_PART" {:kind :run :long? true :key? true :race-sim? true}
-   "RACE_SIM"      {:kind :run :long? true :key? true :race-sim? true}
-   "TT5"         {:kind :run :key? true :quality? true}
-   "GYM_LOWER"   {:kind :strength :heavy-legs? true}
-   "GYM_UPPER"   {:kind :strength}
-   "GYM_BACK_SL" {:kind :strength :legs? true}
-   "CALF_MIN"    {:kind :strength}})
+  "Session library (principles: Running › Sessions, Strength / ME, Testing,
+  Cross-training). id -> {:label :kind (:run :strength :hike :ride) and flags}:
+  :hard?   a quality session; counts toward the weekly hard-session limit
+  :z3?     Z3-Z5 work, not allowed with ADS
+  :long?   a long session (next day easy, spacing and long-run checks)
+  :key?    needs fresh legs although not hard (tests)
+  :b2b?    the second day of a back-to-back; may follow a long day
+  :race-sim? exempt from the long-run growth checks
+  :test?   a test; exempt from the ADS check
+  :heavy-legs? max strength / ME for the legs: not within 48 h before a key
+           session, not in the final 10 days
+  :easy?   easy effort (Rec-Z2)"
+  {"REC"         {:label "Recovery run" :kind :run :easy? true}
+   "EASY"        {:label "Easy run" :kind :run :easy? true}
+   "EASY_ST"     {:label "Easy run + strides" :kind :run :easy? true}
+   "HILL_SPRINT" {:label "Easy run + hill sprints" :kind :run :easy? true}
+   "DOWNHILL"    {:label "Downhill conditioning" :kind :run :easy? true}
+   "LONG"        {:label "Long run" :kind :run :long? true :easy? true}
+   "B2B"         {:label "Back-to-back run (day after a long run)" :kind :run :long? true :b2b? true :easy? true}
+   "LONG_RP"     {:label "Long run with race-pace blocks" :kind :run :long? true :hard? true}
+   "RACE_PACE"   {:label "Race-pace intervals" :kind :run :hard? true}
+   "TEMPO"       {:label "Tempo (Z3)" :kind :run :hard? true :z3? true}
+   "THR"         {:label "Threshold (Z4)" :kind :run :hard? true :z3? true}
+   "VO2"         {:label "VO2max intervals (Z5)" :kind :run :hard? true :z3? true}
+   "HILL_REP"    {:label "Hill repeats / uphill ME" :kind :run :hard? true :z3? true}
+   "RACE_SIM"    {:label "Race simulation (several runs with breaks)" :kind :run :long? true :race-sim? true}
+   "AET_TEST"    {:label "AeT drift test" :kind :run :key? true :test? true}
+   "LT_TEST"     {:label "LT test (30 min time trial)" :kind :run :hard? true :z3? true :test? true}
+   "HIKE"        {:label "Hike / time on feet" :kind :hike :easy? true}
+   "RIDE"        {:label "Easy ride" :kind :ride :easy? true}
+   "GYM_LOWER"   {:label "Gym: lower body (max strength / ME)" :kind :strength :heavy-legs? true}
+   "GYM_UPPER"   {:label "Gym: upper body + core" :kind :strength}
+   "GYM_MAINT"   {:label "Gym: short maintenance" :kind :strength}})
 
 (def session-ids (vec (keys sessions)))
 
-(defn run? [w] (= :run (get-in sessions [(:session_id w) :kind])))
+(defn- flag [w k] (get-in sessions [(:session_id w) k]))
 
-(def long-key-phases
-  "Phases in which LONG counts as a key session (from Build 1 on)."
-  #{"Build 1" "Build 2" "Specific" "Taper" "Race week"})
+(defn run? [w] (= :run (flag w :kind)))
+(defn hard? [w] (boolean (flag w :hard?)))
+(defn long? [w] (boolean (flag w :long?)))
+(defn easy? [w] (boolean (flag w :easy?)))
 
 (defn key-session?
-  "Key sessions; LONG counts as key from Build 1 on. `phase` is the
-  week's phase in the season plan (nil without one)."
-  [w phase]
-  (let [s (sessions (:session_id w))]
-    (or (:key? s) (and (:long? s) (contains? long-key-phases phase)))))
+  "Hard, long or test sessions: they need fresh legs and are followed by an
+  easy day (Load & recovery)."
+  [w]
+  (boolean (or (hard? w) (long? w) (flag w :key?))))
 
-(defn- run-km [ws] (reduce + 0 (keep #(when (run? %) (:distance_km %)) ws)))
+(def session-guide
+  "The session IDs, for Claude's prompts."
+  (str/join "\n" (for [[id {:keys [label]}] (sort-by key sessions)] (str "- " id ": " label))))
+
+(defn- minutes [ws] (reduce + 0 (keep :duration_min ws)))
 
 (defn check-week
   "Warnings for `workouts` planned in the week starting `monday`.
-  `prev` is {:run_km :longest_km :peak_km} for the week before, from what was
-  actually done (or planned, if it hasn't happened yet); :peak_km is the
-  highest weekly volume of the recent weeks. `phase` and `race-date` come
-  from the season plan, `peak-km` from the athlete's settings; checks
-  without their value are skipped."
-  [monday workouts {:keys [prev phase race-date peak-km]}]
-  (let [sunday  (season/add-days monday 6)
-        km      (run-km workouts)
-        by-date (group-by :date workouts)
-        dates   (map #(season/add-days monday %) (range 7))
-        longest (apply max 0 (keep #(when (and (run? %) (get-in sessions [(:session_id %) :long?]))
-                                      (:distance_km %))
-                                   workouts))
-        ;; back up to a level already done, e.g. after time away: +20% (Load & recovery)
-        cap     (if (<= km (or (:peak_km prev) 0)) 1.2 1.1)
-        key-days (set (keep #(when (key-session? % phase) (:date %)) workouts))]
+  `prev` is {:run_min :longest_min :peak_min} from what was actually done:
+  last week's running time, the longest run and the highest weekly running
+  time of the recent weeks. `phase` and `race-date` come from the season
+  plan, `settings` from athlete.md (coach.athlete/settings). `full-week?`
+  says the workouts are the whole week (not just the days from today).
+  Checks without their values are skipped."
+  [monday workouts {:keys [prev phase race-date settings full-week?]}]
+  (let [{:keys [lt_hr easy_hr_max quality_max run_increase_pct long_run_max_min]} settings
+        sunday    (season/add-days monday 6)
+        run-min   (minutes (filter run? workouts))
+        endurance (minutes (filter #(#{:run :hike :ride} (flag % :kind)) workouts))
+        longs     (filter #(and (run? %) (long? %) (not (flag % :race-sim?))) workouts)
+        longest   (apply max 0 (keep :duration_min longs))
+        race-sim? (some #(flag % :race-sim?) workouts)
+        by-date   (group-by :date workouts)
+        dates     (map #(season/add-days monday %) (range 7))
+        ;; back up to a level already held: +20%; above it the athlete's limit, else 10% (d)
+        cap       (if (<= run-min (or (:peak_min prev) 0)) 20 (or run_increase_pct 10))
+        hard      (filter hard? workouts)
+        q-max     (or quality_max 2)
+        gap       (when (and lt_hr easy_hr_max) (/ (- lt_hr easy_hr_max) (double lt_hr)))
+        key-day?  (fn [d] (some key-session? (by-date d)))]
     (vec
      (remove nil?
              (concat
               [(when (some #(or (neg? (compare (:date %) monday)) (pos? (compare (:date %) sunday))) workouts)
-                     "Some sessions fall outside this week.")
-               (when (and (:run_km prev) (pos? (:run_km prev)) (> km (* cap (:run_km prev))))
-                     (format "Running volume %.0f km is more than +%d%% over last week's %.0f km (Load & recovery)."
-                             (double km) (Math/round (* 100 (- cap 1))) (double (:run_km prev))))
-               (when (and peak-km (> km peak-km))
-                 (format "Running volume %.0f km exceeds the %.0f km peak (athlete.md: Proposed macro)." (double km) (double peak-km)))
-               (when (and (:longest_km prev) (pos? (:longest_km prev)) (pos? longest)
-                          (> longest (+ 3 (:longest_km prev)))
-                          (not (some #(get-in sessions [(:session_id %) :race-sim?]) workouts)))
-                     (format "Longest run %.0f km is more than +3 km over the previous longest %.0f km (Running: Progression)."
-                             (double longest) (double (:longest_km prev))))
-               (when (> (count (filter #(get-in sessions [(:session_id %) :threshold?]) workouts)) 1)
-                     "More than one threshold session (athlete.md: Overrides & specifics).")
-               (when (> (count (filter #(get-in sessions [(:session_id %) :quality?]) workouts)) 2)
-                     "More than two quality elements (Intensity distribution).")
-               (when (some #(and (key-days %) (key-days (season/add-days % 1))) key-days)
-                     "Key sessions on consecutive days (Intensity distribution).")
-               (when (not-any? (fn [d] (not-any? run? (by-date d))) dates)
-                     "No day without running (Load & recovery: at least one full rest day).")
-               (when (some #(and race-date (= :strength (get-in sessions [(:session_id %) :kind]))
-                                 (<= 0 (season/days-between (:date %) race-date) 10))
-                           workouts)
-                     "No gym in the final 10 days before the race (Strength / ME).")]
-              (for [long-w (filter #(get-in sessions [(:session_id %) :long?]) workouts)
-                    gym    workouts
-                    :let [s    (sessions (:session_id gym))
-                          gap  (season/days-between (:date gym) (:date long-w))
-                          hrs  (- (* 24 gap) (if (= "PM" (:slot gym)) 10 0))]
-                    :when (and (or (:heavy-legs? s) (:legs? s)) (<= 0 gap)
-                               (< hrs (if (:heavy-legs? s) 48 36)))]
-                (format "%s on %s is less than %d h before %s on %s (Strength / ME)."
-                        (:session_id gym) (:date gym) (if (:heavy-legs? s) 48 36)
-                        (:session_id long-w) (:date long-w))))))))
+                 "Some sessions fall outside this week.")
+               (when (and (:run_min prev) (pos? (:run_min prev))
+                          (> run-min (* (+ 1 (/ cap 100.0)) (:run_min prev))))
+                 (format "Running time %d min is more than +%d%% over last week's %d min (Running: Progression)."
+                         run-min cap (long (:run_min prev))))
+               (when (and long_run_max_min (> longest long_run_max_min))
+                 (format "Long run %d min is over the %d min cap (Running: Progression)." longest (long long_run_max_min)))
+               (when (and (:longest_min prev) (pos? (:longest_min prev)) (pos? longest) (not race-sim?)
+                          (> longest (+ 30 (:longest_min prev))))
+                 (format "Long run %d min is more than +30 min over the previous longest %d min (Running: Progression)."
+                         longest (long (:longest_min prev))))
+               (when (and (pos? longest) (> longest (* 0.35 endurance)))
+                 (format "Long run %d min is more than 35%% of the week's %d min endurance time (Load & recovery)."
+                         longest endurance))
+               (when (> (count hard) q-max)
+                 (format "%d hard sessions; the limit is %d a week (Intensity distribution)." (count hard) (long q-max)))
+               (when (and gap (> gap 0.10) (some #(and (flag % :z3?) (not (flag % :test?))) workouts))
+                 (format "AeT-LT gap is %.0f%% (ADS): no Z3-Z5 sessions, only strides, hill sprints and strength (ADS)."
+                         (* 100 gap)))
+               (when (and (= "Transition" phase) (some #(and (hard? %) (not (flag % :test?))) workouts))
+                 "No hard sessions in Transition: easy, unstructured training (Periodization).")
+               (when (some #(and (key-day? %)
+                                 (some (fn [w] (and (key-session? w) (not (flag w :b2b?))))
+                                       (by-date (season/add-days % 1))))
+                           dates)
+                 "Hard or long sessions on consecutive days: the day after is easy (Load & recovery).")
+               (when (and full-week?
+                          (not-any? (fn [d] (every? #(= "REC" (:session_id %)) (by-date d))) dates))
+                 "No rest day (Load & recovery: at least one a week; a recovery run alone counts).")
+               (when (and full-week? (not= "Race week" phase)
+                          (not-any? #(= :strength (flag % :kind)) workouts))
+                 "No strength session: never below maintenance, 1 a week (Core).")
+               (when (and race-date (some #(and (flag % :heavy-legs?)
+                                                (<= 0 (season/days-between (:date %) race-date) 10))
+                                          workouts))
+                 "No lower-body max strength or ME in the final 10 days before the race (Strength / ME).")]
+              (for [k   (filter key-session? workouts)
+                    gym (filter #(flag % :heavy-legs?) workouts)
+                    :let [gap-d (season/days-between (:date gym) (:date k))
+                          hrs   (- (* 24 gap-d) (if (= "PM" (:slot gym)) 10 0))]
+                    :when (<= 0 hrs 47)]
+                (format "%s on %s is less than 48 h before %s on %s (Strength / ME)."
+                        (:session_id gym) (:date gym) (:session_id k) (:date k))))))))

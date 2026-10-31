@@ -43,12 +43,18 @@ in short fragments, never sentences:
 - `stats`: the 3-4 numbers that shape training most, each a short `label` and a `value` with
   its unit (e.g. LTHR / 170 bpm, Easy zone / 133–145 bpm). No more than 4.
 - `settings`: numbers the dashboard's rule checks use, taken from the file; 0 when the file
-  doesn't give one. `easy_hr_max`: top of the Easy zone (bpm). `steady_hr`: average HR above
-  which an easy run counts as steady (bpm; the easy-zone top if no separate limit is given).
-  `hrv_low` and `rhr_high`: the readiness thresholds \"HRV too low\" (ms) and \"RHR too high\"
-  (bpm). `peak_week_km`: the peak weekly running volume (km).
+  doesn't give one. `easy_hr_max`: the aerobic threshold, top of Z2 (bpm, tested or provisional).
+  `steady_hr`: average HR above which an easy run counts as too hard (bpm; the AeT if no separate
+  limit is given). `lt_hr`: lactate threshold HR (bpm). `hrv_low`: bottom of the athlete's normal
+  overnight HRV range (ms). `rhr_high`: baseline resting HR + 5 (bpm). `quality_max`: hard
+  sessions allowed per week if the file overrides the default of 2. `run_increase_pct`: the
+  largest weekly running-time increase the file allows (%; the highest value if it gives a
+  range or several). `long_run_max_min`: the cap on a single long run (minutes).
 - `focus`: the single most important point for the plan, at most about 8 words.
 ")
+
+(def setting-keys
+  ["easy_hr_max" "steady_hr" "lt_hr" "hrv_low" "rhr_high" "quality_max" "run_increase_pct" "long_run_max_min"])
 
 (def schema
   {"type" "object"
@@ -73,12 +79,8 @@ in short fragments, never sentences:
                                                              "value" {"type" "string"}}}}
                              "focus" {"type" "string"}
                              "settings" {"type" "object" "additionalProperties" false
-                                         "required" ["easy_hr_max" "steady_hr" "hrv_low" "rhr_high" "peak_week_km"]
-                                         "properties" {"easy_hr_max"  {"type" "integer"}
-                                                       "steady_hr"    {"type" "integer"}
-                                                       "hrv_low"      {"type" "integer"}
-                                                       "rhr_high"     {"type" "integer"}
-                                                       "peak_week_km" {"type" "integer"}}}}}}})
+                                         "required" (vec setting-keys)
+                                         "properties" (into {} (for [k setting-keys] [k {"type" "integer"}]))}}}}})
 
 (defn apply-edits
   "The document after `edits`, or an ex-info naming the edit that didn't match."
