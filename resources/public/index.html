@@ -4,6 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Coach</title>
+  <script>
+    // Theme before first paint: the saved choice, else the system setting (see coach.app/apply-theme!)
+    (function () {
+      var t = localStorage.getItem("theme");
+      if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
   <link rel="stylesheet" href="/css/leaflet.css">
   <link rel="stylesheet" href="/css/app.css">
 </head>

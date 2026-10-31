@@ -159,6 +159,26 @@
                                         (assoc-in [:ui :athlete :summarising?] false)))))))
 
 ;; ---------------------------------------------------------------------------
+;; Theme: <html data-theme="light|dark">. A choice made with the toggle is kept in
+;; localStorage; without one the system setting decides (also set early in index.html).
+
+(declare render!)
+
+(def system-dark (js/matchMedia "(prefers-color-scheme: dark)"))
+
+(defn theme [] (.. js/document -documentElement -dataset -theme))
+
+(defn apply-theme! []
+  (let [saved (.getItem js/localStorage "theme")]
+    (set! (.. js/document -documentElement -dataset -theme)
+          (if (#{"light" "dark"} saved) saved (if (.-matches system-dark) "dark" "light")))))
+
+(defn toggle-theme! []
+  (.setItem js/localStorage "theme" (if (= "dark" (theme)) "light" "dark"))
+  (apply-theme!)
+  (render!))
+
+;; ---------------------------------------------------------------------------
 ;; Actions (Replicant dispatches data; this interprets it)
 
 (defn handle [action]
@@ -174,6 +194,7 @@
                       (swap! state dissoc :flash)
                       (api! method url body))
       :sync         (start-sync!)
+      :toggle-theme (toggle-theme!)
       :athlete-chat-send (send-athlete-chat!)
       :athlete-chat-key  (when (= "Enter" (.-key (first args))) (send-athlete-chat!))
       :athlete-summary   (summarise-athlete!)
@@ -200,7 +221,14 @@
      [:nav.side {:aria-label "Main"}
       [:div.brand [:span.logo] "Coach"]
       (for [[k href label] nav-items]
-        [:a {:replicant/key k :href href :class (when (= k active) "active")} label])]
+        [:a {:replicant/key k :href href :class (when (= k active) "active")} label])
+      (let [dark? (= "dark" (theme))]
+        [:button.theme-toggle {:on {:click [[:toggle-theme]]}
+                               :title (if dark? "Switch to light theme" "Switch to dark theme")}
+         (into [:svg {:aria-hidden "true" :width 16 :height 16 :viewBox "0 0 24 24" :fill "none"
+                      :stroke "currentColor" :stroke-width 2.2 :stroke-linecap "round" :stroke-linejoin "round"}]
+               (ui/icon-paths (if dark? :sun :moon)))
+         (if dark? "Light theme" "Dark theme")])]
      [:main {:class (remove nil? [(when (seq loading) "loading") (when (= page :calendar) "wide")])}
       (case page
         :today      (today/view s)
@@ -223,7 +251,8 @@
   (r/set-dispatch! dispatch)
   (add-watch state ::render (fn [_ _ _ _] (render!)))
   (.addEventListener js/window "hashchange" on-hash!)
-  (.addEventListener (js/matchMedia "(prefers-color-scheme: dark)") "change" render!)
+  (apply-theme!)
+  (.addEventListener system-dark "change" #(do (apply-theme!) (render!)))
   (on-hash!)
   (poll-sync!)
   (render!))

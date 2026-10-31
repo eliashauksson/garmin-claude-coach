@@ -47,47 +47,46 @@
   --chip-ski-bg: #fbe7f2;   --chip-ski-fg: #a3346f;   --fam-ski: var(--pink);
   --chip-other-bg: #f2f3f6; --chip-other-fg: #4b5160; --fam-other: #8a90a0;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --page: #0f1115;
-    --surface: #171a21;
-    --surface-2: #222632;
-    --pill-on-tint: rgba(255,255,255,.08);
-    --text: #f2f3f5;
-    --text-2: #a3a9b5;
-    --text-3: #90969f; /* brief: #8a909c; lightened to reach 4.5:1 on the green and amber tints */
-    --line: #222632;
-    --row-line: #222632;
-    --row-hover: #1d212a;
-    --ink: #f2f3f5;
-    --on-ink: #0f1115;
-    --blue: #4c8dff;
-    --red: #ff6b5f;
-    --amber: #ffb547;
-    --green: #4cd18a;
-    --green-ink: #4cd18a;
-    --green-text: #8fe0b0;
-    --purple: #9b8cff;
-    --purple-2: #9b8cff;
-    --deep: #5b6cff;
-    --pink: #f08cc8;
-    --tint-green: #14301f;
-    --tint-green-2: #14301f;
-    --tint-blue: #16263a;
-    --tint-purple: #221d3d;
-    --tint-red: #3a1c1a;
-    --tint-amber: #3a2a12;
-    --shadow-nav: none;
-    --track: rgba(255,255,255,.1);
-    --tooltip-shadow: 0 6px 24px rgba(0,0,0,.45);
-    --chip-run-bg: rgba(27,95,174,.18);   --chip-run-fg: #4c8dff;
-    --chip-bike-bg: rgba(154,90,0,.18);   --chip-bike-fg: #ffb547;
-    --chip-swim-bg: rgba(14,106,117,.18); --chip-swim-fg: #4fd1db; --fam-swim: #2bb8c4;
-    --chip-hike-bg: rgba(26,122,67,.18);  --chip-hike-fg: #4cd18a;
-    --chip-ski-bg: rgba(163,52,111,.18);  --chip-ski-fg: #f08cc8;
-    --chip-other-bg: rgba(75,81,96,.18);  --chip-other-fg: #a3a9b5; --fam-other: #8a909c;
-  }
+/* Dark theme: set by the theme toggle, or from the system setting until one is chosen (index.html, coach.app) */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0f1115;
+  --surface: #171a21;
+  --surface-2: #222632;
+  --pill-on-tint: rgba(255,255,255,.08);
+  --text: #f2f3f5;
+  --text-2: #a3a9b5;
+  --text-3: #90969f; /* brief: #8a909c; lightened to reach 4.5:1 on the green and amber tints */
+  --line: #222632;
+  --row-line: #222632;
+  --row-hover: #1d212a;
+  --ink: #f2f3f5;
+  --on-ink: #0f1115;
+  --blue: #4c8dff;
+  --red: #ff6b5f;
+  --amber: #ffb547;
+  --green: #4cd18a;
+  --green-ink: #4cd18a;
+  --green-text: #8fe0b0;
+  --purple: #9b8cff;
+  --purple-2: #9b8cff;
+  --deep: #5b6cff;
+  --pink: #f08cc8;
+  --tint-green: #14301f;
+  --tint-green-2: #14301f;
+  --tint-blue: #16263a;
+  --tint-purple: #221d3d;
+  --tint-red: #3a1c1a;
+  --tint-amber: #3a2a12;
+  --shadow-nav: none;
+  --track: rgba(255,255,255,.1);
+  --tooltip-shadow: 0 6px 24px rgba(0,0,0,.45);
+  --chip-run-bg: rgba(27,95,174,.18);   --chip-run-fg: #4c8dff;
+  --chip-bike-bg: rgba(154,90,0,.18);   --chip-bike-fg: #ffb547;
+  --chip-swim-bg: rgba(14,106,117,.18); --chip-swim-fg: #4fd1db; --fam-swim: #2bb8c4;
+  --chip-hike-bg: rgba(26,122,67,.18);  --chip-hike-fg: #4cd18a;
+  --chip-ski-bg: rgba(163,52,111,.18);  --chip-ski-fg: #f08cc8;
+  --chip-other-bg: rgba(75,81,96,.18);  --chip-other-fg: #a3a9b5; --fam-other: #8a909c;
 }
 
 * { box-sizing: border-box; }
@@ -110,6 +109,8 @@ nav.side .brand .logo { width: 26px; height: 26px; border-radius: 8px; backgroun
 nav.side a { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 14px; text-decoration: none; color: var(--text-2); font-weight: 500; }
 nav.side a:hover { color: var(--text); }
 nav.side a.active { background: var(--surface); color: var(--text); font-weight: 700; box-shadow: var(--shadow-nav); }
+nav.side .theme-toggle { display: flex; align-items: center; gap: 10px; margin-top: 18px; padding: 8px 14px; border: 0; border-radius: 14px; background: none; font: inherit; font-size: 13px; color: var(--text-3); cursor: pointer; }
+nav.side .theme-toggle:hover { color: var(--text); background: var(--surface); }
 main { flex: 999 1 560px; min-width: 0; padding: 24px 28px 48px; max-width: 1100px; display: flex; flex-direction: column; gap: 14px; }
 main.loading { opacity: .55; transition: opacity .15s; }
 main.wide { max-width: 1600px; }
