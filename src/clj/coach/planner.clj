@@ -85,13 +85,9 @@
         by-week (group-by #(season/monday (:date %)) acts)
         weeks   (for [i (range 6 0 -1) :let [m (season/add-days monday (* -7 i))]]
                   (week-summary m (by-week m)))
-        pmc     (last (analysis/pmc ds today today))
-        types   (into {} (map (juxt :monday :week_type)) (plan/weeks ds (season/add-days monday -21) monday))]
+        pmc     (last (analysis/pmc ds today today))]
     {:today            today
-     :target_week      (assoc (season/week-info monday)
-                              :week_type (types monday)
-                              :note (:note (first (plan/weeks ds monday monday))))
-     :previous_week_types (dissoc types monday)
+     :target_week      (season/week-info monday)
      :last_6_weeks     weeks
      :recent_activities (vec (for [a (filter #(>= (compare (:date %) (season/add-days today -14)) 0) acts)]
                                {:date (:date a) :sport (:sport a) :name (:name a)
@@ -115,7 +111,8 @@ The plan lives only in the athlete's dashboard - nothing is sent to the Garmin w
 
 Follow the principles. The hard rules (§10) are never broken; when rules conflict, use the
 priority order in §0. Remember that Garmin-recorded load underestimates the athlete's real load (§1).
-If the target week's type is unknown, plan nothing and say so in the warnings (§7.1).
+Availability isn't known in advance: plan the full week for the current phase (§6.1, §7.1).
+The recent activities show what the athlete actually did; a gap means time away (§7.2).
 
 Return only sessions (rest days have no entry). Dates must fall inside the target week. Two
 sessions on one day use the AM and PM slots. Give every session an estimated duration; use
@@ -238,12 +235,10 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
         ws     (vec (filter inside (:workouts response)))
         prev   (assoc (last (:last_6_weeks ctx))
                       ;; "previous longest run" = longest of the recent weeks, not just last week
-                      :longest_km (apply max 0 (keep :longest_km (:last_6_weeks ctx))))]
+                      :longest_km (apply max 0 (keep :longest_km (:last_6_weeks ctx)))
+                      :peak_km (apply max 0 (keep :run_km (:last_6_weeks ctx))))]
     {:response (assoc response :workouts ws)
-     :warnings (rules/check-week monday ws {:prev (assoc prev :week_type
-                                                         (get (:previous_week_types ctx)
-                                                              (season/add-days monday -7)))
-                                            :week-type (get-in ctx [:target_week :week_type])})}))
+     :warnings (rules/check-week monday ws {:prev prev})}))
 
 (defn propose!
   "Starts a proposal for the week of `monday` in the background and returns
@@ -402,7 +397,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
     (let [next-monday (season/add-days (season/monday today) 7)
           wk          (first (plan/weeks ds next-monday next-monday))]
       (when (and (= DayOfWeek/SUNDAY (.getDayOfWeek (LocalDate/parse today)))
-                 (:week_type wk) (api-key?)
+                 (:week wk) (api-key?)
                  (empty? (plan/workouts ds next-monday (season/add-days next-monday 6)))
                  (nil? (plan/latest-proposal ds next-monday)))
         (swap! proposed conj (propose! ds next-monday))))

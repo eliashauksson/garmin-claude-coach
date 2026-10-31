@@ -1,13 +1,11 @@
 (ns coach.views.plan
-  "Plan page: week types, the planned sessions, and the AI proposal review.
+  "Plan page: the planned sessions, and the AI proposal review.
   Nothing enters the plan without an explicit accept."
   (:require [clojure.string :as str]
             [coach.ui :as ui]
             [coach.views.calendar :as cal]))
 
 (def weeks-shown 4)
-
-(def week-types [["NORMAL" "Normal week"] ["LIGHT" "Light week"] ["AWAY" "Away"] ["HOLIDAY" "Holiday"]])
 
 (def session-names ui/session-names)
 
@@ -159,28 +157,21 @@
 
 ;; ---------------------------------------------------------------------------
 
-(defn- week-card [{:keys [monday sunday week phase week_type] :as wk} workouts proposal ui-state]
+(defn- week-card [{:keys [monday sunday week phase] :as wk} workouts proposal ui-state]
   (let [mine     (filter #(<= (compare monday (:date %)) 0 (compare sunday (:date %))) workouts)
         running? (= "running" (:status proposal))]
     (ui/card {}
              [:div.page-head
               [:div.title
                [:div.sub (str (short-date monday) " – " (short-date sunday))]
-               [:h2.week-title (if week (str "Week " week " · " phase) phase)]]
-              [:div.seg.soft
-               (for [[v label] week-types]
-                 [:button {:replicant/key v :class (when (= v week_type) "on")
-                           :on {:click [[:api "PUT" (str "/api/plan/weeks/" monday) {:week_type v}]]}}
-                  label])]]
+               [:h2.week-title (if week (str "Week " week " · " phase) phase)]]]
              (if (seq mine)
                [:div.plan-list (map workout-row mine)]
                [:div.empty "Nothing planned yet."])
              [:div.plan-footer
-              [:button.btn-ink {:disabled (or running? (nil? week_type))
-                                :title (when (nil? week_type) "Set the week type first (§7.1)")
+              [:button.btn-ink {:disabled running?
                                 :on {:click [[:api "POST" "/api/plan/proposals" {:monday monday}]]}}
-               (cond running? "Planning…" (seq mine) "Re-plan week" :else "Propose week")]
-              (when (nil? week_type) [:span.sub "Set the week type first."])]
+               (cond running? "Planning…" (seq mine) "Re-plan week" :else "Propose week")]]
              (when (and proposal (not= "closed" (:status proposal)))
                (proposal-panel proposal mine ui-state monday)))))
 

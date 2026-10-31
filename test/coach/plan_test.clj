@@ -37,9 +37,11 @@
   (testing "no recent long run: the +3 km check is skipped"
     (is (not-any? #(str/includes? % "+3 km")
                   (rules/check-week "2026-11-23" ok-week {:prev {:run_km 44 :longest_km 0}}))))
-  (testing "after a time away week +20% is allowed"
-    (is (not-any? #(str/includes? % "+20%")
-                  (rules/check-week "2026-11-23" ok-week {:prev {:run_km 41 :week_type "AWAY"}}))))
+  (testing "back up to an earlier level +20% is allowed, above it +10%"
+    (is (not-any? #(str/includes? % "over last week")
+                  (rules/check-week "2026-11-23" ok-week {:prev {:run_km 41 :peak_km 50}})))
+    (is (some #(str/includes? % "+10%")
+              (rules/check-week "2026-11-23" ok-week {:prev {:run_km 41 :peak_km 44}}))))
   (testing "two thresholds, consecutive key days, no rest day"
     (let [ws (rules/check-week "2027-01-04"
                                (for [[i s] (map-indexed vector ["THR" "THR" "EASY" "EASY" "EASY" "LONG" "EASY"])]
@@ -48,9 +50,7 @@
       (is (some #(str/includes? % "threshold") ws))
       (is (some #(str/includes? % "consecutive") ws))
       (is (some #(str/includes? % "rest day") ws))))
-  (testing "time away weeks and the final 10 days"
-    (is (some #(str/includes? % "Time away")
-              (rules/check-week "2026-11-23" [(w "2026-11-24" "EASY" 6)] {:week-type "AWAY"})))
+  (testing "the final 10 days"
     (is (some #(str/includes? % "final 10 days")
               (rules/check-week "2027-04-05" [(w "2027-04-06" "GYM_UPPER" 0)] {})))))
 

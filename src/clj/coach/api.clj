@@ -92,9 +92,6 @@
                  (ok {:weeks (plan/weeks ds from to)
                       :workouts (plan/workouts ds from to)
                       :season (season/week-info (today))})))}]
-   ["/weeks/:monday" {:put (guarded (fn [{:keys [path-params] :as req}]
-                                      (plan/set-week! ds (:monday path-params) (body req))
-                                      (ok (first (plan/weeks ds (:monday path-params) (:monday path-params))))))}]
    ["/readiness" {:get (fn [_] (ok (readiness-today ds)))}]
    ["/signals"   {:get (fn [_] (ok (adapt/signals (planner/adapt-inputs ds (today)))))}]
    ["/adjust"    {:post (guarded (fn [req]

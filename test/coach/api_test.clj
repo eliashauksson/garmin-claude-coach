@@ -45,9 +45,6 @@
   (let [ds  (temp-ds)
         app (api/app ds)
         pid (coach.plan/create-proposal! ds "2026-11-02" "test")]
-    (testing "week type"
-      (is (= "NORMAL" (:week_type (second (send-json app :put "/api/plan/weeks/2026-11-04" {:week_type "NORMAL"}))))))
-    (is (= 400 (first (send-json app :put "/api/plan/weeks/2026-11-02" {:week_type "HOLIDAY"}))))
     (coach.plan/finish-proposal!
      ds pid {:context {} :warnings ["w"] :usage {}
              :response {:summary "s" :targets {:run_km 30 :longest_run "60 min" :quality "strides"}
@@ -65,7 +62,6 @@
         (is (= ["edited" "rejected"] (map :decision (:items p))))))
     (let [[_ plan] (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08")]
       (is (= [["EASY" 40 "planned"]] (map (juxt :session_id :duration_min :status) (:workouts plan))))
-      (is (= "NORMAL" (:week_type (first (:weeks plan)))))
       (is (= 1 (:week (first (:weeks plan))))))
     (testing "a run on that day marks the planned run done"
       (db/upsert-activities! ds [{:id 9 :date "2026-11-02" :start_time_local "2026-11-02T06:00:00"

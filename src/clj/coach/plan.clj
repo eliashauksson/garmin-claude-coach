@@ -1,5 +1,5 @@
 (ns coach.plan
-  "Storage for the training plan: week types, AI proposals and the planned
+  "Storage for the training plan: weeks, AI proposals and the planned
   workouts the athlete accepted. Plans live only here; nothing goes to Garmin."
   (:require [clojure.data.json :as json]
             [coach.db :as db]
@@ -8,8 +8,6 @@
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
   (:import (java.time Instant LocalDate)))
-
-(def week-types #{"NORMAL" "LIGHT" "AWAY" "HOLIDAY"})
 
 (defn- now [] (str (Instant/now)))
 
@@ -21,19 +19,9 @@
 
 (defn weeks
   "Plan weeks (with season position) for every Monday in [from, to]."
-  [ds from to]
-  (let [rows (into {} (map (juxt :monday identity))
-                   (db/query ds ["SELECT * FROM plan_weeks WHERE monday BETWEEN ? AND ?" (season/monday from) to]))]
-    (for [m (take-while #(<= (compare % to) 0) (iterate #(season/add-days % 7) (season/monday from)))]
-      (merge (season/week-info m) (select-keys (rows m) [:week_type :note])))))
-
-(defn set-week! [ds monday {:keys [week_type note]}]
-  (when (and week_type (not (week-types week_type)))
-    (throw (ex-info "Unknown week type" {:week_type week_type})))
-  (jdbc/execute! ds ["INSERT INTO plan_weeks (monday, week_type, note, updated_at) VALUES (?, ?, ?, ?)
-                      ON CONFLICT(monday) DO UPDATE SET week_type = excluded.week_type,
-                        note = excluded.note, updated_at = excluded.updated_at"
-                     (season/monday monday) week_type note (now)]))
+  [_ds from to]
+  (for [m (take-while #(<= (compare % to) 0) (iterate #(season/add-days % 7) (season/monday from)))]
+    (season/week-info m)))
 
 ;; ---------------------------------------------------------------------------
 ;; Planned workouts

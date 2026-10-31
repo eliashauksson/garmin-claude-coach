@@ -41,9 +41,10 @@
 
 (defn check-week
   "Warnings for `workouts` planned in the week starting `monday`.
-  `prev` is {:run_km :longest_km :week_type} for the week before, from what
-  was actually done (or planned, if it hasn't happened yet)."
-  [monday workouts {:keys [prev week-type]}]
+  `prev` is {:run_km :longest_km :peak_km} for the week before, from what was
+  actually done (or planned, if it hasn't happened yet); :peak_km is the
+  highest weekly volume of the recent weeks."
+  [monday workouts {:keys [prev]}]
   (let [info    (season/week-info monday)
         wk      (:week info)
         sunday  (season/add-days monday 6)
@@ -53,7 +54,8 @@
         longest (apply max 0 (keep #(when (and (run? %) (get-in sessions [(:session_id %) :long?]))
                                       (:distance_km %))
                                    workouts))
-        cap     (if (= "AWAY" (:week_type prev)) 1.2 1.1)
+        ;; back up to a level already done, e.g. after time away: +20% (§10.1)
+        cap     (if (<= km (or (:peak_km prev) 0)) 1.2 1.1)
         key-days (set (keep #(when (key-session? % wk) (:date %)) workouts))]
     (vec
      (remove nil?
@@ -77,8 +79,6 @@
                      "Key sessions on consecutive days (§10.4).")
                (when (not-any? (fn [d] (not-any? run? (by-date d))) dates)
                      "No day without running (§6.2: at least one full rest day).")
-               (when (and (= "AWAY" week-type) (some #(not= "CALF_MIN" (:session_id %)) workouts))
-                     "Time away week: plan nothing except optional CALF_MIN (§7.1).")
                (when (some #(and (= :strength (get-in sessions [(:session_id %) :kind]))
                                  (<= 0 (season/days-between (:date %) season/race-date) 10))
                            workouts)
