@@ -3,6 +3,7 @@
   and the athlete's recent data. The proposal is stored for review; nothing
   enters the plan until the athlete accepts it."
   (:require [clojure.data.json :as json]
+            [coach.adapt :as adapt]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [coach.analysis :as analysis]
@@ -18,7 +19,7 @@
                                                BetaJsonOutputFormat$Schema BetaOutputConfig
                                                BetaOutputConfig$Effort BetaTextBlockParam
                                                BetaThinkingConfigAdaptive MessageCreateParams)
-           (java.time Duration LocalDate)))
+           (java.time DayOfWeek Duration LocalDate)))
 
 (def model "claude-opus-5-5")
 
@@ -187,7 +188,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 (defn call-claude
   "One request: principles in a cached system block, data in the user turn,
   JSON out via structured outputs. Returns {:response map :usage map}."
-  [principles ctx]
+  [principles user-text schema]
   (let [params (-> (MessageCreateParams/builder)
                    (.model ^String model)
                    (.maxTokens 32000)
@@ -196,14 +197,14 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                          (.text ^String (str system-intro principles))
                          (.cacheControl (.build (BetaCacheControlEphemeral/builder)))
                          (.build))])
-                   (.addUserMessage ^String (user-message ctx))
+                   (.addUserMessage ^String user-text)
                    (.thinking (.build (BetaThinkingConfigAdaptive/builder)))
                    (.outputConfig (-> (BetaOutputConfig/builder)
                                       (.effort BetaOutputConfig$Effort/HIGH)
                                       (.format (-> (BetaJsonOutputFormat/builder)
                                                    (.schema (-> (BetaJsonOutputFormat$Schema/builder)
                                                                 (.additionalProperties
-                                                                 (update-vals response-schema ->json-value))
+                                                                 (update-vals schema ->json-value))
                                                                 (.build)))
                                                    (.build)))
                                       (.build)))
@@ -253,9 +254,156 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
     (future
       (try
         (let [ctx (context ds monday)
-              {:keys [response usage]} (call-claude (slurp principles-file) ctx)
+              {:keys [response usage]} (call-claude (slurp principles-file) (user-message ctx) response-schema)
               {:keys [response warnings]} (validate monday response ctx)]
           (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
         (catch Throwable e
           (plan/fail-proposal! ds id (or (ex-message e) (str (class e)))))))
     id))
+
+;; ---------------------------------------------------------------------------
+;; Adapting the plan between weekly proposals
+
+(def change-fields
+  {"date" {"type" "string" "format" "date"}
+   "slot" {"type" "string" "enum" ["AM" "PM"]}
+   "session_id" {"type" "string" "enum" (sort rules/session-ids)}
+   "title" {"type" "string"}
+   "duration_min" {"type" "integer"}
+   "distance_km" {"type" "number"}
+   "intensity" {"type" "string"}
+   "description" {"type" "string"}
+   "reason" {"type" "string"}})
+
+(def adjust-schema
+  {"type" "object"
+   "additionalProperties" false
+   "required" ["summary" "changes" "warnings"]
+   "properties"
+   {"summary"  {"type" "string"}
+    "warnings" {"type" "array" "items" {"type" "string"}}
+    "changes"  {"type" "array"
+                "items" {"type" "object" "additionalProperties" false
+                         "required" (into ["op" "workout_id"] (sort (keys change-fields)))
+                         "properties" (merge {"op" {"type" "string" "enum" ["change" "remove" "add"]}
+                                              "workout_id" {"type" "integer"}}
+                                             change-fields)}}}})
+
+(def Adjustment
+  [:map
+   [:summary :string]
+   [:warnings [:vector :string]]
+   [:changes [:vector [:map
+                       [:op [:enum "change" "remove" "add"]]
+                       [:workout_id int?]
+                       [:date [:re #"^\d{4}-\d{2}-\d{2}$"]]
+                       [:slot [:enum "AM" "PM"]]
+                       [:session_id (into [:enum] rules/session-ids)]
+                       [:title :string] [:duration_min int?] [:distance_km number?]
+                       [:intensity :string] [:description :string] [:reason :string]]]]])
+
+(defn adapt-inputs
+  "What coach.adapt/signals needs, from the database."
+  [ds today]
+  (let [monday (season/monday today)]
+    {:today    today
+     :acts     (reverse (analysis/activities ds {:from (season/add-days today -42) :to today}))
+     :wellness (analysis/wellness ds (season/add-days today -2) today)
+     :workouts (plan/workouts ds monday (season/add-days monday 13))
+     :tsb      (:tsb (last (analysis/pmc ds today today)))}))
+
+(defn adjust-message [ctx today scope-end]
+  (str "Adjust the planned sessions from " today " to " scope-end " in response to the signals"
+       " (and the athlete's note, if there is one). Change, remove or add sessions only as far as the"
+       " signals and the principles justify; leave everything else alone and don't list it."
+       " Don't touch sessions before today or ones already done. Never make up missed sessions (§7.4)."
+       " For op change and remove, use the workout_id from plan_in_scope and give the session's new"
+       " fields (for remove, its current ones). For op add, use workout_id 0."
+       " If nothing should change, return no changes and explain why in the summary.\n\n"
+       (json/write-str ctx)))
+
+(defn- apply-changes
+  "The planned sessions in scope as they'd be after accepting every change."
+  [workouts changes]
+  (let [by-id (into {} (map (juxt :id identity)) workouts)
+        after (reduce (fn [m {:keys [op workout_id] :as c}]
+                        (case op
+                          "change" (update m workout_id merge (select-keys c plan/workout-cols))
+                          "remove" (dissoc m workout_id)
+                          "add"    (assoc m (keyword (str "new" (count m))) c)))
+                      by-id changes)]
+    (vals after)))
+
+(defn validate-adjustment
+  "Schema check; drops changes that target unknown or finished sessions or
+  fall outside the scope; rule-checks every affected week."
+  [today scope-end response in-scope]
+  (when-let [err (m/explain Adjustment response)]
+    (throw (ex-info (str "Invalid adjustment from the model: " (pr-str (me/humanize err))) {:response response})))
+  (let [open-ids (set (keep #(when (= "planned" (:status %)) (:id %)) in-scope))
+        ok?      (fn [{:keys [op workout_id date]}]
+                   (and (<= (compare today date) 0 (compare scope-end date))
+                        (or (= op "add") (open-ids workout_id))))
+        changes  (vec (filter ok? (:changes response)))
+        after    (apply-changes (filter #(#{"planned" "done"} (:status %)) in-scope) changes)
+        weeks    (distinct (map #(season/monday (:date %)) changes))]
+    {:response (assoc response :changes changes)
+     :warnings (vec (distinct (mapcat (fn [m] (rules/check-week m (filter #(= m (season/monday (:date %))) after) {}))
+                                      weeks)))}))
+
+(defn propose-adjustment!
+  "Starts an adjustment proposal for today through the end of next week,
+  triggered by `signals` (and/or an athlete `note`). Returns its id."
+  [ds signals note]
+  (let [today     (str (LocalDate/now))
+        monday    (season/monday today)
+        scope-end (season/add-days monday 13)
+        id        (plan/create-proposal! ds monday model {:kind "adjust" :scope-end scope-end :signals signals})]
+    (future
+      (try
+        (let [in-scope (plan/workouts ds today scope-end)
+              ctx      (assoc (context ds monday)
+                              :signals (mapv #(select-keys % [:id :severity :message :principle]) signals)
+                              :athlete_note note
+                              :plan_in_scope (mapv #(select-keys % [:id :date :slot :session_id :title :duration_min
+                                                                     :distance_km :intensity :status])
+                                                   in-scope)
+                              :recent_feedback (vec (for [a (analysis/activities ds {:from (season/add-days today -14) :to today})
+                                                          :when (or (:rpe a) (:garmin_rpe a) (pos? (or (:pain a) 0)) (:note a))]
+                                                      (select-keys a [:date :name :rpe :garmin_rpe :pain :pain_location :note]))))
+              {:keys [response usage]} (call-claude (slurp principles-file) (adjust-message ctx today scope-end) adjust-schema)
+              {:keys [response warnings]} (validate-adjustment today scope-end response in-scope)]
+          (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
+        (catch Throwable e
+          (plan/fail-proposal! ds id (or (ex-message e) (str (class e)))))))
+    id))
+
+(defn- api-key? [] (try (api-key) true (catch Exception _ false)))
+
+(defn- seen? [ds k] (seq (db/query ds ["SELECT 1 FROM adapt_signals WHERE key = ?" k])))
+
+(defn check!
+  "Runs after each sync. New triggering signals start one adjustment proposal
+  (at most one a day, and not while another adjustment awaits review). On
+  Sundays, next week is proposed if its type is set and nothing is planned."
+  [ds]
+  (let [today   (str (LocalDate/now))
+        sigs    (adapt/signals (adapt-inputs ds today))
+        new     (filter #(and (:trigger? %) (not (seen? ds (:key %)))) sigs)
+        open    (plan/open-proposals ds)
+        adjust-today? (seq (db/query ds ["SELECT 1 FROM plan_proposals WHERE kind = 'adjust' AND substr(created_at, 1, 10) = ?" today]))
+        proposed (atom [])]
+    (when (and (seq new) (api-key?) (not adjust-today?) (not-any? #(= "adjust" (:kind %)) open))
+      (let [id (propose-adjustment! ds new nil)]
+        (doseq [s new]
+          (next.jdbc/execute! ds ["INSERT OR IGNORE INTO adapt_signals (key, proposal_id, first_seen) VALUES (?, ?, ?)"
+                                  (:key s) id today]))
+        (swap! proposed conj id)))
+    (let [next-monday (season/add-days (season/monday today) 7)
+          wk          (first (plan/weeks ds next-monday next-monday))]
+      (when (and (= DayOfWeek/SUNDAY (.getDayOfWeek (LocalDate/parse today)))
+                 (:week_type wk) (api-key?)
+                 (empty? (plan/workouts ds next-monday (season/add-days next-monday 6)))
+                 (nil? (plan/latest-proposal ds next-monday)))
+        (swap! proposed conj (propose! ds next-monday))))
+    {:signals sigs :proposed @proposed}))

@@ -252,6 +252,8 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
 .cal-item:hover { background: var(--row-hover); color: var(--text); }
 .cal-item.planned { background: transparent; border: 1.5px dashed var(--text-3); border-left: 4px solid; }
 .cal-item.planned.skipped { opacity: .5; text-decoration: line-through; }
+.cal-item.planned.missed { border-color: var(--red); border-left-color: var(--red) !important; }
+.cal-item.planned.missed .cal-item-meta::after { content: " · missed"; color: var(--red); font-weight: 700; }
 .cal-item-name { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-item-meta, .cal-item-tss { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-item-tss { font-weight: 700; }
@@ -267,6 +269,13 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
 }
 
 /* Plan page */
+.pill.missed { background: var(--tint-red); color: var(--red); }
+a.pill { text-decoration: none; }
+.plan-row.remove .plan-what b { text-decoration: line-through; }
+.signal { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; }
+.signal .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(-1px); }
+input.note { flex: 1 1 260px; font: inherit; font-size: 13px; padding: 10px 14px; border-radius: 14px; border: 0; background: var(--pill-on-tint); color: var(--text); }
+.card:not([class*="tint-"]) input.note { background: var(--surface-2); }
 .week-title { font-size: 20px; font-weight: 800; color: var(--text); letter-spacing: -.01em; }
 .plan-list { display: flex; flex-direction: column; }
 .plan-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 10px 0; border-top: 1px solid var(--row-line); }

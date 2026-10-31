@@ -2,6 +2,7 @@
   "Glue between the DB and coach.metrics: per-activity metric computation
   and the queries behind the API."
   (:require [clojure.data.json :as json]
+            [next.jdbc]
             [clojure.string :as str]
             [coach.db :as db]
             [coach.metrics :as m])
@@ -89,6 +90,26 @@
      (count acts))))
 
 ;; ---------------------------------------------------------------------------
+;; Athlete feedback
+
+(defn save-feedback!
+  "RPE 1-10, pain (bool) with location, and a note for one activity."
+  [ds activity-id {:keys [rpe pain pain_location note]}]
+  (when (and rpe (not (<= 1 rpe 10)))
+    (throw (ex-info "RPE must be 1-10" {:rpe rpe})))
+  (next.jdbc/execute! ds ["INSERT INTO activity_feedback (activity_id, rpe, pain, pain_location, note, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(activity_id) DO UPDATE SET rpe = excluded.rpe, pain = excluded.pain,
+                             pain_location = excluded.pain_location, note = excluded.note,
+                             updated_at = excluded.updated_at"
+                          activity-id rpe (if pain 1 0) pain_location note (str (java.time.Instant/now))]))
+
+(defn effective-rpe
+  "The athlete's in-app RPE, else the RPE entered on the watch."
+  [a]
+  (or (:rpe a) (:garmin_rpe a)))
+
+;; ---------------------------------------------------------------------------
 ;; Queries
 
 (defn- parse-json-cols [row cols]
@@ -99,8 +120,12 @@
           a.moving_s, a.elev_gain_m, a.avg_hr, a.max_hr, a.calories,
           a.training_load AS garmin_load, a.aerobic_te,
           m.tss, m.tss_method, m.intensity, m.tss_per_hour, m.np, m.ngp_mps, m.vi, m.ef,
-          m.decoupling, m.kj, m.hr_zones_s, m.peaks, m.route
-   FROM activities a LEFT JOIN activity_metrics m ON m.activity_id = a.id")
+          m.decoupling, m.kj, m.hr_zones_s, m.peaks, m.route,
+          json_extract(a.raw, '$.detail.workout_rpe') / 10.0 AS garmin_rpe,
+          f.rpe, f.pain, f.pain_location, f.note
+   FROM activities a
+   LEFT JOIN activity_metrics m ON m.activity_id = a.id
+   LEFT JOIN activity_feedback f ON f.activity_id = a.id")
 
 (defn activities
   "Activities with metrics, newest first. Filters: :sport :from :to."

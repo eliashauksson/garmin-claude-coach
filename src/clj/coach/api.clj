@@ -3,6 +3,7 @@
   (:require [clojure.data.json :as json]
             [coach.analysis :as analysis]
             [coach.auth :as auth]
+            [coach.adapt :as adapt]
             [coach.db :as db]
             [coach.plan :as plan]
             [coach.planner :as planner]
@@ -28,8 +29,11 @@
       (future
         (let [result (try
                        (let [src ((requiring-resolve 'coach.garmin-mcp/start!))]
-                         (try (sync/incremental! src ds) {:ok true}
-                              (finally ((requiring-resolve 'coach.garmin-mcp/stop!) src))))
+                         (try (sync/incremental! src ds)
+                              (finally ((requiring-resolve 'coach.garmin-mcp/stop!) src)))
+                         ;; new data may call for adapting the plan
+                         (let [{:keys [proposed]} (planner/check! ds)]
+                           {:ok true :proposals proposed}))
                        (catch Throwable e
                          {:ok false :error (ex-message e)}))]
           (swap! sync-state assoc :running false
@@ -92,9 +96,17 @@
                                       (plan/set-week! ds (:monday path-params) (body req))
                                       (ok (first (plan/weeks ds (:monday path-params) (:monday path-params))))))}]
    ["/readiness" {:get (fn [_] (ok (readiness-today ds)))}]
+   ["/signals"   {:get (fn [_] (ok (adapt/signals (planner/adapt-inputs ds (today)))))}]
+   ["/adjust"    {:post (guarded (fn [req]
+                                   (planner/api-key)
+                                   (let [note (not-empty (:note (body req)))
+                                         sigs (filter :trigger? (adapt/signals (planner/adapt-inputs ds (today))))]
+                                     (json-response 202 {:id (planner/propose-adjustment! ds sigs note)}))))}]
+   ["/open"      {:get (fn [_] (ok (plan/open-proposals ds)))}]
    ["/proposals"
     ["" {:get  (fn [{:keys [query-params]}]
-                 (ok (plan/latest-proposal ds (season/monday (get query-params "monday" (today))))))
+                 (ok (plan/latest-proposal ds (season/monday (get query-params "monday" (today)))
+                                           (get query-params "kind" "week"))))
          :post (guarded (fn [req]
                           (planner/api-key) ; fail fast with a clear message
                           (json-response 202 {:id (planner/propose! ds (:monday (body req)))})))}]
@@ -124,13 +136,18 @@
                                              :auth (auth-status ds)
                                              :sync (dissoc @sync-state :started_at)
                                              :season (season/week-info (today))
-                                             :readiness_check (readiness-today ds))))}]
+                                             :readiness_check (readiness-today ds)
+                                             :open_proposals (plan/open-proposals ds))))}]
     (plan-routes ds)
     ["/auth"        {:get (fn [_] (ok (auth-status ds)))}]
     ["/activities"  {:get (fn [{:keys [query-params]}]
                             (let [{:strs [sport from to limit]} query-params]
                               (ok (analysis/activities ds {:sport sport :from from :to to
                                                            :limit (some-> limit parse-long)}))))}]
+    ["/activities/:id/feedback"
+     {:put (guarded (fn [{:keys [path-params] :as req}]
+                      (analysis/save-feedback! ds (parse-long (:id path-params)) (body req))
+                      (ok (analysis/activity ds (parse-long (:id path-params))))))}]
     ["/activities/:id"
      {:get (fn [{:keys [path-params query-params]}]
              (let [id (parse-long (:id path-params))]
@@ -166,6 +183,25 @@
       wrap-params))
 
 (defonce server (atom nil))
+(defonce scheduler (atom nil))
+
+(def sync-every-hours 2)
+
+(defn- due-for-sync? []
+  (let [hour (.getHour (java.time.LocalTime/now))
+        last (some-> (:finished_at @sync-state) java.time.Instant/parse)]
+    (and (<= 6 hour 21)
+         (not (:running @sync-state))
+         (or (nil? last)
+             (.isBefore last (.minus (java.time.Instant/now) (java.time.Duration/ofHours sync-every-hours)))))))
+
+(defn- start-background-sync!
+  "Checks every 15 minutes; syncs when the last sync is over 2 h old (06-22 h)."
+  [ds]
+  (let [ex (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
+    (.scheduleAtFixedRate ex #(try (when (due-for-sync?) (run-sync! ds)) (catch Throwable _))
+                          15 15 java.util.concurrent.TimeUnit/MINUTES)
+    (reset! scheduler ex)))
 
 (defn start!
   "Starts the API on 127.0.0.1:`port`. With :sync? true (the default) an
@@ -176,10 +212,13 @@
      (reset! server (jetty/run-jetty (app ds) {:port port :host "127.0.0.1" :join? false}))
      (println (str "Dashboard on http://127.0.0.1:" port "/"))
      (println (auth/describe (auth/status ds)))
-     (when sync? (run-sync! ds))
+     (when sync?
+       (run-sync! ds)
+       (start-background-sync! ds))
      @server)))
 
 (defn stop! []
+  (when-let [ex @scheduler] (.shutdownNow ex) (reset! scheduler nil))
   (when-let [s @server] (.stop s) (reset! server nil)))
 
 (defn -main

@@ -142,6 +142,17 @@
       created_at   TEXT NOT NULL,
       updated_at   TEXT NOT NULL)"
    "CREATE INDEX IF NOT EXISTS planned_workouts_date ON planned_workouts(date)"
+   "CREATE TABLE IF NOT EXISTS activity_feedback (
+      activity_id   INTEGER PRIMARY KEY,
+      rpe           INTEGER,
+      pain          INTEGER NOT NULL DEFAULT 0,
+      pain_location TEXT,
+      note          TEXT,
+      updated_at    TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS adapt_signals (
+      key         TEXT PRIMARY KEY,
+      proposal_id INTEGER,
+      first_seen  TEXT NOT NULL)"
    "CREATE TABLE IF NOT EXISTS sync_state (
       key   TEXT PRIMARY KEY,
       value TEXT)"])
@@ -153,7 +164,13 @@
 
 (def ^:private added-columns
   "Columns added after a table was first created: [table column type]."
-  [["activity_metrics" "route" "TEXT"]])
+  [["activity_metrics" "route" "TEXT"]
+   ["plan_proposals" "kind" "TEXT NOT NULL DEFAULT 'week'"]
+   ["plan_proposals" "scope_end" "TEXT"]
+   ["plan_proposals" "signals" "TEXT"]
+   ["proposal_items" "op" "TEXT NOT NULL DEFAULT 'add'"]
+   ["proposal_items" "target_id" "INTEGER"]
+   ["proposal_items" "prev" "TEXT"]])
 
 (defn- ensure-column! [ds [table column type]]
   (let [cols (set (map :name (jdbc/execute! ds [(str "PRAGMA table_info(" table ")")]

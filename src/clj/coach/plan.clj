@@ -7,7 +7,7 @@
             [coach.season :as season]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
-  (:import (java.time Instant)))
+  (:import (java.time Instant LocalDate)))
 
 (def week-types #{"NORMAL" "LIGHT" "AWAY" "HOLIDAY"})
 
@@ -43,22 +43,36 @@
         (re-find #"strength" (str sport)) :strength))
 
 (defn with-done
-  "Marks planned workouts as done when an activity of the same kind exists on
-  that date (each activity matches at most one workout)."
-  [workouts activities]
+  "Status as seen by the athlete: a planned workout is done when an activity
+  of the same kind exists that day (each activity matches one workout), and
+  missed when its day has passed without one. A workout marked done by hand
+  stays done."
+  [workouts activities today]
   (let [pool (atom (group-by (juxt :date #(activity-kind (:sport %))) activities))]
     (mapv (fn [w]
             (let [k [(:date w) (get-in rules/sessions [(:session_id w) :kind])]
                   a (first (@pool k))]
-              (if (and a (= "planned" (:status w)))
+              (cond
+                (and a (#{"planned" "done"} (:status w)))
                 (do (swap! pool update k rest)
                     (assoc w :status "done" :activity_id (:id a)))
-                w)))
+
+                (and (= "planned" (:status w)) (neg? (compare (:date w) today)))
+                (assoc w :status "missed")
+
+                :else w)))
           (sort-by (juxt :date :slot) workouts))))
 
-(defn workouts [ds from to]
-  (with-done (db/query ds ["SELECT * FROM planned_workouts WHERE date BETWEEN ? AND ? ORDER BY date, slot" from to])
-    (db/query ds ["SELECT id, date, sport FROM activities WHERE date BETWEEN ? AND ?" from to])))
+(defn workouts
+  "Planned workouts in [from, to] with done/missed resolved. Cancelled ones
+  (removed by an accepted adjustment) are left out."
+  [ds from to]
+  (with-done (db/query ds ["SELECT * FROM planned_workouts WHERE date BETWEEN ? AND ? AND status <> 'cancelled'
+                            ORDER BY date, slot" from to])
+    (db/query ds ["SELECT id, date, sport FROM activities WHERE date BETWEEN ? AND ?" from to])
+    (str (LocalDate/now))))
+
+(def statuses #{"planned" "skipped" "done" "cancelled"})
 
 (def workout-cols [:date :slot :session_id :title :duration_min :distance_km :intensity :description :reason])
 
@@ -69,8 +83,10 @@
                        (concat (map w workout-cols) [proposal-id (now) (now)])))))
 
 (defn update-workout!
-  "Edits a planned workout; :status may be planned/skipped."
+  "Edits a planned workout; :status may be planned/skipped/done/cancelled."
   [ds id changes]
+  (when (and (:status changes) (not (statuses (:status changes))))
+    (throw (ex-info "Unknown status" {:status (:status changes)})))
   (let [cols (filter #(contains? changes %) (conj workout-cols :status))]
     (when (seq cols)
       (jdbc/execute! ds (into [(str "UPDATE planned_workouts SET "
@@ -87,9 +103,14 @@
 (defn- parse [row & ks]
   (reduce (fn [r k] (update r k #(some-> % (json/read-str :key-fn keyword)))) row ks))
 
-(defn create-proposal! [ds monday model]
-  (:id (exec! ds ["INSERT INTO plan_proposals (monday, status, model, created_at, updated_at)
-                   VALUES (?, 'running', ?, ?, ?) RETURNING id" monday model (now) (now)])))
+(defn create-proposal!
+  "A week proposal (kind \"week\") or an adjustment of planned sessions up to
+  `scope-end` (kind \"adjust\", with the signals that triggered it)."
+  ([ds monday model] (create-proposal! ds monday model {}))
+  ([ds monday model {:keys [kind scope-end signals] :or {kind "week"}}]
+   (:id (exec! ds ["INSERT INTO plan_proposals (monday, status, model, kind, scope_end, signals, created_at, updated_at)
+                    VALUES (?, 'running', ?, ?, ?, ?, ?, ?) RETURNING id"
+                   monday model kind scope-end (some-> signals json/write-str) (now) (now)]))))
 
 (defn fail-proposal! [ds id error]
   (jdbc/execute! ds ["UPDATE plan_proposals SET status = 'failed', error = ?, updated_at = ? WHERE id = ?"
@@ -103,35 +124,74 @@
                           usage = ?, updated_at = ? WHERE id = ?"
                        (json/write-str context) (json/write-str (dissoc response :workouts))
                        (json/write-str warnings) (json/write-str usage) (now) id])
-    (doseq [[i w] (map-indexed vector (:workouts response))]
+    (doseq [[i w] (map-indexed vector (or (:changes response) (:workouts response)))]
       (jdbc/execute! tx (into ["INSERT INTO proposal_items (proposal_id, idx, date, slot, session_id, title,
-                                  duration_min, distance_km, intensity, description, reason)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"]
-                              (concat [id i] (map w workout-cols)))))))
+                                  duration_min, distance_km, intensity, description, reason, op, target_id)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"]
+                              (concat [id i] (map w workout-cols)
+                                      [(or (:op w) "add") (when (pos? (or (:workout_id w) 0)) (:workout_id w))]))))))
 
 (defn proposal [ds id]
-  (when-let [p (first (db/query ds ["SELECT id, monday, status, model, response, warnings, error, usage,
-                                            created_at, updated_at FROM plan_proposals WHERE id = ?" id]))]
-    (assoc (parse p :response :warnings :usage)
-           :items (db/query ds ["SELECT * FROM proposal_items WHERE proposal_id = ? ORDER BY date, slot, idx" id]))))
+  (when-let [p (first (db/query ds ["SELECT id, monday, status, model, kind, scope_end, signals, response, warnings,
+                                            error, usage, created_at, updated_at FROM plan_proposals WHERE id = ?" id]))]
+    (let [items   (db/query ds ["SELECT * FROM proposal_items WHERE proposal_id = ? ORDER BY date, slot, idx" id])
+          targets (into {} (for [t (keep :target_id items)]
+                             [t (first (db/query ds ["SELECT * FROM planned_workouts WHERE id = ?" t]))]))]
+      (assoc (parse p :response :warnings :usage :signals)
+             :items (mapv #(cond-> (parse % :prev) (:target_id %) (assoc :current (targets (:target_id %)))) items)))))
 
-(defn latest-proposal [ds monday]
-  (some->> (db/query ds ["SELECT id FROM plan_proposals WHERE monday = ? ORDER BY id DESC LIMIT 1" monday])
+(defn open-proposals
+  "Proposals that are generating or still have undecided items."
+  [ds]
+  (db/query ds ["SELECT p.id, p.kind, p.monday, p.status, p.created_at FROM plan_proposals p
+                 WHERE p.status = 'running'
+                    OR (p.status = 'open' AND EXISTS (SELECT 1 FROM proposal_items i
+                                                      WHERE i.proposal_id = p.id AND i.decision = 'pending'))
+                 ORDER BY p.id DESC"]))
+
+(defn latest-proposal [ds monday & [kind]]
+  (some->> (db/query ds ["SELECT id FROM plan_proposals WHERE monday = ? AND kind = ? ORDER BY id DESC LIMIT 1"
+                         monday (or kind "week")])
            first :id (proposal ds)))
 
+(defn- workout-row [tx id]
+  (first (db/query tx ["SELECT * FROM planned_workouts WHERE id = ?" id])))
+
+(defn- undo-item!
+  "Reverts an accepted item: an added workout is deleted, a changed or
+  removed one gets its previous values back."
+  [tx {:keys [op workout_id target_id prev]}]
+  (case op
+    "add" (when workout_id (delete-workout! tx workout_id))
+    (when (and target_id prev)
+      (update-workout! tx target_id (select-keys (json/read-str prev :key-fn keyword)
+                                                 (conj workout-cols :status))))))
+
 (defn decide-item!
-  "Accepts (optionally with edits) or rejects one proposed session. Accepting
-  creates a planned workout; rejecting an accepted one removes it again."
+  "Accepts (optionally with edits) or rejects one proposed item.
+  op add: creates a planned workout. op change: updates the target workout.
+  op remove: cancels the target workout. Previous values are kept so a
+  later reject undoes the change."
   [ds proposal-id idx decision edits]
   (jdbc/with-transaction [tx ds]
-    (let [item (first (db/query tx ["SELECT * FROM proposal_items WHERE proposal_id = ? AND idx = ?" proposal-id idx]))]
+    (let [item (first (db/query tx ["SELECT * FROM proposal_items WHERE proposal_id = ? AND idx = ?" proposal-id idx]))
+          op   (:op item)]
       (when-not item (throw (ex-info "No such proposal item" {:proposal proposal-id :idx idx})))
-      (when-let [wid (:workout_id item)] (delete-workout! tx wid))
+      (when (#{"accepted" "edited"} (:decision item)) (undo-item! tx item))
       (if (= decision "accepted")
         (let [w   (merge item (select-keys edits workout-cols))
-              wid (add-workout! tx w proposal-id)]
-          (jdbc/execute! tx ["UPDATE proposal_items SET decision = ?, workout_id = ? WHERE proposal_id = ? AND idx = ?"
-                             (if (seq edits) "edited" "accepted") wid proposal-id idx]))
+              cur (some->> (:target_id item) (workout-row tx))]
+          (when (and (#{"change" "remove"} op) (nil? cur))
+            (throw (ex-info "The session to change no longer exists" {:target (:target_id item)})))
+          (let [wid (case op
+                      "add"    (add-workout! tx w proposal-id)
+                      "change" (do (update-workout! tx (:target_id item) (select-keys w workout-cols)) nil)
+                      "remove" (do (update-workout! tx (:target_id item) {:status "cancelled"}) nil))]
+            (jdbc/execute! tx ["UPDATE proposal_items SET decision = ?, workout_id = ?, prev = ?
+                                WHERE proposal_id = ? AND idx = ?"
+                               (if (seq edits) "edited" "accepted") wid
+                               (some-> cur (select-keys (conj workout-cols :status)) json/write-str)
+                               proposal-id idx])))
         (jdbc/execute! tx ["UPDATE proposal_items SET decision = 'rejected', workout_id = NULL
                             WHERE proposal_id = ? AND idx = ?" proposal-id idx])))))
 

@@ -18,7 +18,9 @@
 
 (defn urls []
   (let [ms (mondays)]
-    (into [(str "/api/plan?from=" (first ms) "&to=" (cal/add-days (peek ms) 6))]
+    (into [(str "/api/plan?from=" (first ms) "&to=" (cal/add-days (peek ms) 6))
+           "/api/plan/signals"
+           (str "/api/plan/proposals?kind=adjust&monday=" (first ms))]
           (map #(str "/api/plan/proposals?monday=" %) ms))))
 
 (defn- short-date [iso]
@@ -40,13 +42,17 @@
    [:div.plan-what
     [:div (session-chip session_id) " " [:b title]]
     [:div.sub (str/join " · " (remove str/blank? [(amount w) intensity]))]]
-   [:div.plan-actions
-    (case status
-      "done"    [:span.pill "✓ done"]
-      "skipped" (list [:span.pill {:replicant/key "s"} "skipped"]
-                      [:button.pill {:replicant/key "u" :on {:click [[:api "PATCH" (str "/api/plan/workouts/" id) {:status "planned"}]]}} "Undo"])
-      (list [:button.pill {:replicant/key "k" :on {:click [[:api "PATCH" (str "/api/plan/workouts/" id) {:status "skipped"}]]}} "Skip"]
-            [:button.pill {:replicant/key "d" :on {:click [[:api "DELETE" (str "/api/plan/workouts/" id) nil]]}} "Remove"]))]])
+   (let [patch (fn [k label body] [:button.pill {:replicant/key k :on {:click [[:api "PATCH" (str "/api/plan/workouts/" id) body]]}} label])]
+     [:div.plan-actions
+      (case status
+        "done"    (if (:activity_id w)
+                    [:a.pill {:href (str "#/activities/" (:activity_id w))} "✓ done"]
+                    (list [:span.pill {:replicant/key "s"} "✓ done"] (patch "u" "Undo" {:status "planned"})))
+        "skipped" (list [:span.pill {:replicant/key "s"} "skipped"] (patch "u" "Undo" {:status "planned"}))
+        "missed"  (list [:span.pill.missed {:replicant/key "s"} "missed"]
+                        (patch "m" "Mark done" {:status "done"}) (patch "k" "Skip" {:status "skipped"}))
+        (list (patch "m" "Mark done" {:status "done"}) (patch "k" "Skip" {:status "skipped"})
+              [:button.pill {:replicant/key "d" :on {:click [[:api "DELETE" (str "/api/plan/workouts/" id) nil]]}} "Remove"]))])])
 
 ;; ---------------------------------------------------------------------------
 ;; Proposal review
@@ -83,10 +89,16 @@
         editing (get-in ui-state [:editing id idx])
         edits   (get-in ui-state [:edits id idx])
         url     (str "/api/plan/proposals/" id "/items/" idx)]
-    [:div.plan-row {:replicant/key idx :class decision}
+    [:div.plan-row {:replicant/key idx :class [decision (when (= "remove" (:op item)) "remove")]}
      [:div.plan-when (short-date date) [:span.sub (str " " slot)]]
      [:div.plan-what
-      [:div (session-chip session_id) " " [:b title] " " (diff-badge item existing)]
+      [:div (session-chip session_id) " " [:b title] " "
+       (case (:op item)
+         "change" (let [c (:current item)]
+                    [:span.pill (str "changes " (session-names (:session_id c)) " " (short-date (:date c)) " " (:slot c)
+                                     (some->> (amount c) not-empty (str ", ")))])
+         "remove" [:span.pill.missed "remove"]
+         (diff-badge item existing))]
       [:div.sub (str/join " · " (remove str/blank? [(amount item) intensity]))]
       [:div description]
       [:div.sub [:i reason]]
@@ -112,12 +124,14 @@
   (let [{:keys [id status response warnings error items usage]} p
         pending? (some #(= "pending" (:decision %)) items)]
     (case status
-      "running" [:div.proposal [:div.sub "Planning this week… this usually takes a minute or two."]]
+      "running" [:div.proposal [:div.sub "The coach is working on it… this usually takes a minute or two."]]
       "failed"  [:div.proposal [:div.error (str "Planning failed: " error)]]
       [:div.proposal
-       [:div.lab "Proposal" [:span.sp] [:span.sub (str "#" id)]]
+       [:div.lab (if (= "adjust" (:kind p)) "Suggested adjustments" "Proposal") [:span.sp] [:span.sub (str "#" id)]]
+       (when (seq (:signals p))
+         [:div.sub (str "Triggered by: " (str/join " · " (keep :message (:signals p))))])
        [:div (:summary response)]
-       (let [t (:targets response)]
+       (when-let [t (:targets response)]
          (ui/pills (ui/pill (str "Target " (:run_km t) " km running"))
                    (ui/pill (str "Longest: " (:longest_run t)))
                    (ui/pill (str "Quality: " (:quality t)))))
@@ -126,7 +140,7 @@
            [:div.banner.warn [:span.icon "!"]
             [:div (for [[i w] (map-indexed vector all)] [:div {:replicant/key i} w])]]))
        [:div.plan-list (for [item items] (item-row p item existing ui-state monday))]
-       (when pending?
+       (when (and pending? (not= "adjust" (:kind p)))
          [:div.plan-footer
           [:button.btn-ink {:on {:click [[:api "POST" (str "/api/plan/proposals/" id "/accept-all")
                                           {:replace (get-in ui-state [:replace id] true)}]]}}
@@ -174,7 +188,34 @@
   (str (if week (str "Week " week " of 23 · " phase) "Season starts Mon 2 Nov")
        " · " days_to_race " days to the the goal race"))
 
-(defn view [{:keys [data errors flash] ui-state :ui} [plan-url & proposal-urls]]
+(def severity-color {"high" "var(--red)" "warn" "var(--amber)" "info" "var(--blue)"})
+
+(defn- coach-card [signals adjust workouts ui-state]
+  (let [running? (= "running" (:status adjust))
+        open?    (and adjust (not= "closed" (:status adjust))
+                      (or running? (= "failed" (:status adjust))
+                          (some #(= "pending" (:decision %)) (:items adjust))))]
+    (ui/card {:tint (if (some #(#{"high" "warn"} (name (:severity %))) signals) "amber" nil)}
+             (ui/label-row {:icon :pulse :accent "--amber" :tint "--tint-amber" :soft? true :label "Coach signals"})
+             (if (seq signals)
+               [:div.plan-list
+                (for [s signals]
+                  [:div.signal {:replicant/key (:key s)}
+                   [:span.dot {:style {:background (severity-color (name (:severity s)))}}]
+                   [:span (:message s) [:span.sub (str " · " (:principle s)
+                                                       (when (:trigger? s) " · asks for a change"))]]])]
+               [:div.sub "No signals - training is going as planned."])
+             [:div.plan-footer
+              [:input.note {:type "text" :placeholder "Anything the coach should know? (e.g. sick since yesterday)"
+                            :value (get ui-state :adjust-note "")
+                            :on {:input [[:set-ui :adjust-note :event/target-value]]}}]
+              [:button.btn-ink {:disabled running?
+                                :on {:click [[:api "POST" "/api/plan/adjust" {:note (get ui-state :adjust-note "")}]
+                                             [:set-ui :adjust-note ""]]}}
+               (if running? "Adjusting…" "Re-plan rest of week")]]
+             (when open? (proposal-panel adjust workouts ui-state (:monday adjust))))))
+
+(defn view [{:keys [data errors flash] ui-state :ui} [plan-url signals-url adjust-url & proposal-urls]]
   (let [p     (get data plan-url)
         props (map #(get data %) proposal-urls)]
     [:div {:style {:display "contents"}}
@@ -182,6 +223,7 @@
       [:div.title [:div.sub (when p (season-line (:season p)))] [:h1 "Plan"]]]
      (when flash [:div.error flash])
      (when-let [e (get errors plan-url)] [:div.error (str "Could not load: " e)])
+     (when p (coach-card (get data signals-url) (get data adjust-url) (:workouts p) ui-state))
      (when p
        (for [[wk prop] (map vector (:weeks p) props)]
          [:div {:replicant/key (:monday wk)}
