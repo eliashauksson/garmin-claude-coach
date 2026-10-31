@@ -101,23 +101,25 @@
                    monday model kind scope-end (some-> signals json/write-str) (now) (now)]))))
 
 (defn fail-proposal! [ds id error]
-  (jdbc/execute! ds ["UPDATE plan_proposals SET status = 'failed', error = ?, updated_at = ? WHERE id = ?"
+  (jdbc/execute! ds ["UPDATE plan_proposals SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status = 'running'"
                      error (now) id]))
 
 (defn finish-proposal!
   "Stores the model's week and its sessions as pending items."
   [ds id {:keys [context response warnings usage]}]
   (jdbc/with-transaction [tx ds]
-    (jdbc/execute! tx ["UPDATE plan_proposals SET status = 'open', context = ?, response = ?, warnings = ?,
-                          usage = ?, updated_at = ? WHERE id = ?"
-                       (json/write-str context) (json/write-str (dissoc response :workouts))
-                       (json/write-str warnings) (json/write-str usage) (now) id])
-    (doseq [[i w] (map-indexed vector (or (:changes response) (:workouts response)))]
+    ;; only a running proposal: one withdrawn meanwhile (season plan deleted) stays withdrawn
+    (when (pos? (:next.jdbc/update-count
+                 (jdbc/execute-one! tx ["UPDATE plan_proposals SET status = 'open', context = ?, response = ?, warnings = ?,
+                                           usage = ?, updated_at = ? WHERE id = ? AND status = 'running'"
+                                        (json/write-str context) (json/write-str (dissoc response :workouts))
+                                        (json/write-str warnings) (json/write-str usage) (now) id])))
+     (doseq [[i w] (map-indexed vector (or (:changes response) (:workouts response)))]
       (jdbc/execute! tx (into ["INSERT INTO proposal_items (proposal_id, idx, date, slot, session_id, title,
                                   duration_min, distance_km, intensity, description, reason, op, target_id)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"]
                               (concat [id i] (map w workout-cols)
-                                      [(or (:op w) "add") (when (pos? (or (:workout_id w) 0)) (:workout_id w))]))))))
+                                      [(or (:op w) "add") (when (pos? (or (:workout_id w) 0)) (:workout_id w))])))))))
 
 (defn proposal [ds id]
   (when-let [p (first (db/query ds ["SELECT id, monday, status, model, kind, scope_end, signals, response, warnings,
@@ -198,6 +200,16 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Season plans (the long-term plan to race day; coach.season-plan drafts them)
+;;
+;; status: running -> ready (the current plan, at most one) or failed.
+;; A ready plan replaced by a redraft, deleted or swapped out by a restore
+;; becomes archived: a backup. The newest `keep-season-backups` are kept.
+
+(def keep-season-backups 3)
+
+(def ^:private season-cols
+  "id, race_date, start_monday, status, model, response, warnings, error, usage,
+   created_at, updated_at, archived_at, archived_reason")
 
 (defn create-season-plan! [ds race-date start-monday model]
   (:id (exec! ds ["INSERT INTO season_plans (race_date, start_monday, status, model, created_at, updated_at)
@@ -208,21 +220,79 @@
   (jdbc/execute! ds ["UPDATE season_plans SET status = 'failed', error = ?, updated_at = ? WHERE id = ?"
                      error (now) id]))
 
-(defn finish-season-plan! [ds id {:keys [context response warnings usage]}]
-  (jdbc/execute! ds ["UPDATE season_plans SET status = 'ready', context = ?, response = ?, warnings = ?,
-                        usage = ?, updated_at = ? WHERE id = ?"
-                     (json/write-str context) (json/write-str response) (json/write-str warnings)
-                     (json/write-str usage) (now) id]))
+(defn- archive-current!
+  "Turns the current plan into a backup and drops the oldest backups."
+  [tx reason]
+  (jdbc/execute! tx ["UPDATE season_plans SET status = 'archived', archived_at = ?, archived_reason = ?
+                      WHERE status = 'ready'" (now) reason])
+  (jdbc/execute! tx ["DELETE FROM season_plans WHERE status = 'archived' AND id NOT IN
+                        (SELECT id FROM season_plans WHERE status = 'archived'
+                         ORDER BY archived_at DESC, id DESC LIMIT ?)" keep-season-backups]))
+
+(defn finish-season-plan!
+  "Stores a finished draft as the current plan; the previous one becomes a backup."
+  [ds id {:keys [context response warnings usage]}]
+  (jdbc/with-transaction [tx ds]
+    (archive-current! tx "redraft")
+    (jdbc/execute! tx ["UPDATE season_plans SET status = 'ready', context = ?, response = ?, warnings = ?,
+                          usage = ?, updated_at = ? WHERE id = ?"
+                       (json/write-str context) (json/write-str response) (json/write-str warnings)
+                       (json/write-str usage) (now) id])))
 
 (defn latest-season-plan
-  "The newest season plan, or the newest with `status`."
+  "The newest season plan, or the newest with `status` (\"ready\" is the current plan)."
   ([ds] (latest-season-plan ds nil))
   ([ds status]
-   (some-> (first (db/query ds (cond-> [(str "SELECT id, race_date, start_monday, status, model, response, warnings,
-                                                    error, usage, created_at, updated_at FROM season_plans"
+   (some-> (first (db/query ds (cond-> [(str "SELECT " season-cols " FROM season_plans"
                                               (when status " WHERE status = ?") " ORDER BY id DESC LIMIT 1")]
                                  status (conj status))))
            (parse :response :warnings :usage))))
+
+(defn season-backups
+  "Backups, newest first, without their full week list."
+  [ds]
+  (mapv (fn [p] (let [weeks (get-in p [:response :weeks])]
+                  (-> (dissoc p :response :warnings :usage :error)
+                      (assoc :weeks (count weeks)
+                             :peak_tss (some->> (seq (remove #(= "Race week" (:phase %)) weeks)) (map :tss) (apply max))))))
+        (map #(parse % :response)
+             (db/query ds [(str "SELECT " season-cols " FROM season_plans WHERE status = 'archived'
+                                 ORDER BY archived_at DESC, id DESC")]))))
+
+(defn delete-season-plan!
+  "Removes the current plan; it is kept as a backup."
+  [ds]
+  (when-not (latest-season-plan ds "ready")
+    (throw (ex-info "There is no season plan to delete." {})))
+  (jdbc/with-transaction [tx ds] (archive-current! tx "delete")))
+
+(defn restore-season-plan!
+  "Makes backup `id` the current plan; the current one becomes a backup."
+  [ds id]
+  (when-not (seq (db/query ds ["SELECT 1 FROM season_plans WHERE id = ? AND status = 'archived'" id]))
+    (throw (ex-info "Unknown season plan backup" {:id id})))
+  (jdbc/with-transaction [tx ds]
+    ;; take the backup out first so pruning can't drop it
+    (jdbc/execute! tx ["UPDATE season_plans SET status = 'restoring' WHERE id = ?" id])
+    (archive-current! tx "restore")
+    (jdbc/execute! tx ["UPDATE season_plans SET status = 'ready', archived_at = NULL, archived_reason = NULL,
+                          updated_at = ? WHERE id = ?" (now) id])))
+
+(defn clear-upcoming!
+  "What goes with the season plan when it is deleted: planned sessions from
+  `today` on that aren't done are cancelled, and week proposals still running
+  or awaiting review are withdrawn. Done, skipped and past sessions stay.
+  Returns the number of sessions cancelled."
+  [ds today]
+  (let [ids (keep #(when (= "planned" (:status %)) (:id %)) (workouts ds today "9999-12-31"))]
+    (jdbc/with-transaction [tx ds]
+      (doseq [id ids]
+        (jdbc/execute! tx ["UPDATE planned_workouts SET status = 'cancelled', updated_at = ? WHERE id = ?" (now) id]))
+      (jdbc/execute! tx ["UPDATE proposal_items SET decision = 'rejected' WHERE decision = 'pending' AND proposal_id IN
+                            (SELECT id FROM plan_proposals WHERE status IN ('running', 'open'))"])
+      (jdbc/execute! tx ["UPDATE plan_proposals SET status = 'withdrawn', updated_at = ? WHERE status IN ('running', 'open')"
+                         (now)]))
+    (count ids)))
 
 (defn season-target
   "The current season plan's entry for the week of `monday`, if there is one."

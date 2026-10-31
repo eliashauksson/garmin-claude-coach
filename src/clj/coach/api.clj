@@ -96,11 +96,16 @@
                       :workouts (plan/workouts ds from to)
                       :season (season/week-info (today))})))}]
    ["/readiness" {:get (fn [_] (ok (readiness-today ds)))}]
-   ["/season"    {:get  (fn [_] (ok (season-plan/overview ds (today))))
-                  :post (fn [_]
-                          (planner/api-key) ; fail fast with a clear message
-                          (planner/principles)
-                          (json-response 202 {:id (season-plan/draft! ds)}))}]
+   ["/season"
+    ["" {:get    (fn [_] (ok (season-plan/overview ds (today))))
+         :post   (fn [_]
+                   (planner/api-key) ; fail fast with a clear message
+                   (planner/principles)
+                   (json-response 202 {:id (season-plan/draft! ds)}))
+         :delete (guarded (fn [_] (season-plan/delete! ds (today)) (ok (season-plan/overview ds (today)))))}]
+    ["/restore" {:post (guarded (fn [req]
+                                  (season-plan/restore! ds (:id (body req)))
+                                  (ok (season-plan/overview ds (today)))))}]]
    ["/signals"   {:get (fn [_] (ok (adapt/signals (planner/adapt-inputs ds (today)))))}]
    ["/adjust"    {:post (guarded (fn [req]
                                    (planner/api-key)

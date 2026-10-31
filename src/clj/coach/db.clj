@@ -173,11 +173,16 @@
 (def ^:private data-fixes
   ;; Garmin reports -1/-2 stress for "not enough data"; rows stored before
   ;; the normaliser filtered them.
-  ["UPDATE daily_wellness SET avg_stress = NULL WHERE avg_stress < 0"])
+  ["UPDATE daily_wellness SET avg_stress = NULL WHERE avg_stress < 0"
+   ;; one current season plan: older finished drafts (made before backups existed) become backups
+   "UPDATE season_plans SET status = 'archived', archived_at = updated_at, archived_reason = 'redraft'
+    WHERE status = 'ready' AND id < (SELECT max(id) FROM season_plans WHERE status = 'ready')"])
 
 (def ^:private added-columns
   "Columns added after a table was first created: [table column type]."
   [["activity_metrics" "route" "TEXT"]
+   ["season_plans" "archived_at" "TEXT"]
+   ["season_plans" "archived_reason" "TEXT"]
    ["plan_proposals" "kind" "TEXT NOT NULL DEFAULT 'week'"]
    ["plan_proposals" "scope_end" "TEXT"]
    ["plan_proposals" "signals" "TEXT"]

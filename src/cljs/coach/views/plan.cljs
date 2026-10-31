@@ -7,7 +7,7 @@
             [coach.views.calendar :as cal]
             [coach.views.season :as season]))
 
-(def weeks-shown 4)
+(def weeks-shown "The current week and the two the coach keeps planned ahead." 3)
 
 (def session-names ui/session-names)
 
@@ -161,7 +161,7 @@
 
 ;; ---------------------------------------------------------------------------
 
-(defn- week-card [{:keys [monday sunday week phase] :as wk} workouts proposal ui-state]
+(defn- week-card [{:keys [monday sunday week phase] :as wk} workouts proposal ui-state season?]
   (let [mine     (filter #(<= (compare monday (:date %)) 0 (compare sunday (:date %))) workouts)
         running? (= "running" (:status proposal))]
     (ui/card {}
@@ -172,11 +172,13 @@
              (if (seq mine)
                [:div.plan-list (map workout-row mine)]
                [:div.empty "Nothing planned yet."])
-             [:div.plan-footer
-              [:button.btn-ink {:disabled running?
-                                :on {:click [[:api "POST" "/api/plan/proposals" {:monday monday}]]}}
-               (cond running? "Planning…" (seq mine) "Re-plan week" :else "Propose week")]]
-             (when (and proposal (not= "closed" (:status proposal)))
+             (if season?
+               [:div.plan-footer
+                [:button.btn-ink {:disabled running?
+                                  :on {:click [[:api "POST" "/api/plan/proposals" {:monday monday}]]}}
+                 (cond running? "Planning…" (seq mine) "Re-plan week" :else "Propose week")]]
+               [:div.sub "Create the season plan first. The coach then plans the next two weeks for you."])
+             (when (and proposal (not (#{"closed" "withdrawn"} (:status proposal))))
                (proposal-panel proposal mine ui-state monday)))))
 
 (defn- season-line [{:keys [week phase days_to_race]}]
@@ -187,7 +189,7 @@
 
 (defn- coach-card [signals adjust workouts ui-state]
   (let [running? (= "running" (:status adjust))
-        open?    (and adjust (not= "closed" (:status adjust))
+        open?    (and adjust (not (#{"closed" "withdrawn"} (:status adjust)))
                       (or running? (= "failed" (:status adjust))
                           (some #(= "pending" (:decision %)) (:items adjust))))]
     (ui/card {:tint (if (some #(#{"high" "warn"} (name (:severity %))) signals) "amber" nil)}
@@ -219,9 +221,9 @@
      (when flash [:div.error flash])
      (when-let [e (get errors plan-url)] [:div.error (str "Could not load: " e)])
      (when-let [a (get data athlete-url)] (athlete/card a (:athlete ui-state)))
-     (when-let [s (get data season-url)] (season/card s))
+     (when-let [s (get data season-url)] (season/card s (:season ui-state)))
      (when p (coach-card (get data signals-url) (get data adjust-url) (:workouts p) ui-state))
      (when p
        (for [[wk prop] (map vector (:weeks p) props)]
          [:div {:replicant/key (:monday wk)}
-          (week-card wk (:workouts p) prop ui-state)]))]))
+          (week-card wk (:workouts p) prop ui-state (some? (:plan (get data season-url))))]))]))

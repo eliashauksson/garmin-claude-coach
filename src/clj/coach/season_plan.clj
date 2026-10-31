@@ -2,7 +2,8 @@
   "The long-term plan: Claude lays out every week from the current one to
   race week, each with its phase (training-principles.md §3, athlete.md §A5)
   and a target weekly TSS. The newest finished draft is the season plan;
-  weekly proposals aim at its target for their week (coach.planner/context)."
+  weekly proposals aim at its target for their week (coach.planner/context).
+  Once it exists, the coach keeps the next two weeks proposed (coach.planner/plan-ahead!)."
   (:require [clojure.data.json :as json]
             [coach.analysis :as analysis]
             [coach.plan :as plan]
@@ -114,9 +115,9 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
   "Starts drafting a season plan in the background and returns its id. A draft
   already running is reused."
   [ds]
-  (let [latest (plan/latest-season-plan ds)]
-    (if (= "running" (:status latest))
-      (:id latest)
+  (let [running (plan/latest-season-plan ds "running")]
+    (if running
+      (:id running)
       (let [today (str (LocalDate/now))
             id    (plan/create-season-plan! ds season/race-date (season/monday today) planner/model)]
         (future
@@ -128,26 +129,45 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
                                                            (json/write-str ctx))]]
                                     :schema   response-schema})]
               (plan/finish-season-plan! ds id {:context ctx :response (validate response ctx)
-                                               :warnings [] :usage usage}))
+                                               :warnings [] :usage usage})
+              (planner/plan-ahead! ds))
             (catch Throwable e
               (plan/fail-season-plan! ds id (or (ex-message e) (str (class e)))))))
         id))))
 
-(defn overview
-  "What the Plan page shows: the status of the newest draft, the newest
-  finished plan with the TSS actually recorded in its weeks so far."
+(defn delete!
+  "Removes the current plan (kept as a backup) and, with it, the upcoming
+  planned sessions and open proposals (coach.plan/clear-upcoming!). The coach
+  stops planning weeks ahead until there is a plan again."
   [ds today]
-  (let [latest (plan/latest-season-plan ds)
-        shown  (if (= "ready" (:status latest)) latest (plan/latest-season-plan ds "ready"))
-        weeks  (get-in shown [:response :weeks])
-        actual (when (seq weeks)
-                 (weekly-tss (analysis/activities ds {:from (:monday (first weeks)) :to today})))]
-    {:status         (or (:status latest) "none")
-     :error          (when (= "failed" (:status latest)) (:error latest))
-     :plan           (when shown
-                       (assoc-in shown [:response :weeks]
+  (plan/delete-season-plan! ds)
+  (plan/clear-upcoming! ds today))
+
+(defn restore!
+  "Brings back backup `id` as the current plan, then fills the weeks ahead."
+  [ds id]
+  (plan/restore-season-plan! ds id)
+  (planner/plan-ahead! ds))
+
+(defn overview
+  "What the Plan page shows: whether a draft is running or the last one
+  failed, the current plan with the TSS recorded in its weeks so far, and
+  the backups."
+  [ds today]
+  (let [running (plan/latest-season-plan ds "running")
+        current (plan/latest-season-plan ds "ready")
+        newest  (plan/latest-season-plan ds)
+        failed  (when (and (= "failed" (:status newest)) (> (:id newest) (or (:id current) 0))) newest)
+        weeks   (get-in current [:response :weeks])
+        actual  (when (seq weeks)
+                  (weekly-tss (analysis/activities ds {:from (:monday (first weeks)) :to today})))]
+    {:status         (cond running "running" failed "failed" current "ready" :else "none")
+     :error          (:error failed)
+     :plan           (when current
+                       (assoc-in current [:response :weeks]
                                  (mapv #(cond-> % (actual (:monday %)) (assoc :actual_tss (actual (:monday %))))
                                        weeks)))
+     :backups        (plan/season-backups ds)
      :current_monday (season/monday today)
      :race_date      season/race-date
      :days_to_race   (season/days-between today season/race-date)}))

@@ -58,6 +58,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Data
 
+(declare load-route!)
+
 (defn fetch! [url & [{:keys [force]}]]
   (when (or force (not (contains? (:data @state) url)))
     (when-not (contains? (:data @state) url) ; refetches keep the old render, no fade
@@ -66,12 +68,17 @@
         (.then (fn [res]
                  (if (.-ok res) (.json res) (throw (js/Error. (str "HTTP " (.-status res)))))))
         (.then (fn [body]
-                 (let [data (js->clj body :keywordize-keys true)]
+                 (let [data   (js->clj body :keywordize-keys true)
+                       before (get-in @state [:data url])]
                    (swap! state #(-> % (assoc-in [:data url] data)
                                      (update :loading disj url) (update :errors dissoc url)))
                    ;; a proposal or the athlete summary is being generated: check again shortly
-                   (when (or (= "running" (:status data)) (:summarising data))
-                     (js/setTimeout #(fetch! url {:force true}) 4000)))))
+                   (if (or (= "running" (:status data)) (:summarising data))
+                     (js/setTimeout #(fetch! url {:force true}) 4000)
+                     ;; it just finished: it may have started more work (a finished season
+                     ;; plan starts the week proposals), so reload the page's data
+                     (when (= "running" (:status before))
+                       (load-route! {:force true}))))))
         (.catch (fn [e]
                   (swap! state #(-> % (update :loading disj url)
                                     (assoc-in [:errors url] (.-message e)))))))))

@@ -79,9 +79,41 @@
     [:div.sub (str/join " · " (remove nil? [(str "Model " model)
                                             (when (:cost_chf usage) (str "cost ≈ CHF " (.toFixed (:cost_chf usage) 2)))]))]))
 
-(defn card [{:keys [status error plan current_monday days_to_race]}]
+(defn- when-text [iso]
+  (let [d (js/Date. iso)]
+    (str (.getDate d) " " (ui/months (.getMonth d)) " "
+         (.padStart (str (.getHours d)) 2 "0") ":" (.padStart (str (.getMinutes d)) 2 "0"))))
+
+(def reason-label {"redraft" "replaced by a redraft" "delete" "deleted" "restore" "swapped out by a restore"})
+
+(defn- confirm-box
+  "A red confirm banner: title, explanation, then Yes / Cancel."
+  [title text yes-label yes-actions]
+  [:div.banner.critical
+   [:span.icon "!"]
+   [:div
+    [:div [:b title]]
+    [:div.sub text]
+    [:div.plan-footer
+     [:button.btn-ink {:on {:click (conj yes-actions [:set-ui :season nil])}} yes-label]
+     [:button.pill {:on {:click [[:set-ui :season nil]]}} "Cancel"]]]])
+
+(defn- backups-block [backups]
+  (when (seq backups)
+    [:details.athlete-backups
+     [:summary (str "Backups (" (count backups) ")")]
+     (for [{:keys [id created_at archived_at archived_reason weeks peak_tss]} backups]
+       [:div.plan-footer {:replicant/key id}
+        [:span (str "Drafted " (when-text created_at) " · " weeks " weeks"
+                    (when peak_tss (str " · peak " peak_tss " TSS"))
+                    " · " (reason-label archived_reason archived_reason) " " (when-text archived_at))]
+        [:button.pill {:on {:click [[:api "POST" (str url "/restore") {:id id}]]}} "Restore"]])
+     [:div.sub "Restoring keeps the current plan as a backup. The newest 3 backups are kept."]]))
+
+(defn card [{:keys [status error plan backups current_monday days_to_race]} ui-state]
   (let [running? (= "running" status)
         {:keys [summary weeks]} (:response plan)
+        confirm  (:confirm ui-state)
         this-wk  (some #(when (= current_monday (:monday %)) %) weeks)
         peak     (some->> (seq (remove #(= "Race week" (:phase %)) weeks)) (apply max-key :tss))]
     (ui/card {}
@@ -100,8 +132,24 @@
              (cond
                running?          [:div.sub "The coach is drafting the season plan… this usually takes a minute or two."]
                (= "failed" status) [:div.error (str "Drafting failed: " error)]
-               (empty? weeks)    [:div.empty "No season plan yet. The coach lays out every week to race day, with its phase and target TSS, from the training principles and athlete.md."])
-             [:div.plan-footer
-              [:button.btn-ink {:disabled running? :on {:click [[:api "POST" url nil]]}}
-               (cond running? "Drafting…" (seq weeks) "Redraft season plan" :else "Draft season plan")]
-              (when (seq weeks) (usage-line plan))])))
+               (empty? weeks)    [:div.empty "No season plan yet. Create one first: the coach lays out every week to race day, with its phase and target TSS, from the training principles and athlete.md. Then it plans the next two weeks from your training so far, and adds a week every Monday."]
+               :else             [:div.sub "The coach keeps the next two weeks planned and adds a new week every Monday, from your training so far. You review each week before it enters the plan."])
+             (case confirm
+               :redraft (confirm-box "Redraft the season plan?"
+                                     "Claude drafts a new plan from your training so far (a paid call, about a minute or two). The current plan is kept as a backup, so you can restore it."
+                                     "Yes, redraft" [[:api "POST" url nil]])
+               :delete  (confirm-box "Delete the season plan?"
+                                     "All upcoming planned sessions that aren't done yet, and open week proposals, are removed too. The coach stops planning until there is a plan again. The plan is kept as a backup: restoring it brings it back, and the coach then plans the next two weeks again."
+                                     "Yes, delete" [[:api "DELETE" url nil]])
+               nil)
+             (when-not confirm
+               [:div.plan-footer
+                (if (seq weeks)
+                  [:button.btn-ink {:disabled running? :on {:click [[:set-in-ui :season :confirm :redraft]]}}
+                   (if running? "Drafting…" "Redraft season plan")]
+                  [:button.btn-ink {:disabled running? :on {:click [[:api "POST" url nil]]}}
+                   (if running? "Drafting…" "Create season plan")])
+                (when (seq weeks)
+                  [:button.pill {:disabled running? :on {:click [[:set-in-ui :season :confirm :delete]]}} "Delete"])
+                (when (seq weeks) (usage-line plan))])
+             (backups-block backups))))

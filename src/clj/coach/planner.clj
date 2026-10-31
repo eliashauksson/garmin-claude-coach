@@ -20,7 +20,7 @@
                                                BetaJsonOutputFormat$Schema BetaOutputConfig
                                                BetaOutputConfig$Effort BetaTextBlockParam
                                                BetaThinkingConfigAdaptive MessageCreateParams)
-           (java.time DayOfWeek Duration LocalDate)))
+           (java.time Duration LocalDate)))
 
 (def model "claude-opus-5-5")
 
@@ -84,6 +84,14 @@
      :gym_sessions (count (filter gym? acts))
      :tss          (Math/round (double (reduce + 0 (keep :tss acts))))}))
 
+(defn proposed-week
+  "Sessions still awaiting review in the latest proposal for the week of `monday`."
+  [ds monday]
+  (let [p (plan/latest-proposal ds monday)]
+    (when (= "open" (:status p))
+      (not-empty (vec (for [i (:items p) :when (= "pending" (:decision i))]
+                        (select-keys i [:date :slot :session_id :title :distance_km :duration_min])))))))
+
 (defn context
   "Everything the planner needs for the week starting `monday`."
   [ds monday]
@@ -106,6 +114,7 @@
                                                    :readiness :body_battery_high])))
      :load_today       (select-keys pmc [:ctl :atl :tsb])
      :season_plan_target (plan/season-target ds monday)
+     :proposed_previous_week (proposed-week ds (season/add-days monday -7))
      :planned_previous_and_target_weeks
      (vec (for [w (plan/workouts ds (season/add-days monday -7) (season/add-days monday 6))]
             (select-keys w [:date :slot :session_id :title :distance_km :duration_min :status])))}))
@@ -126,6 +135,8 @@ The recent activities show what the athlete actually did; a gap means time away 
 `season_plan_target`, when present, is the target week from the long-term season plan: its phase
 and weekly TSS. Aim the week at it; when readiness or recent training say otherwise, the hard rules
 and readiness win - say so in `warnings`.
+`proposed_previous_week`, when present, lists sessions proposed for the week before that the
+athlete hasn't reviewed yet; treat them as planned.
 
 Return only sessions (rest days have no entry). Dates must fall inside the target week. Two
 sessions on one day use the AM and PM slots. Give every session an estimated duration; use
@@ -261,21 +272,31 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
     {:response (assoc response :workouts ws)
      :warnings (rules/check-week monday ws {:prev prev})}))
 
+(defn- run-proposal! [ds id monday]
+  (try
+    (let [ctx (context ds monday)
+          {:keys [response usage]} (call-claude (principles) (user-message ctx) response-schema)
+          {:keys [response warnings]} (validate monday response ctx)]
+      (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
+    (catch Throwable e
+      (plan/fail-proposal! ds id (or (ex-message e) (str (class e)))))))
+
 (defn propose!
   "Starts a proposal for the week of `monday` in the background and returns
   its id. Poll coach.plan/proposal for the result."
   [ds monday]
   (let [monday (season/monday monday)
         id     (plan/create-proposal! ds monday model)]
-    (future
-      (try
-        (let [ctx (context ds monday)
-              {:keys [response usage]} (call-claude (principles) (user-message ctx) response-schema)
-              {:keys [response warnings]} (validate monday response ctx)]
-          (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
-        (catch Throwable e
-          (plan/fail-proposal! ds id (or (ex-message e) (str (class e)))))))
+    (future (run-proposal! ds id monday))
     id))
+
+(defn propose-weeks!
+  "Proposals for several weeks, one after the other, so each week sees the
+  one before it. Returns their ids."
+  [ds mondays]
+  (let [ids (mapv #(plan/create-proposal! ds % model) mondays)]
+    (future (doseq [[id m] (map vector ids mondays)] (run-proposal! ds id m)))
+    ids))
 
 ;; ---------------------------------------------------------------------------
 ;; Adapting the plan between weekly proposals
@@ -398,10 +419,43 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 
 (defn- seen? [ds k] (seq (db/query ds ["SELECT 1 FROM adapt_signals WHERE key = ?" k])))
 
+(def horizon-weeks "Weeks after the current one that are kept planned." 2)
+
+(defn- retry? [p]
+  ;; a failed proposal is retried after a while, not on every sync
+  (and (= "failed" (:status p))
+       (.isBefore (java.time.Instant/parse (:updated_at p))
+                  (.minus (java.time.Instant/now) (Duration/ofHours 6)))))
+
+(defn weeks-to-plan
+  "The next `horizon-weeks` weeks after the current one (up to race week) with
+  nothing planned or proposed yet."
+  [ds today]
+  (let [m (season/monday today)]
+    (vec (for [i (range 1 (inc horizon-weeks))
+               :let [mo (season/add-days m (* 7 i))
+                     p  (plan/latest-proposal ds mo)]
+               :when (and (<= (compare mo (season/monday season/race-date)) 0)
+                          (empty? (plan/workouts ds mo (season/add-days mo 6)))
+                          (or (nil? p) (= "withdrawn" (:status p)) (retry? p)))]
+           mo))))
+
+(defonce ^:private plan-ahead-lock (Object.))
+
+(defn plan-ahead!
+  "Keeps the weeks after the current one proposed, once a season plan exists:
+  the next two weeks at first, then each Monday the new second week. Returns
+  the ids of the proposals it started."
+  [ds]
+  (locking plan-ahead-lock
+    (let [ms (when (and (api-key?) (athlete/content) (plan/latest-season-plan ds "ready"))
+               (weeks-to-plan ds (str (LocalDate/now))))]
+      (if (seq ms) (propose-weeks! ds ms) []))))
+
 (defn check!
   "Runs after each sync. New triggering signals start one adjustment proposal
-  (at most one a day, and not while another adjustment awaits review). On
-  Sundays, next week is proposed if its type is set and nothing is planned."
+  (at most one a day, and not while another adjustment awaits review). Then
+  the weeks ahead are proposed (plan-ahead!)."
   [ds]
   (let [today   (str (LocalDate/now))
         sigs    (adapt/signals (adapt-inputs ds today))
@@ -415,11 +469,5 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
           (next.jdbc/execute! ds ["INSERT OR IGNORE INTO adapt_signals (key, proposal_id, first_seen) VALUES (?, ?, ?)"
                                   (:key s) id today]))
         (swap! proposed conj id)))
-    (let [next-monday (season/add-days (season/monday today) 7)
-          wk          (first (plan/weeks ds next-monday next-monday))]
-      (when (and (= DayOfWeek/SUNDAY (.getDayOfWeek (LocalDate/parse today)))
-                 (:week wk) (api-key?) (athlete/content)
-                 (empty? (plan/workouts ds next-monday (season/add-days next-monday 6)))
-                 (nil? (plan/latest-proposal ds next-monday)))
-        (swap! proposed conj (propose! ds next-monday))))
+    (swap! proposed into (plan-ahead! ds))
     {:signals sigs :proposed @proposed}))
