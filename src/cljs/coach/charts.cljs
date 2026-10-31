@@ -130,9 +130,31 @@
             (set! (.-group c) group)
             (echarts/connect group))))))}])
 
+(defn- reset-control
+  "A map button under the zoom buttons that calls `fit!` to show the whole track again."
+  [fit!]
+  (let [^js ctrl (L/control #js {:position "topright"})]
+    (set! (.-onAdd ctrl)
+          (fn [_]
+            (let [du  (.-DomUtil L)
+                  div (.create du "div" "leaflet-bar leaflet-control map-reset")
+                  ^js a (.create du "a" "" div)]
+              (set! (.-href a) "#")
+              (.setAttribute a "role" "button")
+              (.setAttribute a "title" "Show the whole track")
+              (.setAttribute a "aria-label" "Show the whole track")
+              (set! (.-innerHTML a)
+                    (str "<svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\""
+                         " stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+                         "<path d=\"M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5\"/><circle cx=\"12\" cy=\"12\" r=\"2.5\"/></svg>"))
+              (.disableClickPropagation (.-DomEvent L) div)
+              (.on (.-DomEvent L) a "click" (fn [e] (.preventDefault e) (fit!)))
+              div)))
+    ctrl))
+
 (defn route-map
-  "Leaflet map of the track. The OpenStreetMap tiles are muted to the theme
-  by a CSS filter, and the track, its casing and the start/end dots are
+  "Leaflet map of the track. The OpenStreetMap tiles keep their colours (dark
+  mode inverts them with a CSS filter), and the track, its casing and the start/end dots are
   coloured by CSS classes (.map in app.css), so the theme toggle restyles
   the map without remounting it. `family` is a ui/families id."
   [{:keys [latlngs key family]}]
@@ -160,7 +182,9 @@
           (doseq [[p class] [[(first latlngs) "route-dot start"] [(last latlngs) "route-dot end"]]]
             (.addTo (L/circleMarker (clj->js p) #js {:className class :radius 6 :weight 3 :interactive false})
                     m))
-          (.fitBounds m (.getBounds line) #js {:padding #js [24 24]})
+          (let [fit! #(.fitBounds m (.getBounds line) #js {:padding #js [24 24]})]
+            (fit!)
+            (.addTo (reset-control fit!) m))
           (set! (.-__map node) m)
           (observe-resize! node #(.invalidateSize m)))
         :replicant.life-cycle/unmount
