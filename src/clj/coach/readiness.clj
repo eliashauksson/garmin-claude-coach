@@ -1,5 +1,5 @@
 (ns coach.readiness
-  "Morning readiness check (training-principles.md §7.1, thresholds in athlete.md §A3). Pure: takes the
+  "Morning readiness check (training-principles.md: Monitoring; thresholds in athlete.md: Baselines). Pure: takes the
   recent wellness rows and today's planned workouts, returns the signals and
   a suggested change per workout. Nothing is applied without approval."
   (:require [coach.plan-rules :as rules]))
@@ -13,7 +13,7 @@
   "`days` are wellness rows, oldest first, ending today (:hrv_avg :hrv_status
   :rhr :sleep_s :sleep_score :readiness :body_battery_high). `workouts` are
   today's planned workouts. `phase` (season plan) decides whether LONG counts
-  as key. `settings` are the athlete's thresholds (:hrv_low :rhr_high, §A3);
+  as key. `settings` are the athlete's thresholds (:hrv_low :rhr_high, athlete.md: Baselines);
   a check without its threshold is skipped."
   [days workouts phase {:keys [hrv_low rhr_high]}]
   (let [t        (last days)

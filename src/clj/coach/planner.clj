@@ -68,8 +68,8 @@
 (defn- secs [a] (or (:moving_s a) (:duration_s a) 0))
 
 (defn week-summary
-  "§8 weekly metrics from recorded activities. Easy = runs with avg HR at or
-  below the top of the athlete's Easy zone (§A3); without it, no easy share."
+  "Weekly metrics from recorded activities. Easy = runs with avg HR at or
+  below the top of the athlete's Easy zone (athlete.md: Thresholds & zones); without it, no easy share."
   [monday acts]
   (let [runs (filter run-act? acts)
         rt   (reduce + 0 (map secs runs))
@@ -126,14 +126,18 @@
 
 (def system-intro
   "You are the running coach for the athlete described below. Two documents follow: the general
-training principles (§0-§9) and the athlete's profile, goal and season plan (§A1-§A9).
+training principles and athlete.md (the athlete's profile, goal and season plan). Refer to
+sections by their heading. Rules in athlete.md override the principles' (d) defaults.
 You plan one week at a time; the athlete reviews every session before it enters the plan.
 The plan lives only in the athlete's dashboard - nothing is sent to the Garmin watch.
 
-Follow the principles. The hard rules (§9) are never broken; when rules conflict, use the
-priority order in §0. Remember that Garmin-recorded load underestimates the athlete's real load (§A2).
-Availability isn't known in advance: plan the full week for the current phase (§5.1, §6.1).
-The recent activities show what the athlete actually did; a gap means time away (§6.2, §A2).
+Follow the principles and their plan procedure. The checks in Plan procedure step 7 are never
+broken; when rules conflict, use the Conflict priority. Remember that Garmin-recorded load
+underestimates the athlete's real load (athlete.md: Constraints).
+Availability isn't known in advance: plan the full week for the current phase (athlete.md:
+Constraints, Overrides & specifics).
+The recent activities show what the athlete actually did; a gap means time away (Load & recovery:
+return after break; athlete.md: Constraints).
 `season_plan_target`, when present, is the target week from the long-term season plan: its phase
 and weekly TSS. Aim the week at it; when readiness or recent training say otherwise, the hard rules
 and readiness win - say so in `warnings`.
@@ -363,7 +367,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
   (str "Adjust the planned sessions from " today " to " scope-end " in response to the signals"
        " (and the athlete's note, if there is one). Change, remove or add sessions only as far as the"
        " signals and the principles justify; leave everything else alone and don't list it."
-       " Don't touch sessions before today or ones already done. Never make up missed sessions (§6.4)."
+       " Don't touch sessions before today or ones already done. Never make up missed sessions (Monitoring)."
        " For op change and remove, use the workout_id from plan_in_scope and give the session's new"
        " fields (for remove, its current ones). For op add, use workout_id 0."
        " If nothing should change, return no changes and explain why in the summary.\n\n"

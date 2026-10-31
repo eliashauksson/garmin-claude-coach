@@ -1,6 +1,6 @@
 (ns coach.season-plan
   "The long-term plan: Claude lays out every week from the current one to
-  race week, each with its phase (training-principles.md §3, athlete.md §A5)
+  race week, each with its phase (training-principles.md: Periodization; athlete.md: Proposed macro)
   and a target weekly TSS. The newest finished draft is the season plan;
   weekly proposals aim at its target for their week (coach.planner/context).
   Once it exists, the coach keeps the next two weeks proposed (coach.planner/plan-ahead!)."
@@ -56,25 +56,27 @@
 
 (def system-intro
   "You are the running coach for the athlete described below. Two documents follow: the general
-training principles (§0-§9) and the athlete's profile, goal and season plan (§A1-§A9).
+training principles and athlete.md (the athlete's profile, goal and season plan). Refer to
+sections by their heading. Rules in athlete.md override the principles' (d) defaults.
 
 Draft the long-term plan: every week from the current week to race week, with its phase and a
 target weekly TSS. Weekly sessions are planned later, one week at a time, aiming at these targets.
 
-- Follow the periodization (§3) and the athlete's season plan (§A5): its phases, dates, peak,
-  cutback and test weeks. If today's date or the athlete's current fitness no longer fits §A5,
+- Follow the Periodization and the athlete's season plan (athlete.md: Proposed macro): its phases,
+  dates, peak, cutback and test weeks. If today's date or the athlete's current fitness no longer fits it,
   adapt it and say what you changed in `warnings`.
 - TSS is all recorded training as this dashboard computes it: hrTSS for runs and marches, plus gym
-  sessions. Remember that Garmin-recorded load underestimates the athlete's real load (§A2).
-- Start from what the athlete has actually done (`last_12_weeks`, `load_today`), not from §A5's
-  numbers alone. Progress within the hard rules (§9.1): no week more than about +10% over the last
-  normal week, a cutback every 3rd-4th week at about -25% (§9.2), a 3-week taper (§9.3).
+  sessions. Remember that Garmin-recorded load underestimates the athlete's real load (athlete.md: Constraints).
+- Start from what the athlete has actually done (`last_12_weeks`, `load_today`), not from the
+  macro's numbers alone. Progress within Load & recovery: no week more than about +10% over the last
+  normal week, a recovery week per the build:recovery rhythm, a taper per Periodization and
+  Running › By period.
 - The last week is `Race week`; its target includes the race itself.
 - Return exactly one entry per Monday in `weeks_to_plan`, in order.
 - `focus`: a few words on the week's key work (e.g. \"Long run 18 km, hill repeats\").
 - `cutback`: true for cutback, absorb and test weeks with reduced load.
 - `summary`: 2-3 sentences on the season's shape.
-- `warnings`: only what the athlete must know (changes to §A5, risks, missing information), one line each.
+- `warnings`: only what the athlete must know (changes to the macro, risks, missing information), one line each.
 
 # Coaching documents
 

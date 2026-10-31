@@ -80,7 +80,7 @@
            (json-response 400 {:error (ex-message e)})))))
 
 (defn readiness-today
-  "§7.1 check for today's planned workouts."
+  "Readiness check (principles: Monitoring) for today's planned workouts."
   [ds]
   (let [t    (today)
         days (analysis/wellness ds (season/add-days t -1) t)
