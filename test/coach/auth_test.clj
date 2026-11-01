@@ -21,3 +21,13 @@
     (is (= st (auth/with-sync-result st fail "2026-11-01T11:00:00Z")) "renewed after the failure")
     (is (= st (auth/with-sync-result st (assoc fail :kind :unreachable) nil)) "not a login problem")
     (is (= st (auth/with-sync-result st {:ok true} nil)))))
+
+(deftest connected-test
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "garmin-tokens" (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (is (false? (auth/connected? (str dir))) "an empty folder: never logged in")
+    (is (false? (auth/connected? (str dir "/missing"))) "no folder at all")
+    (spit (java.io.File. dir "garmin_tokens.json") "{}")
+    (is (true? (auth/connected? (str dir))))))
+
+(deftest not-connected-status-test
+  (is (= :not_connected (:level (auth/status nil false))) "before the first login, never \"expired\""))

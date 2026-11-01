@@ -9,15 +9,17 @@
             [coach.charts :as c]
             [coach.i18n :as i18n :refer [t tk]]
             [coach.ui :as ui]
+            [coach.views.feedback :as feedback]
             [coach.views.load :as load]
             [coach.views.status :as status]))
 
 (def url "/api/overview")
 
 (defn urls
-  "The overview, then the training load's (load/urls)."
+  "The overview, the training load's (load/urls), then the activities
+  waiting for \"How did it go?\"."
   [route]
-  (into [url] (load/urls route)))
+  (conj (into [url] (load/urls route)) feedback/due-url))
 
 ;; Garmin's enums as shown (ui/enum); listed so each has a translation.
 (def enum-texts
@@ -867,6 +869,43 @@
                                (when (:limits endurance) (endurance-gauge endurance))))})]))
 
 ;; ---------------------------------------------------------------------------
+;; Getting started (a new install)
+
+(defn- setup-card
+  "The steps a new install still needs; gone once all are done."
+  [{:keys [setup running job] :as sync}]
+  (let [{:keys [garmin synced claude history athlete season]} setup
+        step (fn [k done? title body]
+               [:li.setup-step {:replicant/key k :class (when done? "done")}
+                [:span.setup-check {:aria-hidden "true"} (if done? "✓" "")]
+                [:div [:div.setup-title title (when done? [:span.visually-hidden (str " " (t "done"))])]
+                 (when-not done? [:div.sub body])]])]
+    (when (and setup (not (and garmin synced claude history athlete season)))
+      [:section.card.setup {:replicant/key "setup"}
+       (ui/label-row {:icon :bolt :accent "--blue" :tint "--tint-blue" :soft? true :label (t "Getting started")})
+       [:ol.setup-steps
+        (step "garmin" garmin (t "Connect Garmin")
+              [:span (t "Log in once in a terminal.") " " [:a {:href "#/settings"} (t "How to connect")]])
+        (step "sync" synced (t "First sync")
+              (if garmin
+                [:span (t "Loads the last 4 weeks (a few minutes).") " " (status/sync-button sync)]
+                (t "After Garmin is connected.")))
+        (step "claude" claude (t "Connect Claude")
+              [:span (t "With your own API key.") " " [:a {:href "#/settings"} (t "How to connect")]])
+        (step "history" history (t "Load your full history")
+              (cond
+                (and running (= "history" job)) (t "Loading… you can use the dashboard meanwhile.")
+                synced [:span (t "Everything before the first sync, for the long-term charts and the coach.") " "
+                        [:button.pill {:disabled running :on {:click [[:load-history]]}} (t "Load full history")]]
+                :else (t "After the first sync.")))
+        (step "athlete" athlete (t "Tell the coach about yourself")
+              [:span (t "Your goal race, availability and history, in a chat with Claude.") " "
+               [:a {:href "#/plan"} (t "Open the Plan page")]])
+        (step "season" season (t "Create the season plan")
+              [:span (t "From then on the coach keeps the next two weeks planned.") " "
+               [:a {:href "#/plan"} (t "Open the Plan page")]])]])))
+
+;; ---------------------------------------------------------------------------
 
 (defn- skeleton []
   [:div.skeleton {:aria-hidden "true"}
@@ -875,8 +914,8 @@
    [:div.skel {:style {:height "260px"}}]
    [:div.skel {:style {:height "320px"}}]])
 
-(defn view [{:keys [data errors sync route] :as s}]
-  (let [[ov-url load-url volume-url] (urls route)
+(defn view [{:keys [data errors sync route] ui-state :ui :as s}]
+  (let [[ov-url load-url volume-url due-url] (urls route)
         d     (get data ov-url)
         today (or (:date d) (ui/iso-today))]
     [:div {:style {:display "contents"}}
@@ -886,11 +925,13 @@
        [:h1 "Coach"]]
       (status/auth-pill (:auth sync))
       (status/sync-button sync)]
+     (setup-card sync)
      (when-let [e (get errors ov-url)] [:div.error (t "Could not load: {0}" e)])
      (if-not d
        (when-not (get errors ov-url) (skeleton))
        (list
         (takeaway d)
+        (feedback/due-card ui-state (get data due-url))
         [:div.morning {:replicant/key "morning"}
          (readiness-card (:readiness d))
          (vitals-grid d)]

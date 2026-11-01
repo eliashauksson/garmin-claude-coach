@@ -190,3 +190,41 @@
         (is (thrown? clojure.lang.ExceptionInfo (sync/sync-overview! (src :auth) ds "2026-11-01")))
         (sync/sync-overview! (src :garmin) ds "2026-11-01")
         (is (= 1 (count (db/query ds ["SELECT * FROM race_predictions"]))))))))
+
+;; ---------------------------------------------------------------------------
+;; Loading the full history
+
+(defrecord HistorySource [first-day]
+  ;; data on every day from `first-day` on, nothing before
+  source/DataSource
+  (fetch-activities [_ start end]
+    (for [date (gm/dates start end) :when (>= (compare date first-day) 0)
+          :when (zero? (mod (.getDayOfYear (java.time.LocalDate/parse date)) 7))]
+      {:id (parse-long (str/replace date "-" "")) :date date :sport "running" :raw {}}))
+  (fetch-activity [_ id] {:id id})
+  (fetch-wellness [_ start end]
+    (for [date (gm/dates start end)]
+      (cond-> {:date date :raw {}} (>= (compare date first-day) 0) (assoc :rhr 50)))))
+
+(deftest backfill-finds-the-start-test
+  (let [ds (temp-ds)]
+    (binding [*out* (java.io.StringWriter.)]
+      (db/set-state! ds :synced_through "2026-10-29")
+      (db/set-state! ds :backfill_before "2026-10-02")
+      (is (false? (sync/history-complete? ds)))
+      (is (= :paused (sync/backfill! (->HistorySource "2025-06-01") ds {:max-chunks 2})))
+      (is (= "false" (db/get-state ds :history_complete)) "a running backfill records that it isn't done")
+      (is (= :complete (sync/backfill! (->HistorySource "2025-06-01") ds)))
+      (testing "it stops after half a year of nothing, not at the floor"
+        (let [before (db/get-state ds :backfill_before)]
+          (is (neg? (compare before "2025-06-01")))
+          (is (pos? (compare before "2024-11-01")))))
+      (is (true? (sync/history-complete? ds)))
+      (is (= "2025-06-01" (sync/earliest-date ds))))))
+
+(deftest legacy-history-test
+  (let [ds (temp-ds)]
+    (db/set-state! ds :backfill_before "2021-03-26")
+    (is (true? (sync/history-complete? ds)) "an install that reached the old fixed start is complete")
+    (db/set-state! ds :history_complete "false")
+    (is (false? (sync/history-complete? ds)) "unless a backfill says it is still going")))

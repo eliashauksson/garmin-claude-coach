@@ -58,13 +58,19 @@ font and Leaflet's CSS into `resources/public/`).
 
 ## Setup
 ```sh
-clojure -M -m coach.auth login        # Garmin login (email, password, MFA)
 npm install
 npm run release                       # builds resources/public/js/main.js
-clojure -M -m coach.sync backfill     # one time: full history (about 1 h)
-clojure -M -m coach.sync streams      # one time: per-second activity data (about 1 h)
-clojure -M -m coach.sync vo2max
+clojure -M -m coach.auth login        # Garmin login (email, password, MFA), once
+make run                              # http://127.0.0.1:8080/
 ```
+The Dashboard then shows a **Getting started** checklist until everything is set up:
+1. **First sync**: loads the last 4 weeks.
+2. **Claude**: paste your API key in Settings › General. It's saved in
+   `~/.config/coach/anthropic-key`, readable only by you; `ANTHROPIC_API_KEY` works too.
+3. **Load full history**: everything before the first sync, then the per-second data of each
+   activity (an hour or two, in the background; resumes after a restart). It stops where Garmin
+   has nothing older. In a terminal: `clojure -M -m coach.sync history`.
+4. **Athlete information and season plan**, on the Plan page.
 
 ## Run
 | Command | What it does |
@@ -80,7 +86,7 @@ clojure -M -m coach.sync vo2max
 | `make restore FILE=…` | Restores a backup (dashboard stopped) |
 
 Single sync steps: `clojure -M -m coach.sync <step>`, where the step is `intraday [days]`,
-`thresholds` (LTHR, threshold pace, FTP, HR zones), `overview` (training status, predictions,
+`history` (everything before the first sync), `thresholds` (LTHR, threshold pace, FTP, HR zones), `overview` (training status, predictions,
 endurance, sleep need) or `metrics` (recomputes TSS and the other metrics).
 `clojure -M -m coach.auth` shows the Garmin login countdown.
 

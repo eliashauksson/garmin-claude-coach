@@ -48,6 +48,22 @@
                                      (tk "If it keeps failing, Garmin may have changed its API: check data/mcp-server.log.")])]
         (banner level (t title) (t "Details: {0}" message) (t hint) (data-up-to last_ok))))))
 
+(defn- connect-banners
+  "Before Garmin or Claude is connected. Not on the Dashboard or Settings,
+  whose setup checklist and connect cards say the same."
+  [{:keys [setup auth]} page]
+  (when (and setup (not (#{:dashboard :settings} page)))
+    (list
+     (when (false? (:garmin setup))
+       (banner "warn" (t "Garmin isn't connected yet")
+               [:span (t "Log in once in a terminal, in the app folder:") " " [:code (:renew_command auth)]
+                (t ", then press Sync now.")]
+               [:a {:href "#/settings"} (t "Settings › General")]))
+     (when (false? (:claude setup))
+       (banner "warn" (t "Claude isn't connected yet")
+               (t "Planning, adjustments and the athlete chat need a Claude API key.")
+               [:a {:href "#/settings"} (t "Add it in Settings › General")])))))
+
 (defn- auth-banner
   "Shown only in the final week of the login, once a sync failed on it, or past
   the estimated expiry."
@@ -83,13 +99,14 @@
 
 (defn view
   "Banners for every page. `sync` is the polled /api/sync state."
-  [{:keys [sync server-down] ui-state :ui}]
+  [{:keys [sync server-down route] ui-state :ui}]
   (if server-down
     (banner "critical" (t "Can't reach the coach server")
             [:span (t "It may have stopped. Start it again with") " " [:code "make run"] (t "; this page reconnects by itself.")])
     (list (when (:translating sync)
             [:div.sub.translating {:role "status"} [:span.spinner {:aria-hidden "true"}] " "
              (t "Claude's texts are being translated; they appear here when done.")])
+          (connect-banners sync (:page route))
           (credits-banner (:claude sync) (:claude-check ui-state))
           (auth-banner (:auth sync) (:last_ok sync))
           (sync-banner sync))))
@@ -101,15 +118,20 @@
     "urgent"  (ui/status-pill :critical (t "Garmin login · {0} days left" days_left))
     "expired" (ui/status-pill :critical (t "Garmin login expired"))
     "unknown" (ui/status-pill :warn (t "Garmin login not recorded"))
+    "not_connected" (ui/status-pill :warn (t "Garmin not connected"))
     nil))
 
-(defn sync-button [{:keys [running last_result]}]
-  [:span {:style {:display "inline-flex" :gap "10px" :align-items "center"}}
-   (when (and (not running) (false? (:ok last_result))) [:span.error (t "Sync failed")])
-   [:button.btn-ink {:disabled running :on {:click [[:sync]]}}
-    (if running
-      (list [:span.spinner {:aria-hidden "true"}] (t "Syncing…"))
-      (t "Sync now"))]])
+(defn sync-button [{:keys [running job last_result setup]}]
+  (let [no-garmin (false? (:garmin setup))]
+    [:span {:style {:display "inline-flex" :gap "10px" :align-items "center"}}
+     (when (and (not running) (not no-garmin) (false? (:ok last_result))) [:span.error (t "Sync failed")])
+     [:button.btn-ink {:disabled (or running no-garmin)
+                       :title (when no-garmin (t "Connect Garmin first"))
+                       :on {:click [[:sync]]}}
+      (cond
+        (and running (= "history" job)) (list [:span.spinner {:aria-hidden "true"}] (t "Loading history…"))
+        running (list [:span.spinner {:aria-hidden "true"}] (t "Syncing…"))
+        :else (t "Sync now"))]]))
 
 (defn backup-link
   "Sidebar: download a fresh backup; shows when the last one was made."

@@ -47,3 +47,21 @@
       (is (= [45.0999 10.0999] (last r)))))
   (is (nil? (analysis/route-thumb {:lat [45.0] :lon [10.0]})))
   (is (nil? (analysis/route-thumb nil))))
+
+(deftest feedback-due-test
+  (let [ds  (temp-ds)
+        act (fn [id date] {:id id :date date :start_time_local (str date "T07:00:00") :sport "running"
+                           :name (str "Run " id) :raw {}})]
+    (db/upsert-activities! ds [(act 1 "2026-10-25") (act 2 "2026-10-26") (act 3 "2026-10-30")
+                               (act 4 "2026-11-01") (act 5 "2026-11-02")])
+    (testing "the last 7 days (today included) without an answer, newest first"
+      (is (= [4 3 2] (map :id (analysis/feedback-due ds "2026-11-01")))))
+    (testing "an answer or a skip takes an activity off the list"
+      (analysis/save-feedback! ds 4 {:note "  Legs heavy, slept badly  " :rpe 7})
+      (analysis/save-feedback! ds 3 {:skipped true})
+      (is (= [2] (map :id (analysis/feedback-due ds "2026-11-01")))))
+    (testing "the note is trimmed; a pain location only counts with pain"
+      (analysis/save-feedback! ds 2 {:note " " :pain false :pain_location "knee"})
+      (is (= {:note "Legs heavy, slept badly" :rpe 7 :pain 0}
+             (select-keys (analysis/activity ds 4) [:note :rpe :pain])))
+      (is (= [nil nil] ((juxt :note :pain_location) (analysis/activity ds 2)))))))

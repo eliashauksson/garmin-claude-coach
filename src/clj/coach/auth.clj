@@ -5,7 +5,8 @@
   runs out is the refresh token. Garmin doesn't expose its expiry, and the
   garmin_mcp docs give ~6 months, so we record the login date ourselves and
   count down from that. It's an estimate: a failing sync is the real signal."
-  (:require [coach.db :as db]
+  (:require [clojure.java.io :as io]
+            [coach.db :as db]
             [coach.garmin-mcp :as gm])
   (:import (java.time LocalDate)
            (java.time.temporal ChronoUnit)))
@@ -41,16 +42,33 @@
     (assoc st :level :expired :sync_error (:message last-sync) :failed_at (:finished_at last-sync))
     st))
 
+(defn token-dir
+  "Where garmin-mcp-auth stores the login (garmin_mcp reads it from there)."
+  []
+  (or (not-empty (System/getenv "GARMINTOKENS"))
+      (str (System/getProperty "user.home") "/.garminconnect")))
+
+(defn connected?
+  "Whether Garmin has ever been connected: a login token is stored. (Whether
+  it still works shows when a sync runs.)"
+  ([] (connected? (token-dir)))
+  ([dir] (boolean (some #(and (.isFile ^java.io.File %) (pos? (.length ^java.io.File %)))
+                        (.listFiles (io/file dir))))))
+
 (defn status
-  "Countdown for the stored login date ({:level :unknown} if none recorded),
-  overridden to :expired when the last sync failed on the login."
-  [ds]
-  (with-sync-result
-    (if-let [d (db/get-state ds :garmin_login_on)]
-      (countdown d (str (LocalDate/now)))
-      {:level :unknown :renew_command renew-command})
-    ((requiring-resolve 'coach.sync/last-result) ds)
-    (db/get-state ds :garmin_login_at)))
+  "{:level :not_connected} before the first login. Otherwise the countdown
+  for the stored login date ({:level :unknown} if none recorded), overridden
+  to :expired when the last sync failed on the login."
+  ([ds] (status ds (connected?)))
+  ([ds connected]
+   (if-not connected
+     {:level :not_connected :renew_command renew-command}
+     (with-sync-result
+       (if-let [d (db/get-state ds :garmin_login_on)]
+         (countdown d (str (LocalDate/now)))
+         {:level :unknown :renew_command renew-command})
+       ((requiring-resolve 'coach.sync/last-result) ds)
+       (db/get-state ds :garmin_login_at)))))
 
 (defn record-login! [ds date]
   (db/set-state! ds :garmin_login_on date)
@@ -73,6 +91,7 @@
 
 (defn describe [{:keys [level days_left expires_on renew_command]}]
   (case level
+    :not_connected (str "Garmin isn't connected yet. Log in: " renew_command)
     :unknown "No Garmin login date recorded."
     :expired (str "Garmin login has probably expired (est. " expires_on "). Renew: " renew_command)
     (str "Garmin login: " days_left " days left (est. expires " expires_on ")"

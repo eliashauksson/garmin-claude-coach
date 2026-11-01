@@ -306,6 +306,29 @@
                                                           :still-out (boolean (:credits_out claude))}))
                                        (poll-sync!))))
                             (.catch #(swap! state assoc-in [:ui :claude-check] {:checking false :result (.-message %)}))))
+      :claude-key   (let [op   (first args)
+                          path [:ui :claude-key]
+                          [method url body] (case op
+                                              :save   ["PUT" settings/key-url {:key (get-in @state (conj path :input))}]
+                                              :test   ["POST" "/api/claude/test" nil]
+                                              :remove ["DELETE" settings/key-url nil])
+                          done (fn [r]
+                                 (swap! state #(-> %
+                                                   (assoc-in path (cond-> {:result (when (not= op :remove) r)}
+                                                                    (and (= op :save) (not (:ok r)))
+                                                                    (assoc :input (get-in % (conj path :input)))))
+                                                   (cond-> (:key r) (assoc-in [:data settings/key-url] (:key r)))
+                                                   (cond-> (= op :remove) (assoc-in [:data settings/key-url] r))))
+                                 (poll-sync!))]
+                      (swap! state update-in path assoc :busy true :result nil)
+                      (-> (js/fetch url #js {:method method :headers #js {"Content-Type" "application/json"}
+                                             :body (when body (js/JSON.stringify (clj->js body)))})
+                          (.then (fn [res] (.then (.json res) #(let [r (js->clj % :keywordize-keys true)]
+                                                                 (if (.-ok res) r {:ok false :error (:error r)})))))
+                          (.then done)
+                          (.catch #(done {:ok false :error (.-message %)}))))
+      :load-history (-> (js/fetch "/api/history" #js {:method "POST"})
+                        (.then (fn [_] (poll-sync!))))
       :backup-started (doseq [ms [3000 10000 30000]] ; the download starts once the zip is written
                         (js/setTimeout #(fetch! status/backup-url {:force true}) ms))
       :set-theme    (set-theme! (first args))

@@ -92,17 +92,33 @@
 ;; ---------------------------------------------------------------------------
 ;; Athlete feedback
 
+(declare activities)
+
 (defn save-feedback!
-  "RPE 1-10, pain (bool) with location, and a note for one activity."
-  [ds activity-id {:keys [rpe pain pain_location note]}]
+  "RPE 1-10, pain (bool) with location, and a note for one activity.
+  `skipped` true records that the athlete dismissed the question."
+  [ds activity-id {:keys [rpe pain pain_location note skipped]}]
   (when (and rpe (not (<= 1 rpe 10)))
     (throw (ex-info "RPE must be 1-10" {:rpe rpe})))
-  (next.jdbc/execute! ds ["INSERT INTO activity_feedback (activity_id, rpe, pain, pain_location, note, updated_at)
-                           VALUES (?, ?, ?, ?, ?, ?)
-                           ON CONFLICT(activity_id) DO UPDATE SET rpe = excluded.rpe, pain = excluded.pain,
-                             pain_location = excluded.pain_location, note = excluded.note,
-                             updated_at = excluded.updated_at"
-                          activity-id rpe (if pain 1 0) pain_location note (str (java.time.Instant/now))]))
+  (let [note (some-> note str/trim not-empty)
+        loc  (when pain (some-> pain_location str/trim not-empty))]
+    (next.jdbc/execute! ds ["INSERT INTO activity_feedback (activity_id, rpe, pain, pain_location, note, skipped, updated_at)
+                             VALUES (?, ?, ?, ?, ?, ?, ?)
+                             ON CONFLICT(activity_id) DO UPDATE SET rpe = excluded.rpe, pain = excluded.pain,
+                               pain_location = excluded.pain_location, note = excluded.note,
+                               skipped = excluded.skipped, updated_at = excluded.updated_at"
+                            activity-id rpe (if pain 1 0) loc note (if skipped 1 0) (str (java.time.Instant/now))])))
+
+(def feedback-days "Activities from this many days back are asked about." 7)
+
+(defn feedback-due
+  "Activities from the last `feedback-days` days (today included) with no
+  feedback yet and not skipped, newest first: the \"How did it go?\" list."
+  [ds today]
+  (->> (activities ds {:from (str (.minusDays (LocalDate/parse today) (dec feedback-days))) :to today})
+       (filter #(nil? (:feedback_at %)))
+       (mapv #(select-keys % [:id :date :start_time_local :sport :name :distance_m :duration_s :moving_s
+                              :avg_hr :tss :garmin_rpe]))))
 
 (defn effective-rpe
   "The athlete's in-app RPE, else the RPE entered on the watch."
@@ -122,7 +138,7 @@
           m.tss, m.tss_method, m.intensity, m.tss_per_hour, m.np, m.ngp_mps, m.vi, m.ef,
           m.decoupling, m.kj, m.hr_zones_s, m.peaks, m.route,
           json_extract(a.raw, '$.detail.workout_rpe') / 10.0 AS garmin_rpe,
-          f.rpe, f.pain, f.pain_location, f.note
+          f.rpe, f.pain, f.pain_location, f.note, f.updated_at AS feedback_at
    FROM activities a
    LEFT JOIN activity_metrics m ON m.activity_id = a.id
    LEFT JOIN activity_feedback f ON f.activity_id = a.id")

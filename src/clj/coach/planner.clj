@@ -51,11 +51,61 @@
                  (throw (ex-info (t "No athlete information yet. Add it on the Plan page first.") {:type :no-athlete})))))
 (def key-file (str (System/getProperty "user.home") "/.config/coach/anthropic-key"))
 
+(def ^:dynamic *key-file* key-file)
+
+(defn- file-key [] (let [f (io/file *key-file*)] (when (.exists f) (not-empty (str/trim (slurp f))))))
+
 (defn api-key []
-  (let [f (io/file key-file)]
-    (or (when (.exists f) (not-empty (str/trim (slurp f))))
-        (not-empty (System/getenv "ANTHROPIC_API_KEY"))
-        (throw (ex-info (t "No Anthropic API key. Put it in {0}" key-file) {:type :no-api-key})))))
+  (or (file-key)
+      (not-empty (System/getenv "ANTHROPIC_API_KEY"))
+      (throw (ex-info (t "Claude isn't connected yet. Add your API key in Settings.") {:type :no-api-key}))))
+
+(defn key-hint
+  "\"sk-ant-…a1b2\": enough to recognise a key, never the key itself."
+  [k]
+  (when (and k (> (count k) 12)) (str (subs k 0 7) "…" (subs k (- (count k) 4)))))
+
+(defn key-status
+  "Whether Claude is connected, and where its key comes from (\"file\": saved
+  in Settings; \"env\": ANTHROPIC_API_KEY, which only the shell can change)."
+  []
+  (let [fk (file-key) ek (not-empty (System/getenv "ANTHROPIC_API_KEY"))]
+    {:connected (boolean (or fk ek))
+     :source    (cond fk "file" ek "env")
+     :hint      (key-hint (or fk ek))
+     :file      *key-file*}))
+
+(defn valid-key-format? [k]
+  (boolean (and (string? k) (re-matches #"sk-ant-[A-Za-z0-9_\-]{20,}" k))))
+
+(defn save-key!
+  "Stores the API key in *key-file*, readable only by this user."
+  [k]
+  (let [k (str/trim (str k))]
+    (when-not (valid-key-format? k)
+      (throw (ex-info (t "That doesn't look like a Claude API key. It starts with sk-ant- (Claude Console → API keys).") {})))
+    (let [f    (io/file *key-file*)
+          dir  (.toPath (.getParentFile (.getAbsoluteFile f)))
+          path (.toPath f)
+          perms #(java.nio.file.attribute.PosixFilePermissions/fromString %)]
+      (java.nio.file.Files/createDirectories dir (make-array java.nio.file.attribute.FileAttribute 0))
+      (java.nio.file.Files/setPosixFilePermissions dir (perms "rwx------"))
+      (when-not (.exists f)
+        (java.nio.file.Files/createFile path (into-array [(java.nio.file.attribute.PosixFilePermissions/asFileAttribute (perms "rw-------"))])))
+      (java.nio.file.Files/setPosixFilePermissions path (perms "rw-------"))
+      (spit f k)
+      (key-status))))
+
+(defn remove-key!
+  "Deletes the saved key (a key from ANTHROPIC_API_KEY stays)."
+  []
+  (io/delete-file (io/file *key-file*) true)
+  (key-status))
+
+(defn key-rejected?
+  "Whether a failed request means the key itself is wrong (not credits or the network)."
+  [msg]
+  (boolean (re-find #"(?i)\b401\b|authentication_error|invalid x-api-key|invalid api key" (str msg))))
 
 ;; ---------------------------------------------------------------------------
 ;; Context (what the coach sees)
@@ -110,9 +160,14 @@
      :target_week      (plan/week-info ds monday)
      :last_6_weeks     weeks
      :recent_activities (vec (for [a (filter #(>= (compare (:date %) (season/add-days today -14)) 0) acts)]
-                               {:date (:date a) :sport (:sport a) :name (:name a)
-                                :km (r1 (some-> (:distance_m a) (/ 1000.0))) :minutes (Math/round (/ (secs a) 60.0))
-                                :avg_hr (some-> (:avg_hr a) Math/round) :tss (some-> (:tss a) Math/round)}))
+                               (merge
+                                {:date (:date a) :sport (:sport a) :name (:name a)
+                                 :km (r1 (some-> (:distance_m a) (/ 1000.0))) :minutes (Math/round (/ (secs a) 60.0))
+                                 :avg_hr (some-> (:avg_hr a) Math/round) :tss (some-> (:tss a) Math/round)}
+                                ;; how it went, in the athlete's words (coach.analysis/save-feedback!)
+                                (when-let [r (analysis/effective-rpe a)] {:rpe (Math/round (double r))})
+                                (when (pos? (or (:pain a) 0)) {:pain true :pain_location (:pain_location a)})
+                                (when (:note a) {:note (:note a)}))))
      :readiness_last_7_days (vec (for [w (analysis/wellness ds (season/add-days today -6) today)]
                                    (select-keys w [:date :hrv_avg :hrv_status :rhr :sleep_s :sleep_score
                                                    :readiness :body_battery_high])))
@@ -140,7 +195,10 @@ underestimates the athlete's real load (athlete.md: Constraints).
 Availability isn't known in advance: plan the full week for the current phase (athlete.md:
 Constraints, Overrides & specifics).
 The recent activities show what the athlete actually did; a gap means time away (Load & recovery:
-return after break; athlete.md: Constraints).
+return after break; athlete.md: Constraints). Where the athlete said how an activity went, it has
+`rpe` (effort 1-10), `pain` with `pain_location`, and/or a `note` in their own words. Take these
+into account (Monitoring): an easy session that felt hard, pain, illness, poor sleep or stress
+mean less; sessions that felt easy can mean more. Say in a session's `reason` when a note shaped it.
 `season_plan_target`, when present, is the target week from the long-term season plan: its phase
 and weekly TSS. Aim the week at it; when readiness or recent training say otherwise, the hard rules
 and readiness win - say so in `warnings`.

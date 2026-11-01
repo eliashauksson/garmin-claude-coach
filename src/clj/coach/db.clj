@@ -259,7 +259,9 @@
    ["api_calls" "error_type" "TEXT"]
    ["api_calls" "batch" "INTEGER NOT NULL DEFAULT 0"]
    ["plan_proposals" "delivery" "TEXT"]
-   ["season_plans" "delivery" "TEXT"]])
+   ["season_plans" "delivery" "TEXT"]
+   ;; "How did it go?" dismissed without an answer (not asked again)
+   ["activity_feedback" "skipped" "INTEGER NOT NULL DEFAULT 0"]])
 
 (defn- ensure-column! [ds [table column type]]
   (let [cols (set (map :name (jdbc/execute! ds [(str "PRAGMA table_info(" table ")")]

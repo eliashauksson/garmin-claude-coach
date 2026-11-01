@@ -586,3 +586,43 @@ td.name-wrap { font-weight: 700; white-space: normal; min-width: 160px; }
 @media (prefers-reduced-motion: reduce) {
   .ring-val, .grow-x, .fade-in, .hm-cell.anim, .skel { animation: none !important; }
 }
+
+/* "How did it go?" (coach.views.feedback) */
+.fb-item { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--row-line); }
+.fb-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.fb-name { font-weight: 800; text-decoration: none; }
+.fb-form { display: flex; flex-direction: column; gap: 10px; }
+.fb-note { width: 100%; font: inherit; font-size: 14px; padding: 10px 14px; border: 0; border-radius: 14px; resize: vertical;
+  background: var(--surface-2); color: var(--text); }
+.fb-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.fb-lab { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.fb-rpe { display: flex; flex-wrap: wrap; gap: 4px; }
+.fb-n { width: 30px; height: 30px; border: 0; border-radius: 9px; background: var(--surface-2); color: var(--text-2);
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; font-variant-numeric: tabular-nums; }
+.fb-n:hover { color: var(--text); }
+.fb-n.on { background: var(--ink); color: var(--on-ink); }
+.pill.pain-on { background: var(--tint-red); color: var(--red); }
+.fb-where { flex: 1 1 200px; }
+
+/* Connecting Garmin and Claude (Settings) and "Getting started" (Dashboard) */
+.card.connect { gap: 12px; }
+.connect .steps, .setup-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.connect .steps li { line-height: 1.5; }
+.connect-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.connect-row input.note { flex: 1 1 240px; }
+.connect-part { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.connect-replace summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.connect-replace[open] summary { margin-bottom: 8px; }
+.ok-line { color: var(--green-ink); font-weight: 600; }
+.spinner-inline { display: inline-block; width: 11px; height: 11px; margin-right: 8px; border: 2px solid currentColor;
+  border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; }
+@media (prefers-reduced-motion: reduce) { .spinner-inline { animation-duration: 2.4s; } }
+.setup-steps { list-style: none; padding: 0; gap: 12px; }
+.setup-step { display: flex; gap: 12px; align-items: flex-start; }
+.setup-check { flex: none; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--line);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; }
+.setup-step.done .setup-check { background: var(--green); border-color: var(--green); color: #fff; }
+.setup-step.done .setup-title { color: var(--text-2); }
+.setup-title { font-weight: 700; }
+.setup-step .sub { margin-top: 2px; }
+.setup-step .sub .btn-ink { padding: 6px 12px; font-size: 13px; }

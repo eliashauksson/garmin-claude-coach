@@ -2,7 +2,8 @@
   (:require [clojure.string :as str]
             [coach.charts :as c]
             [coach.i18n :refer [t tk]]
-            [coach.ui :as ui]))
+            [coach.ui :as ui]
+            [coach.views.feedback :as feedback]))
 
 (defn- rolling
   "Centered moving average over `w` samples (nils skipped), to calm GPS speed."
@@ -26,22 +27,31 @@
 
 (defn- elapsed-fmt [s] (let [m (js/Math.round (/ s 60))] (str (quot m 60) ":" (.padStart (str (mod m 60)) 2 "0"))))
 
+(defn- one-decimal
+  "Axis label: at most one decimal (3.4, 5)."
+  [v]
+  (str (/ (js/Math.round (* v 10)) 10)))
+
 (defn- stream-chart [{:keys [key title data y-fmt y-inverse unit color area? tip clip?]}]
+  (let [[lo hi] (when clip? (percentile-bounds data))]
   (ui/card {:flex "1 1 420px"}
    [:div.lab title]
    (c/echart
     {:key key :class "short" :group "activity"
      :option-fn
      (fn []
-       (merge (c/base {:x-type "value" :x-fmt elapsed-fmt :y-fmt y-fmt :y-inverse y-inverse
-                       :y-min (when clip? (first (percentile-bounds data)))
-                       :y-max (when clip? (second (percentile-bounds data)))
+       (-> (merge (c/base {:x-type "value" :x-fmt elapsed-fmt :y-fmt (or y-fmt one-decimal) :y-inverse y-inverse
+                       ;; clipped to the data's percentiles: rounded outward so the end labels stay short
+                       :y-min (some-> lo (* 10) js/Math.floor (/ 10))
+                       :y-max (some-> hi (* 10) js/Math.ceil (/ 10))
                        :tooltip-fmt (fn [params]
                                       (let [p (first params) [secs y] (js->clj (.-value p))]
                                         (c/tooltip-rows (t "at {0}" (elapsed-fmt secs))
                                                         [{:label unit :value (tip y)
                                                           :color (c/css-var color)}])))})
-              {:series [(cond-> (c/line title color data) area? c/area-wash)]}))})))
+              {:series [(cond-> (c/line title color data) area? c/area-wash)]})
+              ;; the clipped ends fall between ticks: no label there
+              (cond-> clip? (update-in [:yAxis :axisLabel] assoc :showMinLabel false :showMaxLabel false))))}))))
 
 (defn- zones-chart [zones]
   (let [labels [(t "Below Z1") "Z1" "Z2" "Z3" "Z4" "Z5"]
@@ -96,7 +106,7 @@
     (into [:div.row]
           (map (fn [tl tint] (ui/tile (assoc tl :tint tint :size "sm" :flex "1 1 160px"))) tiles tints))))
 
-(defn view [{:keys [data errors]} url]
+(defn view [{:keys [data errors] ui-state :ui} url]
   (let [a    (get data url)
         s    (:streams a)
         run? (= :run (:id (ui/family (:sport a))))
@@ -117,6 +127,7 @@
          [:div.sub (str (ui/sport-label (:sport a)) " · " (ui/date-long (:date a))
                               (some->> (ui/time-of (:start_time_local a)) (str " · ")))]]
         [:div {:replicant/key "tiles"} (tile-row a run?)]
+        (feedback/activity-card ui-state a)
         (when (seq pts)
           [:div {:replicant/key "map"}
            (ui/card {} (c/route-map {:key (str "map-" (:id a)) :latlngs pts

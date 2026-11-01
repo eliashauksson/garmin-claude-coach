@@ -14,7 +14,20 @@
             [coach.source :as source])
   (:import (java.time LocalDate)))
 
-(def epoch "Earliest date with Garmin data." "2021-03-26")
+(def epoch
+  "The earliest date a backfill goes back to (Garmin Connect started in 2006).
+  It usually stops sooner: see empty-chunks-to-stop."
+  "2006-01-01")
+
+(def empty-chunks-to-stop
+  "A backfill stops after this many 28-day chunks in a row with no activity
+  and no health data (about half a year): the start of the athlete's history."
+  6)
+
+(def legacy-history-start
+  "Where backfills used to stop (a fixed date) before they found the start by
+  themselves: a backfill that got there counts as complete."
+  "2021-03-26")
 (def chunk-days 28)
 (def refresh-days
   "How many days before the last sync to re-fetch, for late-arriving data."
@@ -52,7 +65,9 @@
                      (/ (- (System/currentTimeMillis) t0) 1000.0)
                      (let [n (- (count well) (count kept))]
                        (if (pos? n) (str "  kept " n " stored day(s) over empty ones") ""))))
-    {:activities (count acts) :days (count kept)}))
+    {:activities (count acts) :days (count kept)
+     ;; anything at all in this window (for finding the start of the history)
+     :with_data (+ (count acts) (count (remove empty-wellness? well)))}))
 
 (def vo2max-chunk-days "get_vo2max_trend accepts at most 90 days." 90)
 
@@ -279,29 +294,73 @@
         (analysis/compute-metrics! ds (distinct (concat new-ids missing)))))
     :ok))
 
+(defn history-complete?
+  "Whether a backfill has reached the start of the athlete's history. A
+  backfill records its progress in :history_complete; an install from before
+  that counts as complete if it reached the old fixed start."
+  [ds]
+  (case (db/get-state ds :history_complete)
+    "true"  true
+    "false" false
+    (boolean (some-> (db/get-state ds :backfill_before) (compare legacy-history-start) pos? not))))
+
 (defn backfill!
-  "Walks backwards to `epoch`, one chunk at a time. Resumable.
-  Pass :max-chunks to stop early (e.g. to try one chunk)."
+  "Walks backwards one chunk at a time until `empty-chunks-to-stop` chunks in
+  a row had nothing, or `epoch`. Resumable. Pass :max-chunks to stop early
+  (e.g. to try one chunk)."
   ([src ds] (backfill! src ds {}))
   ([src ds {:keys [max-chunks]}]
    (when-not (db/get-state ds :synced_through)
      (incremental! src ds))
-   (loop [n 0]
-     (let [before (db/get-state ds :backfill_before)]
+   (loop [n 0 empty-run 0]
+     (let [before (db/get-state ds :backfill_before)
+           done!  #(do (db/set-state! ds :history_complete "true") (println "Backfill complete.") :complete)]
        (cond
-         (not (.isAfter (d before) (d epoch)))
-         (do (println "Backfill complete.") :complete)
+         (or (history-complete? ds) (not (.isAfter (d before) (d epoch))))
+         (done!)
+
+         (>= empty-run empty-chunks-to-stop)
+         (do (println "Nothing older than" before "- that's the start of the history.") (done!))
 
          (and max-chunks (>= n max-chunks))
          (do (println "Backfill paused before" before) :paused)
 
          :else
-         (let [end   (.minusDays (d before) 1)
+         (let [_     (when-not (db/get-state ds :history_complete)
+                         (db/set-state! ds :history_complete "false"))
+               end   (.minusDays (d before) 1)
                start (let [s (.minusDays end (dec chunk-days))]
-                       (if (.isBefore s (d epoch)) (d epoch) s))]
-           (sync-range! src ds (str start) (str end))
+                       (if (.isBefore s (d epoch)) (d epoch) s))
+               {:keys [with_data]} (sync-range! src ds (str start) (str end))]
            (db/set-state! ds :backfill_before (str start))
-           (recur (inc n))))))))
+           (recur (inc n) (if (pos? with_data) 0 (inc empty-run)))))))))
+
+(defn earliest-date [ds]
+  (:d (first (db/query ds [(str "SELECT min(d) AS d FROM (SELECT min(date) AS d FROM activities
+                                 UNION SELECT min(date) FROM daily_wellness WHERE NOT ("
+                                (str/join " AND " (map #(str (name %) " IS NULL") wellness-values)) "))")]))))
+
+(defn load-history!
+  "Everything before the first sync: the backfill, VO2 max history,
+  per-second data for every activity, then the metrics. Resumable."
+  [src ds]
+  (backfill! src ds)
+  (when-let [from (earliest-date ds)]
+    (sync-vo2max! src ds from (today)))
+  (sync-streams! src ds)
+  (analysis/compute-metrics! ds)
+  :complete)
+
+(defn history-status
+  "For the dashboard: how far the history goes back and what's left."
+  [ds]
+  {:complete        (history-complete? ds)
+   :synced_through  (db/get-state ds :synced_through)
+   :loaded_from     (db/get-state ds :backfill_before)
+   :activities      (:n (first (db/query ds ["SELECT count(*) AS n FROM activities"])))
+   :streams_missing (:n (first (db/query ds ["SELECT count(*) AS n FROM activities a
+                                              LEFT JOIN activity_streams s ON s.activity_id = a.id
+                                              WHERE s.activity_id IS NULL"])))})
 
 (defn record-result!
   "Keeps the last sync's outcome in the DB, so a failure is still shown after
@@ -343,14 +402,14 @@
     :last_sync       (last-result ds)}))
 
 (defn -main
-  "clojure -M -m coach.sync [sync | backfill [max-chunks] | streams [max] | intraday [days] |
+  "clojure -M -m coach.sync [sync | backfill [max-chunks] | history | streams [max] | intraday [days] |
                             vo2max | thresholds | overview | metrics | status]"
   [& [cmd n]]
   (let [ds (doto (db/datasource) db/migrate!)]
     (case cmd
       "status"  (prn (status ds))
       "metrics" (println "Scored" (analysis/compute-metrics! ds) "activities")
-      (let [_ (when-not (#{"sync" "backfill" "streams" "intraday" "vo2max" "thresholds" "overview"} (or cmd "sync"))
+      (let [_ (when-not (#{"sync" "backfill" "history" "streams" "intraday" "vo2max" "thresholds" "overview"} (or cmd "sync"))
                 (println "Unknown command:" cmd) (System/exit 2))
             {:keys [ok]}
             (run-cli-sync!
@@ -358,6 +417,7 @@
                   (case (or cmd "sync")
                     "sync"       (incremental! src ds)
                     "backfill"   (backfill! src ds (when n {:max-chunks (parse-long n)}))
+                    "history"    (load-history! src ds)
                     "streams"    (do (sync-streams! src ds (when n {:max-activities (parse-long n)}))
                                      (analysis/compute-metrics! ds))
                     "intraday"   (let [days (if n (parse-long n) 7)]

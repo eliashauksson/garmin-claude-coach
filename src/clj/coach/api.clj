@@ -30,36 +30,81 @@
 
 (defonce sync-state (atom {:running false}))
 
+(defn- run-job!
+  "Runs `f` with a Garmin source in the background unless a sync or history
+  load is already running (one Garmin session at a time), and records the
+  result like a sync. `job` names it (\"sync\" or \"history\"); `after` runs
+  on success and may add to the result. Nothing starts before Garmin is
+  connected. Returns the state."
+  [ds job f & [after]]
+  (if-not (auth/connected?)
+    @sync-state
+    (let [[old _] (swap-vals! sync-state #(if (:running %) % (assoc % :running true :job job
+                                                                      :started_at (str (java.time.Instant/now)))))]
+      (when-not (:running old)
+        (future
+          ;; first backup of the day, before anything is written
+          (try (backup/daily! ds)
+               (catch Throwable e (println "Daily backup failed:" (ex-message e))))
+          (let [result (try
+                         (let [src ((requiring-resolve 'coach.garmin-mcp/start!))]
+                           (try (f src)
+                                (finally ((requiring-resolve 'coach.garmin-mcp/stop!) src))))
+                         {:ok true}
+                         (catch Throwable e
+                           (println (str job " failed:") (ex-message e))
+                           (merge {:ok false} (sync/failure e))))
+                result (if (and (:ok result) after) (after result) result)
+                done   (str (java.time.Instant/now))
+                result (assoc result :finished_at done)]
+            (try (sync/record-result! ds result) (catch Throwable _))
+            (swap! sync-state assoc :running false :job nil :finished_at done :last_result result
+                   :last_ok (if (:ok result) done (:last_ok @sync-state))))))
+      @sync-state)))
+
 (defn- run-sync!
   "Starts an incremental sync unless one is running. Returns the state."
   [ds]
-  (let [[old _] (swap-vals! sync-state #(if (:running %) % (assoc % :running true :started_at (str (java.time.Instant/now)))))]
-    (when-not (:running old)
-      (future
-        ;; first backup of the day, before anything is written
-        (try (backup/daily! ds)
-             (catch Throwable e (println "Daily backup failed:" (ex-message e))))
-        (let [result (try
-                       (let [src ((requiring-resolve 'coach.garmin-mcp/start!))]
-                         (try (sync/incremental! src ds)
-                              (finally ((requiring-resolve 'coach.garmin-mcp/stop!) src))))
-                       {:ok true}
-                       (catch Throwable e
-                         (println "Sync failed:" (ex-message e))
-                         (merge {:ok false} (sync/failure e))))
-              ;; new data may call for adapting the plan; a failure here isn't a sync failure.
-              ;; Without credits every Claude request would fail, so the check waits.
-              result (cond
-                       (not (:ok result)) result
-                       (costs/credits-out ds) (assoc result :plan_check_skipped "no Claude credits")
-                       :else (try (assoc result :proposals (:proposed (planner/check! ds)))
-                                  (catch Throwable e (assoc result :plan_check_error (ex-message e)))))
-              done   (str (java.time.Instant/now))
-              result (assoc result :finished_at done)]
-          (try (sync/record-result! ds result) (catch Throwable _))
-          (swap! sync-state assoc :running false :finished_at done :last_result result
-                 :last_ok (if (:ok result) done (:last_ok @sync-state))))))
-    @sync-state))
+  (run-job! ds "sync" #(sync/incremental! % ds)
+            ;; new data may call for adapting the plan; a failure here isn't a sync failure.
+            ;; Without credits every Claude request would fail, so the check waits.
+            (fn [result]
+              (cond
+                (costs/credits-out ds) (assoc result :plan_check_skipped "no Claude credits")
+                :else (try (assoc result :proposals (:proposed (planner/check! ds)))
+                           (catch Throwable e (assoc result :plan_check_error (ex-message e))))))))
+
+(defn- run-history!
+  "Loads everything before the first sync (coach.sync/load-history!)."
+  [ds]
+  (run-job! ds "history" #(sync/load-history! % ds)))
+
+(defn- setup
+  "What a new install still needs, for the Dashboard's checklist and the
+  banners: Garmin and Claude connected, the history loaded, the athlete
+  document and a season plan."
+  [ds]
+  {:garmin  (auth/connected?)
+   :claude  (planner/api-key?)
+   :synced  (some? (db/get-state ds :synced_through))
+   :history (sync/history-complete? ds)
+   :athlete (some? (athlete/content))
+   :season  (some? (plan/latest-season-plan ds "ready"))})
+
+(declare claude-check!)
+
+(defn- claude-key-saved!
+  "Saves `k`, then checks it with one tiny request. A key the API rejects is
+  taken out again (the previous one, if any, comes back)."
+  [ds k]
+  (let [prev (try (slurp planner/*key-file*) (catch Exception _ nil))]
+    (planner/save-key! k)
+    (let [{:keys [ok error] :as r} (claude-check! ds)]
+      (if (and (not ok) (planner/key-rejected? error))
+        (do (if prev (spit planner/*key-file* prev) (planner/remove-key!))
+            {:ok false :error (i18n/t "Claude didn't accept that key. Check that you copied all of it, and that it isn't deleted in the Claude Console.")
+             :key (planner/key-status)})
+        (assoc r :key (planner/key-status))))))
 
 (defn- load-sync-state!
   "After a restart: the last recorded result, so a failure is still shown."
@@ -250,6 +295,8 @@
                             (let [{:strs [sport from to limit]} query-params]
                               (ok (analysis/activities ds {:sport sport :from from :to to
                                                            :limit (some-> limit parse-long)}))))}]
+    ;; recent activities waiting for "How did it go?"
+    ["/feedback/due" {:get (fn [{:keys [query-params]}] (ok (analysis/feedback-due ds (get query-params "date" (today)))))}]
     ["/activities/:id/feedback"
      {:put (guarded (fn [{:keys [path-params] :as req}]
                       (analysis/save-feedback! ds (parse-long (:id path-params)) (body req))
@@ -280,6 +327,13 @@
     ["/costs"       {:get (fn [{:keys [query-params]}]
                             (ok (costs/overview ds (get query-params "from"))))}]
     ["/claude/check" {:post (fn [_] (ok (claude-check! ds)))}]
+    ;; the Claude API key: saved in ~/.config/coach/anthropic-key, never sent back
+    ["/claude/key"   {:get    (fn [_] (ok (planner/key-status)))
+                      :put    (guarded (fn [req] (ok (claude-key-saved! ds (:key (body req))))))
+                      :delete (fn [_] (ok (planner/remove-key!)))}]
+    ["/claude/test"  {:post (fn [_] (ok (assoc (claude-check! ds) :key (planner/key-status))))}]
+    ;; everything before the first sync, in the background
+    ["/history"      {:post (fn [_] (json-response 202 (run-history! ds)))}]
     ;; the language of the dashboard, the server's messages and what Claude writes
     ["/lang"        {:get (fn [_] (ok {:lang @i18n/lang :languages i18n/languages}))
                      :put (guarded (fn [req]
@@ -292,7 +346,8 @@
                                        (planner/translate-soon!)
                                        (ok {:lang lang}))))}]
     ["/sync"        {:get  (fn [_] (ok (assoc @sync-state :auth (auth-status ds) :claude (claude-status ds)
-                                          :translating (translate/running?))))
+                                          :translating (translate/running?)
+                                          :setup (setup ds) :history (sync/history-status ds))))
                      :post (fn [_] (json-response 202 (assoc (run-sync! ds) :auth (auth-status ds))))}]
     ["/backup"
      ["" {:get  (fn [_] (ok (backup/status)))
