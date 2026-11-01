@@ -4,6 +4,8 @@ A personal training dashboard that runs locally on my own Garmin data. It covers
 
 The planner reads two documents: `training-principles.md`, the general method for building a running plan, and the athlete document: the athlete, goal race and season outline. Both are referred to by section heading. You add and edit the athlete document on the Plan page, with Claude. On the same page Claude drafts the season plan to race day; the coach then keeps the next two weeks planned.
 
+The **API costs** page lists every Claude request with its tokens, model, effort and cost: in total, per day, per task (week plans, season plans, adjustments, athlete chat and summary) and per model. Costs are the token counts the API reports times each model's list price. A request that fell back to another model is priced per model. At the top of the page you choose the model (Claude Fable 5.1, Opus 5.5, Sonnet 5.5 or Haiku 5.5) and effort (low to max) for each task. Next to each choice you see an estimated cost per request and what each model and effort has cost so far. For season plans, week plans and adjustments you also choose the delivery. **Batch when automatic** (the default) sends requests nobody is waiting for, like the week proposals and adjustments after a sync, through Anthropic's half-price Message Batches API; your own clicks stay instant. **Always batch** and **Always instant** do what they say. Batch answers usually come within an hour (at most 24 hours); the dashboard collects them every minute, also after a restart. Athlete chat and the summary are always instant.
+
 **Personal data stays local.** Only the general training principles are in git. The athlete document (`data/athlete.md`), its backups, the season plans, planned sessions and all Garmin data live in `data/`, which git ignores. Personal values the rule checks need (AeT and LT heart rates, readiness thresholds, hard-session and progression limits, long-run cap, race date) are read from the athlete document, never hard-coded.
 
 ## Requirements
@@ -60,6 +62,7 @@ All data lives in `data/coach.db` (SQLite). That folder is not tracked by git.
 A banner above every page says what failed and what to do:
 - **Garmin login expired.** Run `clojure -M -m coach.auth login` in a terminal, then press Sync now. The dashboard doesn't need a restart.
 - **Rate limit, network or a Garmin error.** These are usually temporary. The next automatic sync (within 2 h) tries again. If a Garmin error keeps coming back, Garmin may have changed its API: check `data/mcp-server.log`.
+- **Claude API credits have run out.** Plans, adjustments and the athlete chat stop, and the automatic planning after each sync pauses. Add funds on the [billing page of the Claude Console](https://platform.claude.com/settings/billing), then press **I've added funds, check again**. That sends one tiny request on the cheapest model to confirm.
 - **The coach server isn't running.** Start it with `make run`. The page reconnects by itself.
 
 A failed sync never damages stored data. It stops at the first login, rate-limit or network error, and a day that comes back empty never replaces a stored day that has data. The last result is kept in the database, so the banner is still there after a restart.

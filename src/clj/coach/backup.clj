@@ -129,6 +129,9 @@
     (let [before (create! ds {:prune? false})]
       (println "Current state backed up to" (:path before)))
     (let [data (io/file *data-dir*)]
+      ;; a leftover write-ahead log belongs to the old database: replayed onto
+      ;; the restored file it would corrupt it (its content is in the backup above)
+      (doseq [ext ["-wal" "-shm"]] (io/delete-file (io/file data (str "coach.db" ext)) true))
       ;; the athlete backups are replaced as a set, like the document itself
       (doseq [^File old (or (.listFiles (io/file data "athlete-backups")) [])] (.delete old))
       (with-open [zin (ZipInputStream. (io/input-stream f))]

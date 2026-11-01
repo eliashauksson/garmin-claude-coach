@@ -123,11 +123,19 @@
                         :on {:click [[:api "POST" url {:decision (if (= decision "rejected") "accepted" "rejected")}]]}}
           (if (= decision "rejected") "Accept instead" "Undo")]))]]))
 
+(defn waiting-text
+  "What a running request is doing, by how it was sent (coach.plan/set-delivery!)."
+  [delivery]
+  (case delivery
+    "batch"  "Waiting for Claude in the half-price batch. Usually within an hour (at most 24 h); you can close the page meanwhile."
+    "queued" "Queued for the half-price batch: it goes out once the week before it is back, because it builds on that week."
+    "The coach is working on it… this usually takes a minute or two."))
+
 (defn- proposal-panel [p existing ui-state monday]
-  (let [{:keys [id status response warnings error items usage]} p
+  (let [{:keys [id status response warnings error items usage delivery]} p
         pending? (some #(= "pending" (:decision %)) items)]
     (case status
-      "running" [:div.proposal [:div.sub "The coach is working on it… this usually takes a minute or two."]]
+      "running" [:div.proposal [:div.sub (waiting-text delivery)]]
       "failed"  [:div.proposal [:div.error (str "Planning failed: " error)]]
       [:div.proposal
        [:div.lab (if (= "adjust" (:kind p)) "Suggested adjustments" "Proposal") [:span.sp] [:span.sub (str "#" id)]]
@@ -177,7 +185,8 @@
                [:div.plan-footer
                 [:button.btn-ink {:disabled running?
                                   :on {:click [[:api "POST" "/api/plan/proposals" {:monday monday}]]}}
-                 (cond running? "Planning…" (seq mine) "Re-plan week" :else "Propose week")]]
+                 (cond (and running? (:delivery proposal)) "Waiting for batch…"
+                       running? "Planning…" (seq mine) "Re-plan week" :else "Propose week")]]
                [:div.sub "Create the season plan first. The coach then plans the next two weeks for you."])
              (when (and proposal (not (#{"closed" "withdrawn"} (:status proposal))))
                (proposal-panel proposal mine ui-state monday)))))
@@ -216,7 +225,8 @@
               [:button.btn-ink {:disabled running?
                                 :on {:click [[:api "POST" "/api/plan/adjust" {:note (get ui-state :adjust-note "")}]
                                              [:set-ui :adjust-note ""]]}}
-               (if running? "Adjusting…" "Re-plan rest of week")]]
+               (cond (and running? (:delivery adjust)) "Waiting for batch…"
+                     running? "Adjusting…" :else "Re-plan rest of week")]]
              (when open? (proposal-panel adjust workouts ui-state (:monday adjust))))))
 
 (defn view [{:keys [data errors flash] ui-state :ui} [plan-url signals-url adjust-url athlete-url season-url & proposal-urls]]

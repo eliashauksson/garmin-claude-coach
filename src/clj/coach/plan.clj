@@ -111,10 +111,16 @@
   "A week proposal (kind \"week\") or an adjustment of planned sessions up to
   `scope-end` (kind \"adjust\", with the signals that triggered it)."
   ([ds monday model] (create-proposal! ds monday model {}))
-  ([ds monday model {:keys [kind scope-end signals] :or {kind "week"}}]
-   (:id (exec! ds ["INSERT INTO plan_proposals (monday, status, model, kind, scope_end, signals, created_at, updated_at)
-                    VALUES (?, 'running', ?, ?, ?, ?, ?, ?) RETURNING id"
-                   monday model kind scope-end (some-> signals json/write-str) (now) (now)]))))
+  ([ds monday model {:keys [kind scope-end signals delivery] :or {kind "week"}}]
+   (:id (exec! ds ["INSERT INTO plan_proposals (monday, status, model, kind, scope_end, signals, delivery, created_at, updated_at)
+                    VALUES (?, 'running', ?, ?, ?, ?, ?, ?, ?) RETURNING id"
+                   monday model kind scope-end (some-> signals json/write-str) delivery (now) (now)]))))
+
+(defn set-delivery!
+  "\"batch\" (sent to the half-price batch), \"queued\" (waits for the previous
+  week's batch result) or nil (instant)."
+  [ds id delivery]
+  (jdbc/execute! ds ["UPDATE plan_proposals SET delivery = ?, updated_at = ? WHERE id = ?" delivery (now) id]))
 
 (defn fail-proposal! [ds id error]
   (jdbc/execute! ds ["UPDATE plan_proposals SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status = 'running'"
@@ -139,7 +145,7 @@
 
 (defn proposal [ds id]
   (when-let [p (first (db/query ds ["SELECT id, monday, status, model, kind, scope_end, signals, response, warnings,
-                                            error, usage, created_at, updated_at FROM plan_proposals WHERE id = ?" id]))]
+                                            error, usage, delivery, created_at, updated_at FROM plan_proposals WHERE id = ?" id]))]
     (let [items   (db/query ds ["SELECT * FROM proposal_items WHERE proposal_id = ? ORDER BY date, slot, idx" id])
           targets (into {} (for [t (keep :target_id items)]
                              [t (first (db/query ds ["SELECT * FROM planned_workouts WHERE id = ?" t]))]))]
@@ -149,7 +155,7 @@
 (defn open-proposals
   "Proposals that are generating or still have undecided items."
   [ds]
-  (db/query ds ["SELECT p.id, p.kind, p.monday, p.status, p.created_at FROM plan_proposals p
+  (db/query ds ["SELECT p.id, p.kind, p.monday, p.status, p.delivery, p.created_at FROM plan_proposals p
                  WHERE p.status = 'running'
                     OR (p.status = 'open' AND EXISTS (SELECT 1 FROM proposal_items i
                                                       WHERE i.proposal_id = p.id AND i.decision = 'pending'))
@@ -225,12 +231,12 @@
 
 (def ^:private season-cols
   "id, race_date, start_monday, status, model, response, warnings, error, usage,
-   created_at, updated_at, archived_at, archived_reason")
+   created_at, updated_at, archived_at, archived_reason, delivery")
 
-(defn create-season-plan! [ds race-date start-monday model]
-  (:id (exec! ds ["INSERT INTO season_plans (race_date, start_monday, status, model, created_at, updated_at)
-                   VALUES (?, ?, 'running', ?, ?, ?) RETURNING id"
-                  race-date start-monday model (now) (now)])))
+(defn create-season-plan! [ds race-date start-monday model & [delivery]]
+  (:id (exec! ds ["INSERT INTO season_plans (race_date, start_monday, status, model, delivery, created_at, updated_at)
+                   VALUES (?, ?, 'running', ?, ?, ?, ?) RETURNING id"
+                  race-date start-monday model delivery (now) (now)])))
 
 (defn fail-season-plan! [ds id error]
   (jdbc/execute! ds ["UPDATE season_plans SET status = 'failed', error = ?, updated_at = ? WHERE id = ?"

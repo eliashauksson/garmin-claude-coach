@@ -5,6 +5,7 @@
             [coach.views.activities :as activities]
             [coach.views.activity :as activity]
             [coach.views.calendar :as calendar]
+            [coach.views.costs :as costs]
             [coach.views.plan :as plan]
             [coach.views.load :as load]
             [coach.views.status :as status]
@@ -31,6 +32,7 @@
       "load"       {:page :load :params params}
       "calendar"   {:page :calendar :params params}
       "plan"       {:page :plan :params params}
+      "costs"      {:page :costs :params params}
       {:page :today})))
 
 (defn route-hash [{:keys [page id params]}]
@@ -52,6 +54,7 @@
     :activity   [(str "/api/activities/" id "?streams=true")]
     :calendar   (calendar/urls route)
     :plan       (plan/urls)
+    :costs      [(costs/url route) costs/settings-url]
     :load       [(str "/api/load?from=" (range-from route))
                  (str "/api/volume?from=" (range-from route))]
     []))
@@ -234,6 +237,21 @@
                       (swap! state dissoc :flash)
                       (api! method url body))
       :sync         (start-sync!)
+      :ai-setting   (let [[task field value] args
+                          current (some #(when (= task (:id %)) %)
+                                        (get-in @state [:data costs/settings-url :tasks]))]
+                      (swap! state dissoc :flash)
+                      (api! "PUT" (str costs/settings-url "/" task)
+                            (assoc (select-keys current [:model :effort :delivery]) field value)))
+      :claude-check (do (swap! state assoc-in [:ui :claude-check] {:checking true})
+                        (-> (js/fetch "/api/claude/check" #js {:method "POST"})
+                            (.then #(.json %))
+                            (.then (fn [body]
+                                     (let [{:keys [ok error]} (js->clj body :keywordize-keys true)]
+                                       (swap! state assoc-in [:ui :claude-check]
+                                              (if ok nil {:checking false :result error}))
+                                       (poll-sync!))))
+                            (.catch #(swap! state assoc-in [:ui :claude-check] {:checking false :result (.-message %)}))))
       :backup-started (doseq [ms [3000 10000 30000]] ; the download starts once the zip is written
                         (js/setTimeout #(fetch! status/backup-url {:force true}) ms))
       :toggle-theme (toggle-theme!)
@@ -256,7 +274,7 @@
 ;; Shell
 
 (def nav-items [[:today "#/" "Today"] [:plan "#/plan" "Plan"] [:calendar "#/calendar" "Calendar"] [:activities "#/activities" "Activities"]
-                [:load "#/load" "Training load"]])
+                [:load "#/load" "Training load"] [:costs "#/costs" "API costs"]])
 
 (defn view [{:keys [route loading] :as s}]
   (let [page (:page route)
@@ -282,7 +300,8 @@
         :activity   (activity/view s (first (urls route)))
         :load       (let [[l v] (urls route)] (load/view s l v))
         :calendar   (calendar/view s (urls route))
-        :plan       (plan/view s (urls route)))]]))
+        :plan       (plan/view s (urls route))
+        :costs      (costs/view s (first (urls route))))]]))
 
 (defn render! []
   (r/render (js/document.getElementById "app") (view @state)))

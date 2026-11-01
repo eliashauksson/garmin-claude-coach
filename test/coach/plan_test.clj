@@ -112,10 +112,10 @@
       (is (= :ok (:level (readiness/check [good (assoc good :hrv_avg 40 :rhr 58)] plan {})))))))
 
 (deftest cost-test
-  (require 'coach.planner)
-  (let [cost (resolve 'coach.planner/cost-usd)]
+  (require 'coach.costs)
+  (let [cost #((resolve 'coach.costs/line-cost) "claude-opus-5-5" %)]
     (testing "1M of each at Opus 5.5 list prices"
-      (is (< (Math/abs (- 29.2 (cost {:input_tokens 1e6 :output_tokens 1e6 :cache_read 1e6 :cache_write 1e6}))) 1e-9)))
+      (is (< (Math/abs (- 29.2 (cost {:input_tokens 1e6 :output_tokens 1e6 :cache_read 1e6 :cache_write_5m 1e6}))) 1e-9)))
     (testing "a typical proposal: 3k input, 8k cache write, 9k output"
-      (is (< (Math/abs (- 0.232 (cost {:input_tokens 3000 :output_tokens 9000 :cache_read 0 :cache_write 8000}))) 1e-9)))
+      (is (< (Math/abs (- 0.232 (cost {:input_tokens 3000 :output_tokens 9000 :cache_read 0 :cache_write_5m 8000}))) 1e-9)))
     (is (zero? (cost {})))))

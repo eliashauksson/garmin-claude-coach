@@ -5,6 +5,7 @@
   weekly proposals aim at its target for their week (coach.planner/context).
   Once it exists, the coach keeps the next two weeks proposed (coach.planner/plan-ahead!)."
   (:require [clojure.data.json :as json]
+            [coach.ai-settings :as ai]
             [coach.analysis :as analysis]
             [coach.athlete :as athlete]
             [coach.plan :as plan]
@@ -57,7 +58,7 @@
      :this_week_so_far (planner/week-summary start (by-wk start))}))
 
 (def system-intro
-  "You are the running coach for the athlete described below. Two documents follow: the general
+  "You are the running coach for the athlete described in the two documents above: the general
 training principles and athlete.md (the athlete's profile, goal and season plan). Refer to
 sections by their heading. Rules in athlete.md override the principles' (d) defaults.
 
@@ -123,27 +124,42 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
 
 ;; ---------------------------------------------------------------------------
 
+(defn- finish! [ds id ctx response usage]
+  (plan/finish-season-plan! ds id {:context ctx :response (validate response ctx)
+                                   :warnings [] :usage usage})
+  (planner/plan-ahead! ds))
+
+(planner/register-batch-handler!
+ :season_plan
+ {:done (fn [ds {:keys [id ctx]} response usage] (finish! ds id ctx response usage))
+  :fail (fn [ds {:keys [id]} msg] (plan/fail-season-plan! ds id msg))})
+
 (defn draft!
   "Starts drafting a season plan in the background and returns its id. A draft
   already running is reused."
-  [ds]
+  [ds & [trigger]]
   (let [running (plan/latest-season-plan ds "running")]
     (if running
       (:id running)
-      (let [today (str (LocalDate/now))
-            race  (race-date!)
-            id    (plan/create-season-plan! ds race (season/monday today) planner/model)]
+      (let [today  (str (LocalDate/now))
+            race   (race-date!)
+            batch? (ai/batch? :season_plan (or trigger :manual))
+            id     (plan/create-season-plan! ds race (season/monday today) (planner/model-for :season_plan)
+                                             (when batch? "batch"))]
         (future
           (try
-            (let [ctx (context ds today race)
-                  {:keys [response usage]}
-                  (planner/request {:system   (str system-intro (planner/principles))
-                                    :messages [[:user (str "Draft the season plan. The athlete's data as JSON:\n\n"
-                                                           (json/write-str ctx))]]
-                                    :schema   response-schema})]
-              (plan/finish-season-plan! ds id {:context ctx :response (validate response ctx)
-                                               :warnings [] :usage usage})
-              (planner/plan-ahead! ds))
+            (let [ctx  (context ds today race)
+                  opts {:knowledge (planner/principles)
+                        :system    system-intro
+                        :messages  [[:user (str "Draft the season plan. The athlete's data as JSON:\n\n"
+                                                (json/write-str ctx))]]
+                        :schema    response-schema
+                        :task      :season_plan
+                        :ref       (str "season plan " id)}]
+              (if batch?
+                (planner/submit-batch! ds (assoc opts :data {:id id :ctx ctx}))
+                (let [{:keys [response usage]} (planner/request opts)]
+                  (finish! ds id ctx response usage))))
             (catch Throwable e
               (plan/fail-season-plan! ds id (or (ex-message e) (str (class e)))))))
         id))))
@@ -176,6 +192,7 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
         actual  (when (seq weeks)
                   (weekly-tss (analysis/activities ds {:from (:monday (first weeks)) :to today})))]
     {:status         (cond running "running" failed "failed" current "ready" :else "none")
+     :delivery       (:delivery running)
      :error          (:error failed)
      :plan           (when current
                        (assoc-in current [:response :weeks]

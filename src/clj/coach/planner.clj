@@ -7,7 +7,9 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [coach.analysis :as analysis]
+            [coach.ai-settings :as ai]
             [coach.athlete :as athlete]
+            [coach.costs :as costs]
             [coach.db :as db]
             [coach.plan :as plan]
             [coach.plan-rules :as rules]
@@ -15,40 +17,36 @@
             [malli.core :as m]
             [malli.error :as me])
   (:import (com.anthropic.client.okhttp AnthropicOkHttpClient)
-           (com.anthropic.core JsonValue)
+           (com.anthropic.core JsonValue ObjectMappers)
            (com.anthropic.models.beta.messages BetaCacheControlEphemeral BetaJsonOutputFormat
                                                BetaJsonOutputFormat$Schema BetaOutputConfig
                                                BetaOutputConfig$Effort BetaTextBlockParam
                                                BetaThinkingConfigAdaptive MessageCreateParams)
            (java.time Duration LocalDate)))
 
-(def model "claude-opus-5-5")
+(defn model-for
+  "The model the athlete chose for `task` (coach.ai-settings)."
+  [task]
+  (:model (ai/for-task task)))
 
-(def prices
-  "USD per million tokens for `model` (Anthropic list prices, Oct 2026).
-  Cache writes use the 5-minute TTL rate (1.25x input)."
-  {:input 4.00 :output 20.00 :cache_read 0.20 :cache_write 5.00})
-
-(def usd->chf
-  "Approximate exchange rate for showing costs in CHF. Anthropic bills in
-  USD; this is only for display. Mid-2026 rates were about 0.80-0.83."
-  0.81)
-
-(defn cost-usd
-  "Dollar cost of one request from its usage. input_tokens excludes cached
-  tokens, which are billed separately; thinking is part of output_tokens."
-  [{:keys [input_tokens output_tokens cache_read cache_write]}]
-  (let [per-m #(* (or %1 0) (prices %2) 1e-6)]
-    (+ (per-m input_tokens :input) (per-m output_tokens :output)
-       (per-m cache_read :cache_read) (per-m cache_write :cache_write))))
 (def general-file "training-principles.md")
 
+(defn knowledge
+  "The first system block of every Claude request: the general principles and
+  athlete.md, the same text for every task. Task instructions come after it.
+  It is cached (request :cache?) only where another request of the same task
+  is likely within the cache's 5 minutes: the cache is per model and per
+  output schema (measured: a different schema misses, a different effort
+  hits), and an unread cache write costs 25% more than plain input."
+  [doc]
+  (str "# General training principles (read-only)\n\n" (slurp general-file)
+       "\n\n# Current athlete.md\n\n" (or doc "(no athlete.md yet)")))
+
 (defn principles
-  "The general principles and the athlete file, as one text for the cached system block."
+  "knowledge for the planning tasks, which need athlete.md."
   []
-  (str (slurp general-file) "\n\n---\n\n"
-       (or (athlete/content)
-           (throw (ex-info "No athlete information yet. Add it on the Plan page first." {:type :no-athlete})))))
+  (knowledge (or (athlete/content)
+                 (throw (ex-info "No athlete information yet. Add it on the Plan page first." {:type :no-athlete})))))
 (def key-file (str (System/getProperty "user.home") "/.config/coach/anthropic-key"))
 
 (defn api-key []
@@ -128,7 +126,7 @@
 
 (def system-intro
   (str
-  "You are the running coach for the athlete described below. Two documents follow: the general
+  "You are the running coach for the athlete described in the two documents above: the general
 training principles and athlete.md (the athlete's profile, goal and season plan). Refer to
 sections by their heading. Rules in athlete.md override the principles' (d) defaults.
 You plan one week at a time; the athlete reviews every session before it enters the plan.
@@ -222,53 +220,260 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 (defn- client []
   (-> (AnthropicOkHttpClient/builder) (.apiKey ^String (api-key)) (.timeout (Duration/ofMinutes 10)) (.build)))
 
+(defn- api-json
+  "An SDK object as the API's own JSON (snake_case keys), via the SDK's mapper."
+  [x]
+  (json/read-str (.writeValueAsString (ObjectMappers/jsonMapper) x) :key-fn keyword))
+
+(def billing-url
+  "The Claude Console page where credits are bought."
+  "https://platform.claude.com/settings/billing")
+
+(def no-credits-message
+  (str "Your Claude API credits have run out. Add funds in the Claude Console ("
+       billing-url "), then try again."))
+
+(defn no-credits?
+  "True for the API's out-of-credits error: the typed billing_error (HTTP 402),
+  or the 400 that says the credit balance is too low."
+  [^Throwable e]
+  (boolean
+   (or (and (instance? com.anthropic.errors.AnthropicServiceException e)
+            (let [^com.anthropic.errors.AnthropicServiceException se e]
+              (or (= 402 (.statusCode se))
+                  (= "billing_error" (some-> (.orElse (.errorType se) nil) str)))))
+       (re-find #"(?i)credit balance is too low" (str (ex-message e))))))
+
+(declare request*)
+
 (defn request
   "One Claude request: `system` in a cached block, `messages` as
   [[:user text] [:assistant text] ...], JSON out via structured outputs.
-  Returns {:response map :usage map}."
-  [{:keys [system messages schema effort] :or {effort BetaOutputConfig$Effort/HIGH}}]
-  (let [b      (-> (MessageCreateParams/builder)
-                   (.model ^String model)
-                   (.maxTokens 32000)
-                   (.systemOfBetaTextBlockParams
-                    [(-> (BetaTextBlockParam/builder)
-                         (.text ^String system)
-                         (.cacheControl (.build (BetaCacheControlEphemeral/builder)))
-                         (.build))]))
-        _      (doseq [[role text] messages]
-                 (if (= :assistant role) (.addAssistantMessage b ^String text) (.addUserMessage b ^String text)))
-        params (-> b
-                   (.thinking (.build (BetaThinkingConfigAdaptive/builder)))
-                   (.outputConfig (-> (BetaOutputConfig/builder)
-                                      (.effort ^BetaOutputConfig$Effort effort)
-                                      (.format (-> (BetaJsonOutputFormat/builder)
-                                                   (.schema (-> (BetaJsonOutputFormat$Schema/builder)
-                                                                (.additionalProperties
-                                                                 (update-vals schema ->json-value))
-                                                                (.build)))
-                                                   (.build)))
-                                      (.build)))
-                   ;; if the model declines, the API retries on a fallback model
-                   (.addBeta "server-side-fallback-2026-07-01")
-                   (.putAdditionalBodyProperty "fallbacks" (JsonValue/from "default"))
-                   (.build))
-        msg    (.create (.messages (.beta (client))) params)
-        stop   (some-> (.orElse (.stopReason msg) nil) (.asString))
-        text   (apply str (keep #(some-> (.orElse (.text %) nil) (.text)) (.content msg)))
-        usage  (.usage msg)]
-    (when (#{"refusal" "max_tokens"} stop)
-      (throw (ex-info (str "The model stopped early: " stop) {:stop_reason stop})))
-    {:response (json/read-str text :key-fn keyword)
-     :usage    (let [u {:input_tokens (.inputTokens usage) :output_tokens (.outputTokens usage)
-                        :cache_read (.orElse (.cacheReadInputTokens usage) 0)
-                        :cache_write (.orElse (.cacheCreationInputTokens usage) 0)
-                        :stop_reason stop}]
-                 (assoc u :cost_usd (cost-usd u) :cost_chf (* usd->chf (cost-usd u))))}))
+  Returns {:response map :usage map}. The model and effort are the ones
+  chosen for `task` (coach.ai-settings) unless opts give :model / :effort.
+  Every request, failed ones too, is logged with its cost under `task`."
+  [{:keys [task ref] :as opts}]
+  (let [chosen (ai/for-task task)
+        model  (or (:model opts) (:model chosen))
+        effort (or (:effort opts) (:effort chosen))
+        t0     (System/currentTimeMillis)
+        log    (fn [m] (costs/log! (merge {:task (or task :other) :ref ref :model model
+                                           :effort effort :duration_ms (- (System/currentTimeMillis) t0)}
+                                          m)))]
+    (try
+      (let [{:keys [usage-raw served-model stop request-id] :as r}
+            (request* (assoc opts :model model :effort effort))]
+        (log {:usage usage-raw :served_model served-model :stop_reason stop :request_id request-id})
+        (when (#{"refusal" "max_tokens"} stop)
+          (throw (ex-info (str "The model stopped early: " stop) {:stop_reason stop})))
+        (select-keys r [:response :usage]))
+      (catch clojure.lang.ExceptionInfo e
+        (when-not (:stop_reason (ex-data e)) (log {:error (ex-message e)}))
+        (throw e))
+      (catch Throwable e
+        (if (no-credits? e)
+          (do (log {:error (or (ex-message e) "billing_error") :error_type "no_credits"})
+              (throw (ex-info no-credits-message {:type :no-credits :billing_url billing-url} e)))
+          (do (log {:error (or (ex-message e) (str (class e)))})
+              (throw e)))))))
 
-(defn call-claude
-  "The planner's request: principles in the system block, data in one user turn."
-  [principles user-text schema]
-  (request {:system (str system-intro principles) :messages [[:user user-text]] :schema schema}))
+(defn message-params
+  "The request as SDK params. Batch requests leave out the server-side
+  fallback, which the Message Batches API doesn't accept."
+  [{:keys [knowledge system messages schema model effort cache? batch?]}]
+  (let [block (fn [^String text cache?]
+                (cond-> (.text (BetaTextBlockParam/builder) text)
+                  cache? (.cacheControl (.build (BetaCacheControlEphemeral/builder)))
+                  true   (.build)))
+        b     (-> (MessageCreateParams/builder)
+                  (.model ^String model)
+                  (.maxTokens 32000)
+                  (.systemOfBetaTextBlockParams
+                   ;; the shared knowledge first; the task's own instructions after it
+                   (vec (remove nil? [(some-> knowledge (block cache?))
+                                      (some-> system (block false))]))))]
+    (doseq [[role text] messages]
+      (if (= :assistant role) (.addAssistantMessage b ^String text) (.addUserMessage b ^String text)))
+    (-> b
+        (.thinking (.build (BetaThinkingConfigAdaptive/builder)))
+        (.outputConfig (-> (BetaOutputConfig/builder)
+                           (.effort (BetaOutputConfig$Effort/of ^String effort))
+                           (.format (-> (BetaJsonOutputFormat/builder)
+                                        (.schema (-> (BetaJsonOutputFormat$Schema/builder)
+                                                     (.additionalProperties
+                                                      (update-vals schema ->json-value))
+                                                     (.build)))
+                                        (.build)))
+                           (.build)))
+        ;; if the model declines, the API retries on a fallback model
+        ;; (not offered for Claude Haiku 5.5, nor in batches)
+        (cond-> (and (not batch?) (ai/fallback? model))
+          (-> (.addBeta "server-side-fallback-2026-07-01")
+              (.putAdditionalBodyProperty "fallbacks" (JsonValue/from "default"))))
+        (.build))))
+
+(defn parse-message
+  "A BetaMessage -> what request returns, plus the raw usage for the cost
+  log. `factor` scales the cost (costs/batch-factor for batch requests)."
+  [msg model factor]
+  (let [stop   (some-> (.orElse (.stopReason msg) nil) (.asString))
+        text   (apply str (keep #(some-> (.orElse (.text %) nil) (.text)) (.content msg)))
+        raw    (api-json (.usage msg))
+        served (str (.model msg))
+        sum    (costs/summarise (costs/lines raw served model factor))]
+    {:usage-raw    raw
+     :served-model served
+     :stop         stop
+     :request-id   (.id msg)
+     ;; parsed only for a finished answer
+     :response     (when-not (#{"refusal" "max_tokens"} stop) (json/read-str text :key-fn keyword))
+     :usage        {:input_tokens (:input_tokens sum) :output_tokens (:output_tokens sum)
+                    :cache_read (:cache_read sum)
+                    :cache_write (+ (:cache_write_5m sum) (:cache_write_1h sum))
+                    :stop_reason stop :model served
+                    :cost_usd (:cost_usd sum)
+                    :cost_chf (some-> (:cost_usd sum) (* costs/usd->chf))}}))
+
+(defn- request*
+  [{:keys [model] :as opts}]
+  (parse-message (.create (.messages (.beta (client))) (message-params opts)) model 1.0))
+
+(defn claude-opts
+  "The planner's request options: the shared knowledge, then the planner's
+  instructions, then the data in one user turn."
+  [user-text schema & [log-opts]]
+  (merge {:knowledge (principles) :system system-intro
+          :messages [[:user user-text]] :schema schema}
+         log-opts))
+
+(defn call-claude [user-text schema & [log-opts]]
+  (request (claude-opts user-text schema log-opts)))
+
+;; ---------------------------------------------------------------------------
+;; Half-price batches (Message Batches API)
+;;
+;; A batch request is sent now and answered within minutes (at most 24 h).
+;; The pending request is stored in claude_batches with everything needed to
+;; finish the job (its `data`); poll-batches! collects results - also after a
+;; restart, since Anthropic keeps them for 29 days - and hands each to the
+;; task's handler, the same validation and storage as an instant request.
+
+(defonce ^{:doc "task -> {:done (fn [ds data response usage]) :fail (fn [ds data message])}"}
+  batch-handlers (atom {}))
+
+(defn register-batch-handler! [task handlers]
+  (swap! batch-handlers assoc (name task) handlers))
+
+(defn batch-request-params
+  "The request's params as a batch request entry (via the SDK's own JSON,
+  so instant and batch requests are built by the same code)."
+  [opts]
+  (let [mapper (ObjectMappers/jsonMapper)]
+    (.readValue mapper
+                (.writeValueAsString mapper (._body ^MessageCreateParams (message-params (assoc opts :batch? true))))
+                com.anthropic.models.beta.messages.batches.BatchCreateParams$Request$Params)))
+
+(defn- now-str [] (str (java.time.Instant/now)))
+
+(defn submit-batch!
+  "Sends one request through the Message Batches API and stores it as
+  pending. `data` (JSON-able) goes to the task's batch handler with the
+  result. Throws like request does (no credits included)."
+  [ds {:keys [task ref data] :as opts}]
+  (let [chosen (ai/for-task task)
+        model  (or (:model opts) (:model chosen))
+        effort (or (:effort opts) (:effort chosen))
+        opts   (assoc opts :model model :effort effort)
+        cid    (str (name task) "-" (System/currentTimeMillis) "-" (rand-int 100000))]
+    (try
+      (let [batch (.create (.batches (.messages (.beta (client))))
+                           (-> (com.anthropic.models.beta.messages.batches.BatchCreateParams/builder)
+                               (.addRequest (-> (com.anthropic.models.beta.messages.batches.BatchCreateParams$Request/builder)
+                                                (.customId cid)
+                                                (.params (batch-request-params opts))
+                                                (.build)))
+                               (.build)))]
+        (next.jdbc/execute! ds ["INSERT INTO claude_batches (custom_id, batch_id, task, ref, model, effort, data, status, submitted_at)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)"
+                                cid (.id batch) (name task) ref model effort (json/write-str data) (now-str)])
+        cid)
+      (catch Throwable e
+        (let [credits? (no-credits? e)]
+          (costs/log! {:task task :ref ref :model model :effort effort :batch? true
+                       :error (or (ex-message e) (str (class e)))
+                       :error_type (when credits? "no_credits")})
+          (throw (if credits?
+                   (ex-info no-credits-message {:type :no-credits :billing_url billing-url} e)
+                   e)))))))
+
+(defn- finish-batch-row! [ds cid status error]
+  (next.jdbc/execute! ds ["UPDATE claude_batches SET status = ?, error = ?, ended_at = ? WHERE custom_id = ?"
+                          status error (now-str) cid]))
+
+(defn handle-batch-result!
+  "One batch result -> the task's handler. `result` is {:type
+  \"succeeded\"|\"errored\"|\"expired\"|\"canceled\" :message BetaMessage :error msg}."
+  [ds {:keys [custom_id task ref model effort data submitted_at]} {:keys [type message error error-type]}]
+  (let [{:keys [done fail]} (get @batch-handlers task)
+        data     (some-> data (json/read-str :key-fn keyword))
+        ms       (- (System/currentTimeMillis) (.toEpochMilli (java.time.Instant/parse submitted_at)))
+        log      (fn [m] (costs/log! (merge {:task task :ref ref :model model :effort effort
+                                             :duration_ms ms :batch? true} m)))
+        failed!  (fn [msg]
+                   (finish-batch-row! ds custom_id "failed" msg)
+                   (when fail (fail ds data msg)))]
+    (case type
+      "succeeded"
+      (let [{:keys [usage-raw served-model stop request-id response usage]}
+            (parse-message message model costs/batch-factor)]
+        (log {:usage usage-raw :served_model served-model :stop_reason stop :request_id request-id})
+        (if (#{"refusal" "max_tokens"} stop)
+          (failed! (if (= "refusal" stop)
+                     "Claude declined this request in the half-price batch, which has no automatic fallback to another model. Try again: your own click runs it instantly."
+                     "The answer was cut off (max tokens). Try again."))
+          (try (when done (done ds data response usage))
+               (finish-batch-row! ds custom_id "done" nil)
+               (catch Throwable e (failed! (or (ex-message e) (str (class e))))))))
+      "errored"
+      (do (log {:error error :error_type (when (= "billing_error" error-type) "no_credits")})
+          (failed! (if (= "billing_error" error-type) no-credits-message (str "Claude couldn't process it: " error))))
+      ;; expired / canceled: not billed
+      (failed! "The half-price batch didn't finish within 24 hours (not billed). Try again."))))
+
+(defn- batch-result->map [^com.anthropic.models.beta.messages.batches.BetaMessageBatchResult r]
+  (cond
+    (.isSucceeded r) {:type "succeeded" :message (.message (.asSucceeded r))}
+    (.isErrored r)   (let [err (.error (.error (.asErrored r)))
+                           j   (api-json err)]
+                       {:type "errored" :error (or (get-in j [:message]) (str j))
+                        :error-type (:type j)})
+    (.isExpired r)   {:type "expired"}
+    :else            {:type "canceled"}))
+
+(defn pending-batches [ds]
+  (db/query ds ["SELECT * FROM claude_batches WHERE status = 'pending' ORDER BY submitted_at"]))
+
+(defn poll-batches!
+  "Collects finished batches. Safe to call often; does nothing without
+  pending requests. Returns how many results were handled."
+  [ds]
+  (let [pending (pending-batches ds)]
+    (if (empty? pending)
+      0
+      (let [svc (.batches (.messages (.beta (client))))]
+        (reduce + (for [[batch-id rows] (group-by :batch_id pending)]
+                    (try
+                      (let [b (.retrieve svc ^String batch-id)]
+                        (if (= "ended" (.asString (.processingStatus b)))
+                          (let [by-id (into {} (map (juxt :custom_id identity)) rows)]
+                            (with-open [results (.resultsStreaming svc ^String batch-id)]
+                              (reduce + (for [r (iterator-seq (.iterator results))
+                                              :let [row (by-id (.customId r))] :when row]
+                                          (do (handle-batch-result! ds row (batch-result->map (.result r))) 1)))))
+                          0))
+                      (catch Throwable e
+                        (println "Checking batch" batch-id "failed:" (ex-message e))
+                        0))))))))
 
 ;; ---------------------------------------------------------------------------
 
@@ -295,31 +500,71 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
     {:response (assoc response :workouts ws)
      :warnings (rules/check-week monday ws (assoc (rule-opts (:target_week ctx)) :prev prev :full-week? true))}))
 
-(defn- run-proposal! [ds id monday]
+(defn- run-proposal! [ds id monday & [cache?]]
   (try
     (let [ctx (context ds monday)
-          {:keys [response usage]} (call-claude (principles) (user-message ctx) response-schema)
+          {:keys [response usage]} (call-claude (user-message ctx) response-schema
+                                                    {:task :week_plan :ref (str "proposal " id) :cache? cache?})
           {:keys [response warnings]} (validate monday response ctx)]
       (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
     (catch Throwable e
       (plan/fail-proposal! ds id (or (ex-message e) (str (class e)))))))
 
-(defn propose!
-  "Starts a proposal for the week of `monday` in the background and returns
-  its id. Poll coach.plan/proposal for the result."
-  [ds monday]
-  (let [monday (season/monday monday)
-        id     (plan/create-proposal! ds monday model)]
-    (future (run-proposal! ds id monday))
-    id))
+(defn- submit-week!
+  "Sends the week of `monday` (proposal `id`) as a batch request. `later` are
+  the [id monday] weeks after it: each is sent once the one before it is
+  back, because a week's context includes the previous week's proposal."
+  [ds id monday later]
+  (try
+    (let [ctx (context ds monday)]
+      (plan/set-delivery! ds id "batch")
+      (submit-batch! ds (claude-opts (user-message ctx) response-schema
+                                     {:task :week_plan :ref (str "proposal " id)
+                                      :data {:id id :monday monday :ctx ctx :later later}})))
+    (catch Throwable e
+      (plan/fail-proposal! ds id (or (ex-message e) (str (class e))))
+      (when-let [[[nid nm] & more] (seq later)]
+        (submit-week! ds nid nm more)))))
+
+(defn- next-week! [ds {:keys [later]}]
+  (when-let [[[nid nm] & more] (seq later)]
+    (submit-week! ds nid nm more)))
+
+(register-batch-handler!
+ :week_plan
+ {:done (fn [ds {:keys [id monday ctx] :as data} response usage]
+          (try
+            (let [{:keys [response warnings]} (validate monday response ctx)]
+              (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
+            (finally (next-week! ds data))))
+  :fail (fn [ds {:keys [id] :as data} msg]
+          (plan/fail-proposal! ds id msg)
+          (next-week! ds data))})
 
 (defn propose-weeks!
   "Proposals for several weeks, one after the other, so each week sees the
-  one before it. Returns their ids."
-  [ds mondays]
-  (let [ids (mapv #(plan/create-proposal! ds % model) mondays)]
-    (future (doseq [[id m] (map vector ids mondays)] (run-proposal! ds id m)))
+  one before it. `trigger` :auto (the app started it) or :manual (a click)
+  decides, with the task's delivery setting, between the half-price batch and
+  an instant request. Instant: every week but the last caches the knowledge
+  block for the next one. Returns their ids."
+  [ds mondays & [trigger]]
+  (let [batch? (ai/batch? :week_plan (or trigger :manual))
+        ids    (vec (map-indexed (fn [i m] (plan/create-proposal! ds m (model-for :week_plan)
+                                                                  {:delivery (when batch? (if (zero? i) "batch" "queued"))}))
+                                 mondays))
+        last   (dec (count ids))]
+    (future
+      (if batch?
+        (submit-week! ds (first ids) (first mondays) (vec (rest (map vector ids mondays))))
+        (doseq [[i id m] (map vector (range) ids mondays)]
+          (run-proposal! ds id m (< i last)))))
     ids))
+
+(defn propose!
+  "Starts a proposal for the week of `monday` in the background and returns
+  its id. Poll coach.plan/proposal for the result."
+  [ds monday & [trigger]]
+  (first (propose-weeks! ds [(season/monday monday)] (or trigger :manual))))
 
 ;; ---------------------------------------------------------------------------
 ;; Adapting the plan between weekly proposals
@@ -414,14 +659,27 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
      :warnings (vec (distinct (mapcat (fn [m] (rules/check-week m (filter #(= m (season/monday (:date %))) after) (rule-opts (info-of m))))
                                       weeks)))}))
 
+(defn- finish-adjustment! [ds id today scope-end in-scope ctx response usage]
+  (let [{:keys [response warnings]} (validate-adjustment today scope-end response in-scope
+                                                         #(plan/week-info ds %))]
+    (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage})))
+
+(register-batch-handler!
+ :adjust
+ {:done (fn [ds {:keys [id today scope_end in_scope ctx]} response usage]
+          (finish-adjustment! ds id today scope_end in_scope ctx response usage))
+  :fail (fn [ds {:keys [id]} msg] (plan/fail-proposal! ds id msg))})
+
 (defn propose-adjustment!
   "Starts an adjustment proposal for today through the end of next week,
   triggered by `signals` (and/or an athlete `note`). Returns its id."
-  [ds signals note]
+  [ds signals note & [trigger]]
   (let [today     (str (LocalDate/now))
         monday    (season/monday today)
         scope-end (season/add-days monday 13)
-        id        (plan/create-proposal! ds monday model {:kind "adjust" :scope-end scope-end :signals signals})]
+        batch?    (ai/batch? :adjust (or trigger :manual))
+        id        (plan/create-proposal! ds monday (model-for :adjust) {:kind "adjust" :scope-end scope-end :signals signals
+                                                                        :delivery (when batch? "batch")})]
     (future
       (try
         (let [in-scope (plan/workouts ds today scope-end)
@@ -434,10 +692,13 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                               :recent_feedback (vec (for [a (analysis/activities ds {:from (season/add-days today -14) :to today})
                                                           :when (or (:rpe a) (:garmin_rpe a) (pos? (or (:pain a) 0)) (:note a))]
                                                       (select-keys a [:date :name :rpe :garmin_rpe :pain :pain_location :note]))))
-              {:keys [response usage]} (call-claude (principles) (adjust-message ctx today scope-end) adjust-schema)
-              {:keys [response warnings]} (validate-adjustment today scope-end response in-scope
-                                                                  #(plan/week-info ds %))]
-          (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
+              opts     (claude-opts (adjust-message ctx today scope-end) adjust-schema
+                                    {:task :adjust :ref (str "proposal " id)})]
+          (if batch?
+            (submit-batch! ds (assoc opts :data {:id id :today today :scope_end scope-end
+                                                 :in_scope in-scope :ctx ctx}))
+            (let [{:keys [response usage]} (request opts)]
+              (finish-adjustment! ds id today scope-end in-scope ctx response usage))))
         (catch Throwable e
           (plan/fail-proposal! ds id (or (ex-message e) (str (class e)))))))
     id))
@@ -478,7 +739,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
   (locking plan-ahead-lock
     (let [ms (when (and (api-key?) (athlete/content) (plan/latest-season-plan ds "ready"))
                (weeks-to-plan ds (str (LocalDate/now))))]
-      (if (seq ms) (propose-weeks! ds ms) []))))
+      (if (seq ms) (propose-weeks! ds ms :auto) []))))
 
 (defn check!
   "Runs after each sync. New triggering signals start one adjustment proposal
@@ -492,7 +753,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
         adjust-today? (seq (db/query ds ["SELECT 1 FROM plan_proposals WHERE kind = 'adjust' AND substr(created_at, 1, 10) = ?" today]))
         proposed (atom [])]
     (when (and (seq new) (api-key?) (athlete/content) (not adjust-today?) (not-any? #(= "adjust" (:kind %)) open))
-      (let [id (propose-adjustment! ds new nil)]
+      (let [id (propose-adjustment! ds new nil :auto)]
         (doseq [s new]
           (next.jdbc/execute! ds ["INSERT OR IGNORE INTO adapt_signals (key, proposal_id, first_seen) VALUES (?, ?, ?)"
                                   (:key s) id today]))

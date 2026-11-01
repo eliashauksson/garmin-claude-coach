@@ -4,14 +4,13 @@
   athlete applies them (coach.athlete/save!)."
   (:require [clojure.string :as str]
             [coach.athlete :as athlete]
-            [coach.planner :as planner])
-  (:import (com.anthropic.models.beta.messages BetaOutputConfig$Effort)))
+            [coach.planner :as planner]))
 
 (def system-intro
   "You help the athlete keep their coaching file, athlete.md, up to date. The coach plans their
 training from two documents: the general training principles (fixed, never edited here) and
 athlete.md (the athlete, their circumstances, personal zones and baselines, goal race, season
-plan). Both are below.
+plan). Both are above.
 
 How to work:
 - Talk with the athlete in short, plain messages. Ask when something is unclear or missing;
@@ -21,7 +20,7 @@ How to work:
   by name. If a section no longer applies, say so in it rather than removing it.
 - Keep the file consistent: if a change affects other parts (e.g. a new LTHR changes the zones
   in Thresholds & zones), update those too and say so.
-- Edits proposed earlier in this chat are applied only if the file below shows them; a new
+- Edits proposed earlier in this chat are applied only if the file above shows them; a new
   proposal replaces the previous one, so always edit from the file as it is now.
 - If there is no athlete.md yet, help the athlete create one: ask for their profile, goal race
   and date, circumstances and availability, then propose the whole file in the same structure.
@@ -96,10 +95,6 @@ in short fragments, never sentences:
           (or doc "")
           edits))
 
-(defn system-text [doc]
-  (str system-intro
-       "\n# General training principles (read-only)\n\n" (slurp planner/general-file)
-       "\n\n# Current athlete.md\n\n" (or doc "(no athlete.md yet)")))
 
 (defn- tidy
   "Keeps the overview within its limits whatever the model returned."
@@ -112,10 +107,13 @@ in short fragments, never sentences:
   [messages]
   (let [doc (athlete/content)
         {:keys [response usage]}
-        (planner/request {:system   (system-text doc)
+        (planner/request {:knowledge (planner/knowledge doc)
+                          :system   system-intro
+                          ;; the next turn of the chat reads it
+                          :cache?   true
                           :messages (for [{:keys [role text]} messages] [(keyword role) text])
                           :schema   schema
-                          :effort   BetaOutputConfig$Effort/LOW})
+                          :task     :athlete_chat})
         {:keys [reply edits summary]} response]
     {:reply    reply
      :proposal (when (seq edits)
@@ -132,8 +130,10 @@ empty and `edits` must be [].")
   []
   (let [doc (or (athlete/content) (throw (ex-info "There is no athlete document." {})))
         {:keys [response usage]}
-        (planner/request {:system (system-text doc) :messages [[:user summary-request]]
-                          :schema schema :effort BetaOutputConfig$Effort/LOW})]
+        (planner/request {:knowledge (planner/knowledge doc) :system system-intro
+                          :messages [[:user summary-request]]
+                          :schema schema
+                          :task :athlete_summary})]
     (athlete/save-summary-only! (tidy (:summary response)))
     {:summary (tidy (:summary response)) :usage usage}))
 

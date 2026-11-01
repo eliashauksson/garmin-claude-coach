@@ -168,7 +168,44 @@
       first_seen  TEXT NOT NULL)"
    "CREATE TABLE IF NOT EXISTS sync_state (
       key   TEXT PRIMARY KEY,
-      value TEXT)"])
+      value TEXT)"
+   ;; every Claude API request (coach.costs)
+   "CREATE TABLE IF NOT EXISTS api_calls (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      at              TEXT NOT NULL,
+      task            TEXT NOT NULL,
+      ref             TEXT,
+      model_requested TEXT,
+      model_used      TEXT,
+      effort          TEXT,
+      status          TEXT NOT NULL,
+      stop_reason     TEXT,
+      error           TEXT,
+      input_tokens    INTEGER NOT NULL DEFAULT 0,
+      output_tokens   INTEGER NOT NULL DEFAULT 0,
+      cache_read      INTEGER NOT NULL DEFAULT 0,
+      cache_write_5m  INTEGER NOT NULL DEFAULT 0,
+      cache_write_1h  INTEGER NOT NULL DEFAULT 0,
+      cost_usd        REAL,
+      duration_ms     INTEGER,
+      request_id      TEXT,
+      lines           TEXT,
+      usage_raw       TEXT,
+      source          TEXT NOT NULL DEFAULT 'logged')"
+   "CREATE INDEX IF NOT EXISTS api_calls_at ON api_calls(at)"
+   ;; requests sent through the half-price Message Batches API, until their result is in
+   "CREATE TABLE IF NOT EXISTS claude_batches (
+      custom_id    TEXT PRIMARY KEY,
+      batch_id     TEXT,
+      task         TEXT NOT NULL,
+      ref          TEXT,
+      model        TEXT NOT NULL,
+      effort       TEXT NOT NULL,
+      data         TEXT,
+      status       TEXT NOT NULL,
+      submitted_at TEXT NOT NULL,
+      ended_at     TEXT,
+      error        TEXT)"])
 
 (def ^:private data-fixes
   ;; Garmin reports -1/-2 stress for "not enough data"; rows stored before
@@ -188,7 +225,11 @@
    ["plan_proposals" "signals" "TEXT"]
    ["proposal_items" "op" "TEXT NOT NULL DEFAULT 'add'"]
    ["proposal_items" "target_id" "INTEGER"]
-   ["proposal_items" "prev" "TEXT"]])
+   ["proposal_items" "prev" "TEXT"]
+   ["api_calls" "error_type" "TEXT"]
+   ["api_calls" "batch" "INTEGER NOT NULL DEFAULT 0"]
+   ["plan_proposals" "delivery" "TEXT"]
+   ["season_plans" "delivery" "TEXT"]])
 
 (defn- ensure-column! [ds [table column type]]
   (let [cols (set (map :name (jdbc/execute! ds [(str "PRAGMA table_info(" table ")")]

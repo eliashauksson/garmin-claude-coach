@@ -109,7 +109,7 @@
         [:button.pill {:on {:click [[:api "POST" (str url "/restore") {:id id}]]}} "Restore"]])
      [:div.sub "Restoring keeps the current plan as a backup. The newest 3 backups are kept."]]))
 
-(defn card [{:keys [status error plan backups current_monday days_to_race]} ui-state]
+(defn card [{:keys [status error plan backups current_monday days_to_race delivery]} ui-state]
   (let [running? (= "running" status)
         {:keys [summary weeks]} (:response plan)
         confirm  (:confirm ui-state)
@@ -129,7 +129,9 @@
              (when (seq weeks) (c/echart {:key "season" :class "h240" :option-fn #(chart-option weeks current_monday)}))
              (when (seq weeks) (phase-summary weeks current_monday))
              (cond
-               running?          [:div.sub "The coach is drafting the season plan… this usually takes a minute or two."]
+               running?          [:div.sub (if (= "batch" delivery)
+                                             "Waiting for Claude in the half-price batch. Usually within an hour (at most 24 h); you can close the page meanwhile."
+                                             "The coach is drafting the season plan… this usually takes a minute or two.")]
                (= "failed" status) [:div.error (str "Drafting failed: " error)]
                (empty? weeks)    [:div.empty "No season plan yet. Create one first: the coach lays out every week to race day, with its phase and target TSS, from the training principles and athlete.md. Then it plans the next two weeks from your training so far, and adds a week every Monday."]
                :else             [:div.sub "The coach keeps the next two weeks planned and adds a new week every Monday, from your training so far. You review each week before it enters the plan."])

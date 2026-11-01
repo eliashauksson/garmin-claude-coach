@@ -2,7 +2,8 @@
   "What's wrong right now, shown above every page: the coach server is down,
   the Garmin login has expired (or is about to), or the last sync failed.
   Plus the backup link in the sidebar."
-  (:require [coach.ui :as ui]))
+  (:require [clojure.string :as str]
+            [coach.ui :as ui]))
 
 (def backup-url "/api/backup")
 
@@ -61,13 +62,33 @@
             [:span "Renew in a terminal: " [:code renew_command] ", then press Sync now."]
             (when sync_error (data-up-to last-ok)))))
 
+(defn- credits-banner
+  "The Claude API credits have run out: planning and the athlete chat stop
+  until funds are added."
+  [{:keys [credits_out billing_url since]} {:keys [checking result]}]
+  (when credits_out
+    (banner "critical" "Your Claude API credits have run out"
+            (str "Plans, adjustments and the athlete chat need credits. Since " (or (when-str since) "the last request")
+                 ", requests to Claude are refused, and the automatic planning after each sync is paused.")
+            [:span "Add funds on the "
+             [:a {:href billing_url :target "_blank" :rel "noopener noreferrer"} "billing page of the Claude Console"]
+             ", then check again."]
+            [:span {:style {:display "inline-flex" :gap "10px" :align-items "center" :margin-top "6px"}}
+             [:button.pill {:disabled checking :on {:click [[:claude-check]]}}
+              (if checking "Checking…" "I've added funds, check again")]
+             (when (and result (not checking))
+               [:span (if (str/includes? (str result) "credits have run out")
+                        "Still no credits. If you just paid, wait a minute and try again."
+                        (str "The check failed: " result))])])))
+
 (defn view
   "Banners for every page. `sync` is the polled /api/sync state."
-  [{:keys [sync server-down]}]
+  [{:keys [sync server-down] ui-state :ui}]
   (if server-down
     (banner "critical" "Can't reach the coach server"
             [:span "It may have stopped. Start it again with " [:code "make run"] "; this page reconnects by itself."])
-    (list (auth-banner (:auth sync) (:last_ok sync))
+    (list (credits-banner (:claude sync) (:claude-check ui-state))
+          (auth-banner (:auth sync) (:last_ok sync))
           (sync-banner sync))))
 
 (defn backup-link

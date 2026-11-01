@@ -4,9 +4,11 @@
             [coach.analysis :as analysis]
             [coach.auth :as auth]
             [coach.adapt :as adapt]
+            [coach.ai-settings :as ai]
             [coach.athlete :as athlete]
             [coach.athlete-chat :as athlete-chat]
             [coach.backup :as backup]
+            [coach.costs :as costs]
             [coach.db :as db]
             [coach.plan :as plan]
             [coach.planner :as planner]
@@ -42,11 +44,13 @@
                        (catch Throwable e
                          (println "Sync failed:" (ex-message e))
                          (merge {:ok false} (sync/failure e))))
-              ;; new data may call for adapting the plan; a failure here isn't a sync failure
-              result (if (:ok result)
-                       (try (assoc result :proposals (:proposed (planner/check! ds)))
-                            (catch Throwable e (assoc result :plan_check_error (ex-message e))))
-                       result)
+              ;; new data may call for adapting the plan; a failure here isn't a sync failure.
+              ;; Without credits every Claude request would fail, so the check waits.
+              result (cond
+                       (not (:ok result)) result
+                       (costs/credits-out ds) (assoc result :plan_check_skipped "no Claude credits")
+                       :else (try (assoc result :proposals (:proposed (planner/check! ds)))
+                                  (catch Throwable e (assoc result :plan_check_error (ex-message e)))))
               done   (str (java.time.Instant/now))
               result (assoc result :finished_at done)]
           (try (sync/record-result! ds result) (catch Throwable _))
@@ -80,6 +84,27 @@
   [(get params "from" (days-ago default-days)) (get params "to" (today))])
 
 (defn- auth-status [ds] (auth/status ds))
+
+(defn- claude-status
+  "For the banner on every page: are the Claude credits out?"
+  [ds]
+  (when-let [out (costs/credits-out ds)]
+    (assoc out :credits_out true :billing_url planner/billing-url :message planner/no-credits-message)))
+
+(defn- claude-check!
+  "After the athlete adds funds: one tiny request on the cheapest model
+  (about $0.00003) to see whether Claude answers again."
+  [ds]
+  (try
+    (planner/request {:system "You test an API connection. Answer briefly."
+                      :messages [[:user "Reply with the word ok."]]
+                      :schema {"type" "object" "properties" {"reply" {"type" "string"}}
+                               "required" ["reply"] "additionalProperties" false}
+                      :model "claude-haiku-5-5" :effort "low"
+                      :task :test :ref "credits check"})
+    {:ok true :claude (claude-status ds)}
+    (catch Throwable e
+      {:ok false :error (ex-message e) :claude (claude-status ds)})))
 
 (defn- body [req]
   (some-> (:body req) slurp not-empty (json/read-str :key-fn keyword)))
@@ -216,7 +241,16 @@
                             (let [[from to] (date-range query-params 180)]
                               (ok (analysis/volume ds from to))))}]
     ["/thresholds"  {:get (fn [_] (ok (db/thresholds ds)))}]
-    ["/sync"        {:get  (fn [_] (ok (assoc @sync-state :auth (auth-status ds))))
+    ["/ai-settings"
+     ["" {:get    (fn [_] (ok (ai/overview ds)))
+          :delete (fn [_] (ai/reset-all! ds) (ok (ai/overview ds)))}]
+     ["/:task" {:put (guarded (fn [{:keys [path-params] :as req}]
+                                (ai/save! ds (:task path-params) (body req))
+                                (ok (ai/overview ds))))}]]
+    ["/costs"       {:get (fn [{:keys [query-params]}]
+                            (ok (costs/overview ds (get query-params "from"))))}]
+    ["/claude/check" {:post (fn [_] (ok (claude-check! ds)))}]
+    ["/sync"        {:get  (fn [_] (ok (assoc @sync-state :auth (auth-status ds) :claude (claude-status ds))))
                      :post (fn [_] (json-response 202 (assoc (run-sync! ds) :auth (auth-status ds))))}]
     ["/backup"
      ["" {:get  (fn [_] (ok (backup/status)))
@@ -256,6 +290,18 @@
 
 (defonce server (atom nil))
 (defonce scheduler (atom nil))
+(defonce batch-poller (atom nil))
+
+(defn- start-batch-poller!
+  "Collects half-price batch results every minute (and right away, for
+  results that came in while the dashboard was off)."
+  [ds]
+  (let [ex (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
+    (.scheduleWithFixedDelay ex #(try (let [n (planner/poll-batches! ds)]
+                                        (when (pos? n) (println "Collected" n "batch result(s)")))
+                                      (catch Throwable e (println "Batch check failed:" (ex-message e))))
+                             0 60 java.util.concurrent.TimeUnit/SECONDS)
+    (reset! batch-poller ex)))
 
 (def sync-every-hours 2)
 
@@ -285,6 +331,11 @@
      (println (str "Dashboard on http://127.0.0.1:" port "/"))
      (println (auth/describe (auth/status ds)))
      (load-sync-state! ds)
+     (costs/use-db! ds)
+     (ai/use-db! ds)
+     (let [n (costs/import-earlier! ds)]
+       (when (pos? n) (println "Imported" n "earlier Claude requests into the cost log")))
+     (start-batch-poller! ds)
      (when sync?
        (run-sync! ds)
        (start-background-sync! ds))
@@ -292,6 +343,7 @@
 
 (defn stop! []
   (when-let [ex @scheduler] (.shutdownNow ex) (reset! scheduler nil))
+  (when-let [ex @batch-poller] (.shutdownNow ex) (reset! batch-poller nil))
   (when-let [s @server] (.stop s) (reset! server nil)))
 
 (defn -main
