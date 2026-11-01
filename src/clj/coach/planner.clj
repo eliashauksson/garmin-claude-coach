@@ -754,9 +754,23 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
        (.isBefore (java.time.Instant/parse (:updated_at p))
                   (.minus (java.time.Instant/now) (Duration/ofHours 6)))))
 
+(defn- plan-again?
+  "Whether a week with no sessions left gets a new proposal, given its latest
+  proposal `p`: none yet, withdrawn, failed a while ago, or reviewed with
+  something accepted whose sessions were cancelled since (a new season plan,
+  an adjustment). Not while one is running or still has items to review, and
+  not when the athlete turned the last one down (nothing accepted)."
+  [p]
+  (or (nil? p)
+      (= "withdrawn" (:status p))
+      (retry? p)
+      (and (#{"open" "closed"} (:status p))
+           (not-any? #(= "pending" (:decision %)) (:items p))
+           (some #(#{"accepted" "edited"} (:decision %)) (:items p)))))
+
 (defn weeks-to-plan
-  "The next `horizon-weeks` weeks after the current one (up to race week) with
-  nothing planned or proposed yet."
+  "The next `horizon-weeks` weeks after the current one (up to race week)
+  with no sessions planned and nothing proposed for them (see plan-again?)."
   [ds today]
   (let [m    (season/monday today)
         race (:race_date (plan/current-season ds))]
@@ -765,7 +779,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                      p  (plan/latest-proposal ds mo)]
                :when (and race (<= (compare mo (season/monday race)) 0)
                           (empty? (plan/workouts ds mo (season/add-days mo 6)))
-                          (or (nil? p) (= "withdrawn" (:status p)) (retry? p)))]
+                          (plan-again? p))]
            mo))))
 
 (defonce ^:private plan-ahead-lock (Object.))

@@ -53,6 +53,21 @@
         (let [id (coach.plan/create-proposal! ds "2026-11-09" "m")]
           (coach.plan/fail-proposal! ds id "boom"))
         (is (= [] (coach.planner/weeks-to-plan ds "2026-10-31"))))
+      (testing "an accepted week whose sessions were cancelled since is planned again"
+        (let [id (coach.plan/create-proposal! ds "2026-11-16" "m")]
+          (coach.plan/finish-proposal! ds id {:response {:workouts [{:date "2026-11-17" :slot "AM" :session_id "EASY"
+                                                                     :title "t" :duration_min 30 :distance_km 5}]}})
+          (coach.plan/accept-all! ds id false)
+          (is (not-any? #{"2026-11-16"} (coach.planner/weeks-to-plan ds "2026-11-09")) "not while its session stands")
+          (coach.plan/clear-upcoming! ds "2026-11-09")
+          (is (some #{"2026-11-16"} (coach.planner/weeks-to-plan ds "2026-11-09")))))
+      (testing "a week the athlete turned down is left alone"
+        (let [id (coach.plan/create-proposal! ds "2026-11-23" "m")]
+          (coach.plan/finish-proposal! ds id {:response {:workouts [{:date "2026-11-24" :slot "AM" :session_id "EASY"
+                                                                     :title "t" :duration_min 30 :distance_km 5}]}})
+          (is (not-any? #{"2026-11-23"} (coach.planner/weeks-to-plan ds "2026-11-16")) "not while it awaits review")
+          (coach.plan/decide-item! ds id 0 "rejected" nil)
+          (is (not-any? #{"2026-11-23"} (coach.planner/weeks-to-plan ds "2026-11-16")) "nor once it is turned down")))
       (testing "on Monday the new second week is due"
         (is (= ["2026-11-16"] (coach.planner/weeks-to-plan ds "2026-11-02"))))
       (testing "nothing after race week"
