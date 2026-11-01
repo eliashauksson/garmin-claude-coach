@@ -158,14 +158,38 @@
        (when (zero? (mod (inc i) 25)) (println (format "  streams %d/%d" (inc i) n))))
      ids)))
 
-(def intraday-days "Today plus this many days back are kept fresh." 6)
+(def intraday-days "Today plus this many days back are re-fetched on every sync." 6)
 
-(defn sync-intraday!
-  "Fetches intraday series for each date in [start, end]. A fatal error
-  (login, rate limit, offline) stops the sync; any other failure is logged
-  and that day skipped. An empty day never replaces a stored one with data."
-  [src ds start end]
-  (doseq [date (reverse (map first (chunks start end 1)))]
+(def garmin-intraday-months
+  "Garmin serves intraday detail (heart rate, stress, body battery, steps
+  through the day) only for about this many months back; older days come
+  back empty. Measured on 2026-11-01: the first day with detail was
+  2026-07-01. So every day is saved while it's still in the window."
+  4)
+
+(defn intraday-window-start [today] (str (.minusMonths (d today) garmin-intraday-months)))
+
+(defn intraday-dates
+  "Pure: the days a sync fetches, oldest first: the last week (late and
+  partial data) plus every day in Garmin's window that was never stored.
+  A day Garmin had nothing for is stored empty, so it isn't asked for again."
+  [today stored?]
+  (let [recent (set (map first (chunks (str (.minusDays (d today) intraday-days)) today 1)))
+        window (map first (chunks (intraday-window-start today) today 1))]
+    (sort (distinct (concat recent (remove stored? window))))))
+
+(defn stored-intraday-dates [ds from]
+  (into #{} (map :date) (db/query ds ["SELECT date FROM daily_intraday WHERE date >= ?" from])))
+
+(defn sync-intraday-dates!
+  "Fetches and stores the intraday series of `dates`. A fatal error (login,
+  rate limit, offline) stops the sync; any other failure is logged and that
+  day skipped (so it's tried again next time). An empty day never replaces
+  a stored one with data."
+  [src ds dates]
+  (doseq [[i date] (map-indexed vector dates)]
+    (when (and (pos? i) (zero? (mod i 25)))
+      (println (format "  intraday %d/%d" i (count dates))))
     (try
       (let [row (source/fetch-intraday src date)]
         (if (and (empty-intraday? row) (some-> (db/load-intraday ds date) empty-intraday? not))
@@ -175,6 +199,11 @@
         (if (fatal? e)
           (throw e)
           (println "  intraday" date "skipped:" (ex-message e)))))))
+
+(defn sync-intraday!
+  "Fetches intraday series for each date in [start, end]."
+  [src ds start end]
+  (sync-intraday-dates! src ds (reverse (map first (chunks start end 1)))))
 
 (defn- sync-chunks! [src ds start end]
   (doseq [[s e] (chunks start end chunk-days)]
@@ -193,8 +222,11 @@
     (db/set-state! ds :synced_through t)
     (when-not (db/get-state ds :backfill_before)
       (db/set-state! ds :backfill_before from))
-    (let [week-ago (str (.minusDays (d t) intraday-days))]
-      (sync-intraday! src ds (if (pos? (compare from week-ago)) from week-ago) t))
+    ;; the last week, plus any day in Garmin's 4-month window not saved yet
+    (let [dates (intraday-dates t (stored-intraday-dates ds (intraday-window-start t)))]
+      (when (> (count dates) (inc intraday-days))
+        (println "Intraday:" (count dates) "days, saving the ones not stored yet before Garmin drops them"))
+      (sync-intraday-dates! src ds dates))
     (sync-vo2max! src ds from t)
     (let [changed? (sync-thresholds! src ds)
           new-ids  (sync-streams! src ds)

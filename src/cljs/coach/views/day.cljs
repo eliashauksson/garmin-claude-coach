@@ -32,9 +32,14 @@
 
 (defn- no-data [] [:div.empty *no-data*])
 
+(def ^:dynamic *no-detail*
+  "Why a chart through the day is empty; set per day in `view`."
+  "No data yet — run Sync.")
+
+(defn- no-detail [] [:div.empty *no-detail*])
+
 (def ^:dynamic *morning* "this morning")
 
-(def intraday-days "Intraday series are kept for this many days (coach.sync/intraday-days + today)." 7)
 
 (defn url [date] (str "/api/day/" date))
 
@@ -79,7 +84,7 @@
                                        {:y-min 0 :y-max 100 :tip "body battery"
                                         :series [(-> (c/line "Body battery" "--blue" bb :lineStyle {:width 2.5})
                                                      (c/area-wash 0.25))]})})
-               (no-data))
+               (no-detail))
       :footer (ui/pills (when (:bb_charged day) (ui/pill (str "+" (:bb_charged day) " charged")))
                         (when (:bb_drained day) (ui/pill (str "−" (:bb_drained day) " drained"))))})))
 
@@ -118,7 +123,7 @@
                                         {:tip "bpm"
                                          :series [(c/area-wash (c/line "Heart rate" "--red" hr) 0.18)]})})
                 day-axis]
-               (no-data))})))
+               (no-detail))})))
 
 ;; ---------------------------------------------------------------------------
 ;; Row 3: stress, steps
@@ -148,7 +153,7 @@
                                                           :barWidth 2 :barMaxWidth nil :barGap "-100%"
                                                           :itemStyle {:color (c/css-var "--amber") :borderRadius 1})]})})
                 day-axis]
-               (no-data))
+               (no-detail))
       :footer (when (pos? n)
                 (into [:div.pills]
                       (for [[label pred] stress-buckets]
@@ -183,7 +188,7 @@
                                             (assoc :series [(c/bars "Steps" "--green" (mapv #(when (pos? %) %) steps)
                                                                     :barMaxWidth nil :barCategoryGap "15%" :barMinHeight 4)])))})
                 [:div.ax [:span "00"] [:span "06"] [:span "12"] [:span "18"] [:span "24"]]]
-               (no-data))})))
+               (no-detail))})))
 
 ;; ---------------------------------------------------------------------------
 ;; Row 4: 7 nights, last activity
@@ -323,8 +328,6 @@
 (defn- monday [date]
   (add-days date (- (mod (+ (.getDay (ui/parse-date date)) 6) 7))))
 
-(defn- days-between [a b]
-  (js/Math.round (/ (- (.getTime (ui/parse-date b)) (.getTime (ui/parse-date a))) 86400000)))
 
 (defn view [{:keys [data errors]} url date]
   (let [d      (get data url)
@@ -333,12 +336,16 @@
         i      (:intraday d)
         today  (or (:today d) (ui/iso-today))
         today? (= date today)
-        old?   (>= (days-between date today) intraday-days)]
-    (binding [*no-data* (cond
-                          (pos? (compare date today)) "This day hasn't happened yet."
-                          old? "Detail through the day is kept for the last 7 days only."
-                          today? "No data yet — run Sync."
-                          :else "No data for this day.")
+        future? (pos? (compare date today))]
+    (binding [*no-data* (cond future? "This day hasn't happened yet."
+                              today?  "No data yet — run Sync."
+                              :else   "No data for this day.")
+              *no-detail* (cond
+                            future? "This day hasn't happened yet."
+                            (:intraday_saved d) "Garmin recorded no detail through the day."
+                            (and (:intraday_window_start d) (neg? (compare date (:intraday_window_start d))))
+                            "Garmin keeps detail through the day for about 4 months only, and this day is older. Every newer day is saved."
+                            :else "Not synced yet — run Sync.")
               *morning* (if today? "this morning" "that morning")]
       [:div {:style {:display "contents"}}
        [:div.page-head

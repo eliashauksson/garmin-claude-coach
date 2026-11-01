@@ -236,4 +236,7 @@
      :activities (vec (sort-by :start_time_local (activities ds {:from date :to date})))
      :day        (day-extras raw)
      :nights     (nights ds date)
-     :intraday   (some-> (db/load-intraday ds date) (dissoc :date))}))
+     :intraday   (some-> (db/load-intraday ds date) (dissoc :date))
+     ;; whether the day's detail was ever fetched (stored empty when Garmin had none)
+     :intraday_saved (boolean (seq (db/query ds ["SELECT 1 FROM daily_intraday WHERE date = ?" date])))
+     :intraday_window_start ((requiring-resolve 'coach.sync/intraday-window-start) (today))}))

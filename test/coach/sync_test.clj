@@ -118,3 +118,15 @@
            (sync/failure (ex-info "Garmin Connect request failed" {}))))
     (is (= {:kind :auth :message "Error retrieving stats: Garmin login failed."}
            (sync/failure (ex-info "Error retrieving stats: Garmin login failed. Run 'garmin-mcp-auth' to authenticate, then restart the server." {}))))))
+
+(deftest intraday-dates-test
+  (let [today "2026-11-01"]
+    (is (= "2026-07-01" (sync/intraday-window-start today)) "Garmin's window: 4 months")
+    (testing "first run: every day in the window"
+      (let [ds (sync/intraday-dates today #{})]
+        (is (= ["2026-07-01" "2026-11-01"] [(first ds) (last ds)]))
+        (is (= 124 (count ds)))))
+    (testing "afterwards: the last week plus any gap"
+      (let [stored (disj (set (sync/intraday-dates today #{})) "2026-08-15")]
+        (is (= ["2026-08-15" "2026-10-26" "2026-10-27" "2026-10-28" "2026-10-29" "2026-10-30" "2026-10-31" "2026-11-01"]
+               (sync/intraday-dates today stored)))))))
