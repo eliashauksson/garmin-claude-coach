@@ -205,6 +205,45 @@
   [src ds start end]
   (sync-intraday-dates! src ds (reverse (map first (chunks start end 1)))))
 
+;; ---------------------------------------------------------------------------
+;; Coach overview: today's training status, race predictions and endurance
+;; score (Garmin only serves their current value, so each sync keeps that
+;; day's), and the sleep need of the last 30 nights.
+
+(def sleep-need-days "Nights of sleep need the overview shows." 30)
+
+(defn sleep-need-dates
+  "Pure: the nights to fetch, oldest first: the last `refresh-days` + 1
+  (late data) plus every night of the last `sleep-need-days` not stored."
+  [today stored?]
+  (let [recent (set (map first (chunks (str (.minusDays (d today) refresh-days)) today 1)))
+        window (map first (chunks (str (.minusDays (d today) (dec sleep-need-days))) today 1))]
+    (sort (distinct (concat recent (remove stored? window))))))
+
+(defn- overview-step!
+  "Runs one fetch-and-store step. A fatal error stops the sync; any other is
+  logged and skipped (tried again next sync). nil answers store nothing, so
+  an empty answer never replaces a stored day."
+  [label f]
+  (try (f)
+       (catch Exception e
+         (if (fatal? e) (throw e) (println " " label "skipped:" (ex-message e))))))
+
+(defn sync-overview!
+  "Training status, race predictions and endurance score for `today`, and
+  the sleep need of recent nights."
+  [src ds today]
+  (overview-step! "training status"
+                  #(some->> (source/fetch-training-status src today) vector (db/upsert-training-status! ds)))
+  (overview-step! "race predictions"
+                  #(some->> (source/fetch-race-predictions src) vector (db/upsert-race-predictions! ds)))
+  (overview-step! "endurance score"
+                  #(some->> (source/fetch-endurance src today) vector (db/upsert-endurance! ds)))
+  (let [stored (into #{} (map :date) (db/query ds ["SELECT date FROM sleep_need"]))]
+    (doseq [date (sleep-need-dates today stored)]
+      (overview-step! (str "sleep need " date)
+                      #(some->> (source/fetch-sleep-need src date) vector (db/upsert-sleep-need! ds))))))
+
 (defn- sync-chunks! [src ds start end]
   (doseq [[s e] (chunks start end chunk-days)]
     (sync-range! src ds s e)))
@@ -228,6 +267,7 @@
         (println "Intraday:" (count dates) "days, saving the ones not stored yet before Garmin drops them"))
       (sync-intraday-dates! src ds dates))
     (sync-vo2max! src ds from t)
+    (sync-overview! src ds t)
     (let [changed? (sync-thresholds! src ds)
           new-ids  (sync-streams! src ds)
           missing  (map :id (db/query ds ["SELECT a.id FROM activities a
@@ -304,13 +344,13 @@
 
 (defn -main
   "clojure -M -m coach.sync [sync | backfill [max-chunks] | streams [max] | intraday [days] |
-                            vo2max | thresholds | metrics | status]"
+                            vo2max | thresholds | overview | metrics | status]"
   [& [cmd n]]
   (let [ds (doto (db/datasource) db/migrate!)]
     (case cmd
       "status"  (prn (status ds))
       "metrics" (println "Scored" (analysis/compute-metrics! ds) "activities")
-      (let [_ (when-not (#{"sync" "backfill" "streams" "intraday" "vo2max" "thresholds"} (or cmd "sync"))
+      (let [_ (when-not (#{"sync" "backfill" "streams" "intraday" "vo2max" "thresholds" "overview"} (or cmd "sync"))
                 (println "Unknown command:" cmd) (System/exit 2))
             {:keys [ok]}
             (run-cli-sync!
@@ -323,6 +363,7 @@
                     "intraday"   (let [days (if n (parse-long n) 7)]
                                    (sync-intraday! src ds (str (.minusDays (d (today)) (dec days))) (today)))
                     "vo2max"     (sync-vo2max! src ds epoch (today))
+                    "overview"   (sync-overview! src ds (today))
                     "thresholds" (do (println "Changed:" (sync-thresholds! src ds))
                                      (run! prn (db/thresholds ds))))))]
         (prn (status ds))

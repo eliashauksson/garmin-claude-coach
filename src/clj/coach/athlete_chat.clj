@@ -40,6 +40,11 @@ in short fragments, never sentences:
 - `race`: the goal race name only (e.g. \"City Marathon\").
 - `race_date`: its date as YYYY-MM-DD, or \"\" if there is none.
 - `race_detail`: what the race is, a few words (e.g. \"Marathon · 42.2 km\").
+- `race_goal`: the goal finish time as H:MM:SS (e.g. \"3:30:00\"; for several races on one day,
+  their total), or \"\" if the file gives none.
+- `race_legs`: the standard distances the goal race is made of, from
+  \"5k\", \"10k\", \"half\" and \"marathon\" (e.g. [\"marathon\"]); [] when it is anything else
+  (trail, ultra, triathlon...).
 - `athlete`: name and a few words (e.g. \"Alex, 34 · teacher\").
 - `stats`: the 3-4 numbers that shape training most, each a short `label` and a `value` with
   its unit (e.g. LTHR / 170 bpm, Easy zone / 133–145 bpm). No more than 4.
@@ -68,10 +73,13 @@ in short fragments, never sentences:
                         "required" ["old_text" "new_text"]
                         "properties" {"old_text" {"type" "string"} "new_text" {"type" "string"}}}}
     "summary" {"type" "object" "additionalProperties" false
-               "required" ["race" "race_date" "race_detail" "athlete" "stats" "focus" "settings"]
+               "required" ["race" "race_date" "race_detail" "race_goal" "race_legs" "athlete" "stats" "focus" "settings"]
                "properties" {"race" {"type" "string"}
                              "race_date" {"type" "string"}
                              "race_detail" {"type" "string"}
+                             "race_goal" {"type" "string"}
+                             "race_legs" {"type" "array"
+                                          "items" {"type" "string" "enum" ["5k" "10k" "half" "marathon"]}}
                              "athlete" {"type" "string"}
                              "stats" {"type" "array"
                                       "items" {"type" "object" "additionalProperties" false
@@ -151,7 +159,8 @@ empty and `edits` must be [].")
   []
   (let [doc  (athlete/content)
         hash (athlete/sha doc)
-        need (and doc (nil? (:settings (athlete/summary))))
+        ;; also an overview from before the goal time and race legs were part of it
+        need (and doc (let [s (athlete/summary)] (or (nil? (:settings s)) (not (contains? s :race_legs)))))
         [old _] (swap-vals! summary-job
                             #(if (and need (not (:running %)) (not= hash (get-in % [:failed :hash])))
                                (assoc % :running true)

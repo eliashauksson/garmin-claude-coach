@@ -11,6 +11,7 @@
             [coach.costs :as costs]
             [coach.db :as db]
             [coach.i18n :as i18n]
+            [coach.overview :as overview]
             [coach.plan :as plan]
             [coach.planner :as planner]
             [coach.readiness :as readiness]
@@ -231,6 +232,17 @@
                                                   :planned (plan/workouts ds date date))
                                      ;; suggestions for today's sessions, from this morning's readiness
                                      (= date (today)) (assoc :readiness_check (readiness-today ds)))))))}]
+    ;; the dashboard's coach overview (coach-dashboard-spec.md)
+    ["/overview"    {:get (guarded
+                           (fn [{:keys [query-params]}]
+                             (let [date (get query-params "date" (today))]
+                               (when-not (re-matches #"\d{4}-\d{2}-\d{2}" date)
+                                 (throw (ex-info (str "Not a date: " date) {})))
+                               ;; the goal time and race legs come from the athlete summary:
+                               ;; an older summary without them is rewritten in the background
+                               (let [job (when (planner/api-key?) (athlete-chat/ensure-summary!))]
+                                 (ok (cond-> (overview/overview ds date)
+                                       (:summarising job) (assoc :summarising true)))))))}]
     (plan-routes ds)
     (athlete-routes ds)
     ["/auth"        {:get (fn [_] (ok (auth-status ds)))}]

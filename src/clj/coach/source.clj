@@ -23,4 +23,13 @@
     {:date :hr [[minute bpm]] :stress [[minute level]] :body_battery [[minute level]]
      :steps [24 hourly totals] :raw {...}}.")
   (fetch-vo2max [this start-date end-date]
-    "VO2 max per day [{:date :sport :value :carried_forward}]. Max 90 days."))
+    "VO2 max per day [{:date :sport :value :carried_forward}]. Max 90 days.")
+  (fetch-training-status [this date]
+    "Training status and load focus on `date`: {:date :raw {:status {...} :balance {...}}},
+    nil when Garmin has none.")
+  (fetch-race-predictions [this]
+    "Today's race predictions {:date :t5k :t10k :thalf :tmar :raw} (seconds), nil when none.")
+  (fetch-endurance [this date]
+    "Endurance score on `date` {:date :score :raw}, nil when none.")
+  (fetch-sleep-need [this date]
+    "Sleep need for the night ending `date` {:date :need_min :raw}, nil when none."))

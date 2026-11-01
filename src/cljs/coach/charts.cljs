@@ -131,6 +131,111 @@
             (set! (.-group c) group)
             (echarts/connect group))))))}])
 
+(defn fade
+  "A vertical gradient of a colour token from `top` to 0 opacity (area fills)."
+  [var-name top]
+  {:type "linear" :x 0 :y 0 :x2 0 :y2 1
+   :colorStops [{:offset 0 :color (alpha var-name top)} {:offset 1 :color (alpha var-name 0)}]})
+
+(defn spark-option
+  "A sparkline: 2px line, no axes, an area fading from 0.3 to 0 and a 3.5px end
+  dot ringed in --surface. `values` may hold nils. `band` is [[lo hi] ...] drawn
+  behind at 0.14. `inverse?` turns the y axis upside down (lower is better)."
+  [{:keys [color values band inverse?]}]
+  (let [n    (count values)
+        xs   (vec (range n))
+        last-i (last (keep-indexed #(when (some? %2) %1) values))]
+    {:animation false
+     :grid {:left 5 :right 7 :top 6 :bottom 6}
+     :tooltip {:show false}
+     :xAxis {:type "category" :show false :boundaryGap false :data xs}
+     :yAxis {:type "value" :show false :scale true :inverse (boolean inverse?)}
+     :series (concat
+              (when (seq band)
+                [{:type "line" :stack "band" :symbol "none" :silent true :lineStyle {:opacity 0}
+                  :data (mapv first band)}
+                 {:type "line" :stack "band" :symbol "none" :silent true :lineStyle {:opacity 0}
+                  :areaStyle {:color (css-var color) :opacity 0.14}
+                  :data (mapv (fn [[lo hi]] (when (and lo hi) (- hi lo))) band)}])
+              [{:type "line" :data values :showSymbol false :connectNulls true :silent true
+                :lineStyle {:width 2 :cap "round" :join "round" :color (css-var color)}
+                :areaStyle {:color (fade color 0.3) :origin (if inverse? "end" "start")}}
+               {:type "scatter" :silent true :symbolSize 7
+                :itemStyle {:color (css-var color) :borderColor (css-var "--surface") :borderWidth 2}
+                :data (if last-i [[last-i (nth values last-i)]] [])}])}))
+
+(defn spark
+  "A sparkline chart (see spark-option), aria-hidden."
+  [key class opts]
+  [:div {:aria-hidden "true" :replicant/key key}
+   (echart {:key key :class class :option-fn #(spark-option opts)})])
+
+(defn end-label
+  "A line's end label (\"55 bpm\"), 12px / 700, and the right padding it needs."
+  [text color-var]
+  {:label {:show true :formatter (fn [_] text) :color (css-var color-var)
+           :fontSize 12 :fontWeight 700 :fontFamily font :distance 8}
+   :pad (+ 16 (* 7.5 (count text)))})
+
+(defn dom-chart
+  "A hand-drawn chart: `draw!` is called with the container node and its width
+  on every render and resize, and builds the content with DOM calls (no
+  innerHTML). `first?` is true for the first draw only (for entry animations)."
+  [{:keys [key class draw!]}]
+  [:div.dom-chart
+   {:class class
+    :replicant/key key
+    :replicant/on-render
+    (fn [{:replicant/keys [life-cycle] :as hook}]
+      (let [^js node (:replicant/node hook)]
+        (if (= life-cycle :replicant.life-cycle/unmount)
+          (some-> (.-__ro node) .disconnect)
+          (let [redraw (fn []
+                         (let [w (.-clientWidth node)]
+                           (when (pos? w)
+                             (draw! node w (not (.-__drawn node)))
+                             (set! (.-__drawn node) true))))]
+            (set! (.-__draw node) redraw)
+            (when-not (.-__ro node)
+              (observe-resize! node #((.-__draw node))))
+            (redraw)))))}])
+
+(def svg-ns "http://www.w3.org/2000/svg")
+
+(defn el
+  "A DOM element (SVG when `tag` is a keyword in svg/…) with attributes and
+  children; strings become text nodes."
+  [tag attrs & children]
+  (let [svg? (= "svg" (namespace tag))
+        ^js e (if svg? (.createElementNS js/document svg-ns (name tag)) (.createElement js/document (name tag)))]
+    (doseq [[k v] attrs :when (some? v)] (.setAttribute e (name k) (str v)))
+    (doseq [c (flatten children) :when (some? c)]
+      (.appendChild e (if (string? c) (.createTextNode js/document c) c)))
+    e))
+
+(defn tooltip!
+  "Shows `lines` (first one bold) in the card's tooltip near the pointer:
+  14px right of it, flipped left near the card's edge. nil hides it."
+  [^js host ^js ev lines]
+  (let [^js tip (or (.-__tip host)
+                    (let [t (el :div {:class "dom-tip" :role "tooltip"})]
+                      (.appendChild host t)
+                      (set! (.-__tip host) t)
+                      t))]
+    (if (empty? lines)
+      (set! (.. tip -style -display) "none")
+      (let [r  (.getBoundingClientRect host)
+            x  (- (.-clientX ev) (.-left r))
+            y  (- (.-clientY ev) (.-top r))]
+        (.replaceChildren tip)
+        (doseq [[i l] (map-indexed vector lines)]
+          (.appendChild tip (el :div (when (zero? i) {:class "b"}) l)))
+        (set! (.. tip -style -display) "block")
+        (let [tw (.-offsetWidth tip)
+              left (if (> (+ x 14 tw) (.-width r)) (max 0 (- x 14 tw)) (+ x 14))]
+          (set! (.. tip -style -left) (str left "px"))
+          (set! (.. tip -style -top) (str (max 0 (- y 10)) "px")))))))
+
 (defn- reset-control
   "A map button under the zoom buttons that calls `fit!` to show the whole track again."
   [fit!]

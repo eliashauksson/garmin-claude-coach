@@ -19,7 +19,9 @@
     "get_training_readiness" "get_morning_training_readiness" "get_body_battery"
     "get_stress_data" "get_training_status" "get_training_load_trend" "get_vo2max_trend"
     "get_lactate_threshold" "get_heart_rate_zones" "get_cycling_ftp"
-    "get_heart_rates" "get_steps_data"})
+    "get_heart_rates" "get_steps_data"
+    ;; the dashboard's coach overview (coach.overview)
+    "get_training_load_balance" "get_race_predictions" "get_endurance_score"})
 
 (defn- uvx-path []
   (let [local (str (System/getProperty "user.home") "/.local/bin/uvx")]
@@ -258,6 +260,42 @@
                 []))
      :raw (dissoc raw :date)}))
 
+;; Coach overview: training status, race predictions, endurance, sleep need.
+;; Each returns nil for an answer without data, so nothing empty is stored.
+
+(defn training-status-row
+  "From get_training_status and get_training_load_balance for `date`."
+  [date status balance]
+  (let [st (m status) bl (m balance)]
+    (when (or (:training_status_feedback st) (number? (:chronic_load st)) (:aerobic_low bl))
+      {:date date :raw {:status st :balance bl}})))
+
+(defn race-prediction-row
+  "From get_race_predictions: {:prediction_date :predictions {:10K {:time_seconds}}}."
+  [res]
+  (let [r  (m res)
+        p  (m (:predictions r))
+        ts (fn [k] (let [v (get-in p [k :time_seconds])] (when (and (number? v) (pos? v)) v)))
+        row {:date (:prediction_date r) :t5k (ts :5K) :t10k (ts :10K)
+             :thalf (ts :half_marathon) :tmar (ts :marathon) :raw r}]
+    (when (and (string? (:date row)) (some row [:t5k :t10k :thalf :tmar]))
+      row)))
+
+(defn endurance-row
+  "From get_endurance_score for a one-day range."
+  [date res]
+  (let [r (m res)]
+    (when (number? (:current_score r))
+      {:date (or (:current_date r) date) :score (:current_score r)
+       :raw (dissoc r :weekly_breakdown)})))
+
+(defn sleep-need-row
+  "From get_sleep_data (Garmin's full sleep record, ~250 KB): only the sleep need is kept."
+  [date res]
+  (let [need (m (get-in (m res) [:dailySleepDTO :sleepNeed]))]
+    (when (number? (:actual need))
+      {:date date :need_min (:actual need) :raw need})))
+
 ;; ---------------------------------------------------------------------------
 
 (defn- activity-page
@@ -340,7 +378,25 @@
     (let [r (call client "get_vo2max_trend" {"start_date" start-date "end_date" end-date})]
       (vec (for [p (:trend (m r)) :when (:vo2_max p)]
              {:date (:date p) :sport (:sport r) :value (:vo2_max p)
-              :carried_forward (boolean (:carried_forward p))})))))
+              :carried_forward (boolean (:carried_forward p))}))))
+
+  (fetch-training-status [_ date]
+    (Thread/sleep (long delay-ms))
+    (let [status (call client "get_training_status" {"date" date})]
+      (Thread/sleep (long delay-ms))
+      (training-status-row date status (call client "get_training_load_balance" {"date" date}))))
+
+  (fetch-race-predictions [_]
+    (Thread/sleep (long delay-ms))
+    (race-prediction-row (call client "get_race_predictions" {})))
+
+  (fetch-endurance [_ date]
+    (Thread/sleep (long delay-ms))
+    (endurance-row date (call client "get_endurance_score" {"start_date" date "end_date" date})))
+
+  (fetch-sleep-need [_ date]
+    (Thread/sleep (long delay-ms))
+    (sleep-need-row date (call client "get_sleep_data" {"date" date}))))
 
 (defn start!
   "Starts the MCP server and returns a GarminMcpSource. Tokens are read from

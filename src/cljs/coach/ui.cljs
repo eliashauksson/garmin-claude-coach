@@ -21,12 +21,43 @@
           pad #(if (< % 10) (str "0" %) (str %))]
       (if (pos? h) (str h ":" (pad m) ":" (pad sec)) (str m ":" (pad sec))))))
 
+(defn- pad2 [n] (if (< n 10) (str "0" n) (str n)))
+
 (defn hm
-  "Seconds -> 6h 32m."
+  "Seconds -> 6h 32m (11h 07m)."
   [s]
   (when (num? s)
     (let [m (js/Math.round (/ s 60)) h (quot m 60)]
-      (if (pos? h) (str h "h " (mod m 60) "m") (str m "m")))))
+      (if (pos? h) (str h "h " (pad2 (mod m 60)) "m") (str m "m")))))
+
+(defn h-mm
+  "Seconds -> 2:05 (hours:minutes, for tables)."
+  [s]
+  (when (num? s)
+    (let [m (js/Math.round (/ s 60))]
+      (str (quot m 60) ":" (pad2 (mod m 60))))))
+
+(defn signed
+  "+1.2 / -3 / 0: the sign always shown."
+  [x]
+  (when (num? x) (str (if (pos? x) "+" "") x)))
+
+(defn rich
+  "A translated sentence with its {0}, {1}... filled in bold."
+  [template & args]
+  (let [args  (vec args)
+        parts (.split (str template) (js/RegExp. "\\{(\\d+)\\}"))]
+    (into [:span]
+          (map-indexed (fn [i part]
+                         (if (odd? i) [:b (str (get args (js/parseInt part) "—"))] part))
+                       parts))))
+
+(defn enum
+  "A Garmin enum as a translated sentence: LISTEN_TO_YOUR_BODY -> \"Listen to
+  your body\" (a trailing variant number, as in PRODUCTIVE_2, is dropped)."
+  [s]
+  (when (and (string? s) (not (str/blank? s)))
+    (t (-> s (str/replace #"_\d+$" "") (str/replace "_" " ") str/lower-case str/capitalize))))
 
 (defn km [m] (when (num? m) (fixed (/ m 1000) (if (< m 10000) 2 1))))
 
@@ -92,9 +123,12 @@
    {:id :swim  :label (tk "Swim")      :plural (tk "swims")    :color "--fam-swim"  :re #"swimming"}
    {:id :hike  :label (tk "Hike/walk") :plural (tk "hikes")    :color "--fam-hike"  :re #"hiking|walking|mountaineering"}
    {:id :ski   :label (tk "Ski/snow")  :plural (tk "ski days") :color "--fam-ski"   :re #"ski|snowboard"}
+   {:id :strength :label (tk "Strength") :plural (tk "strength sessions") :color "--fam-strength"
+    :re #"strength|fitness|cardio|hiit|yoga"}
    {:id :other :label (tk "Other")     :plural (tk "other")    :color "--fam-other" :re #".*"}])
 
-(def singular {:run (tk "run") :bike (tk "ride") :swim (tk "swim") :hike (tk "hike") :ski (tk "ski day") :other (tk "other")})
+(def singular {:run (tk "run") :bike (tk "ride") :swim (tk "swim") :hike (tk "hike") :ski (tk "ski day")
+               :strength (tk "strength session") :other (tk "other")})
 
 (defn family [sport]
   (some #(when (re-find (:re %) (str sport)) %) families))

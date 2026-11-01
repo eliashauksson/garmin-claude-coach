@@ -206,6 +206,29 @@
       submitted_at TEXT NOT NULL,
       ended_at     TEXT,
       error        TEXT)"
+   ;; the dashboard's coach overview (coach.overview): one row per day synced
+   "CREATE TABLE IF NOT EXISTS training_status (
+      date       TEXT PRIMARY KEY,
+      raw        TEXT NOT NULL,
+      fetched_at TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS race_predictions (
+      date       TEXT PRIMARY KEY,
+      t5k        REAL,
+      t10k       REAL,
+      thalf      REAL,
+      tmar       REAL,
+      raw        TEXT NOT NULL,
+      fetched_at TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS endurance_score (
+      date       TEXT PRIMARY KEY,
+      score      REAL,
+      raw        TEXT NOT NULL,
+      fetched_at TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS sleep_need (
+      date       TEXT PRIMARY KEY,
+      need_min   REAL,
+      raw        TEXT NOT NULL,
+      fetched_at TEXT NOT NULL)"
    ;; Claude's texts in every dashboard language (coach.translate)
    "CREATE TABLE IF NOT EXISTS translations (
       hash       TEXT NOT NULL,
@@ -285,6 +308,12 @@
 
 (defn upsert-activities! [ds rows] (upsert! ds "activities" "id" activity-cols rows))
 (defn upsert-wellness!   [ds rows] (upsert! ds "daily_wellness" "date" wellness-cols rows))
+
+(defn upsert-training-status! [ds rows] (upsert! ds "training_status" "date" [:date :raw :fetched_at] rows))
+(defn upsert-race-predictions! [ds rows]
+  (upsert! ds "race_predictions" "date" [:date :t5k :t10k :thalf :tmar :raw :fetched_at] rows))
+(defn upsert-endurance! [ds rows] (upsert! ds "endurance_score" "date" [:date :score :raw :fetched_at] rows))
+(defn upsert-sleep-need! [ds rows] (upsert! ds "sleep_need" "date" [:date :need_min :raw :fetched_at] rows))
 
 (defn query [ds sqlvec]
   (jdbc/execute! ds sqlvec {:builder-fn rs/as-unqualified-lower-maps}))

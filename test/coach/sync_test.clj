@@ -130,3 +130,63 @@
       (let [stored (disj (set (sync/intraday-dates today #{})) "2026-08-15")]
         (is (= ["2026-08-15" "2026-10-26" "2026-10-27" "2026-10-28" "2026-10-29" "2026-10-30" "2026-10-31" "2026-11-01"]
                (sync/intraday-dates today stored)))))))
+
+;; ---------------------------------------------------------------------------
+;; Coach overview: training status, race predictions, endurance, sleep need
+
+(defn- overview-source
+  "Answers for today; `empty?` makes every answer come back without data."
+  [calls empty?]
+  (reify source/DataSource
+    (fetch-training-status [_ date]
+      (swap! calls conj [:status date])
+      (when-not empty? {:date date :raw {:status {:training_status_feedback "DETRAINING"}}}))
+    (fetch-race-predictions [_]
+      (swap! calls conj [:predictions])
+      (when-not empty? {:date "2026-11-01" :t5k 1351 :t10k 2913 :thalf 6467 :tmar 14595 :raw {}}))
+    (fetch-endurance [_ date]
+      (swap! calls conj [:endurance date])
+      (when-not empty? {:date date :score 6093 :raw {}}))
+    (fetch-sleep-need [_ date]
+      (swap! calls conj [:sleep-need date])
+      (when-not empty? {:date date :need_min 480 :raw {}}))))
+
+(deftest sleep-need-dates-test
+  (testing "first run: the last 30 nights"
+    (let [ds (sync/sleep-need-dates "2026-11-01" #{})]
+      (is (= ["2026-10-03" "2026-11-01"] [(first ds) (last ds)]))
+      (is (= 30 (count ds)))))
+  (testing "afterwards: the last 3 nights plus any gap"
+    (let [stored (disj (set (sync/sleep-need-dates "2026-11-01" #{})) "2026-10-10")]
+      (is (= ["2026-10-10" "2026-10-30" "2026-10-31" "2026-11-01"]
+             (sync/sleep-need-dates "2026-11-01" stored))))))
+
+(deftest sync-overview-test
+  (let [ds    (temp-ds)
+        calls (atom [])]
+    (binding [*out* (java.io.StringWriter.)]
+      (sync/sync-overview! (overview-source calls false) ds "2026-11-01")
+      (testing "today's training status, predictions and endurance are stored"
+        (is (= 1 (count (db/query ds ["SELECT * FROM training_status WHERE date = '2026-11-01'"]))))
+        (is (= [{:date "2026-11-01" :t10k 2913.0 :tmar 14595.0}]
+               (db/query ds ["SELECT date, t10k, tmar FROM race_predictions"])))
+        (is (= [6093.0] (map :score (db/query ds ["SELECT score FROM endurance_score"])))))
+      (testing "sleep need for the last 30 nights"
+        (is (= 30 (count (db/query ds ["SELECT * FROM sleep_need"])))))
+      (testing "an answer without data never replaces a stored day"
+        (reset! calls [])
+        (sync/sync-overview! (overview-source calls true) ds "2026-11-01")
+        (is (= 3 (count (filter #(= :sleep-need (first %)) @calls))) "only the recent nights are asked again")
+        (is (= [6093.0] (map :score (db/query ds ["SELECT score FROM endurance_score"]))))
+        (is (= [480.0] (distinct (map :need_min (db/query ds ["SELECT need_min FROM sleep_need"]))))))))
+  (testing "a failed login stops the sync; any other error skips the step"
+    (let [ds  (temp-ds)
+          src (fn [kind] (reify source/DataSource
+                           (fetch-training-status [_ _] (throw (garmin-error kind)))
+                           (fetch-race-predictions [_] {:date "2026-11-01" :t10k 2913 :raw {}})
+                           (fetch-endurance [_ _] nil)
+                           (fetch-sleep-need [_ _] nil)))]
+      (binding [*out* (java.io.StringWriter.)]
+        (is (thrown? clojure.lang.ExceptionInfo (sync/sync-overview! (src :auth) ds "2026-11-01")))
+        (sync/sync-overview! (src :garmin) ds "2026-11-01")
+        (is (= 1 (count (db/query ds ["SELECT * FROM race_predictions"]))))))))

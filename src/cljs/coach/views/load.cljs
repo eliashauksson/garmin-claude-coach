@@ -84,7 +84,7 @@
            :footer [:div.sub (t "Above 0: fresh. −10 to −30: building fitness. Below −30: high strain.")]})]
         [:div.row {:replicant/key "r2"}
          (ui/chart-card
-          {:title (t "Daily stress · TSS") :tint "amber"
+          {:title (t "Daily stress · TSS") :tint "amber" :flex "1 1 100%"
            :chart (c/echart
                    {:key "tss-bars" :class "h150" :group "load"
                     :option-fn (fn []

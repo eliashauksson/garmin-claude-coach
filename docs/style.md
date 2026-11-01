@@ -316,6 +316,7 @@ Family is chosen by matching the Garmin sport type:
 | swim | Swim | `swimming` |
 | hike | Hike/walk | `hiking`, `walking`, `mountaineering` |
 | ski | Ski/snow | `ski`, `snowboard` |
+| strength | Strength | `strength`, `fitness`, `cardio`, `hiit`, `yoga` (bg `--tint-purple`, fg and series `--purple`) |
 | other | Other | anything else |
 
 Colours belong to the family, never to a rank or position.

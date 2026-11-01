@@ -130,9 +130,22 @@
   []
   (into {} (filter #(and (number? (val %)) (pos? (val %)))) (:settings (summary))))
 
+(defn clock->s
+  "\"7:00:00\" / \"3:30\" (h:mm) -> seconds; nil for anything else."
+  [s]
+  (when (string? s)
+    (when-let [[_ h m sec] (re-matches #"\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*" s)]
+      (+ (* 3600 (parse-long h)) (* 60 (parse-long m)) (if sec (parse-long sec) 0)))))
+
+(def race-legs #{"5k" "10k" "half" "marathon"})
+
 (defn race
-  "{:name :date} of the goal race, from the summary; :date nil when not set."
+  "The goal race from the summary: {:name :date :goal_s :legs}; :date nil
+  when not set, :goal_s nil without a goal time, :legs [] unless the race is
+  made of standard road distances (see coach.athlete-chat)."
   []
-  (let [{:keys [race race_date]} (summary)]
-    {:name (not-empty race)
-     :date (when (and race_date (re-matches #"\d{4}-\d{2}-\d{2}" race_date)) race_date)}))
+  (let [{:keys [race race_date race_goal race_legs]} (summary)]
+    {:name   (not-empty race)
+     :date   (when (and race_date (re-matches #"\d{4}-\d{2}-\d{2}" race_date)) race_date)
+     :goal_s (clock->s race_goal)
+     :legs   (vec (filter race-legs race_legs))}))
