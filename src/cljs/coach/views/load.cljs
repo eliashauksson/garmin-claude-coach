@@ -24,7 +24,7 @@
       (c/tooltip-rows (ui/date-long (:date r))
                       [{:label (t "fitness (CTL)") :value (:ctl r) :color (c/css-var "--blue")}
                        {:label (t "fatigue (ATL)") :value (:atl r) :color (c/css-var "--red")}
-                       {:label (t "form (TSB)") :value (:tsb r)}
+                       {:label (t "form (TSB)") :value (:tsb r) :color (c/css-var "--green-ink")}
                        {:label (t "TSS that day") :value (:tss r)}]))))
 
 (defn urls
@@ -62,37 +62,29 @@
          (ui/tile {:label (t "Ramp rate") :tint "amber" :size "md" :value (:ramp latest) :sub (t "CTL change / 7 days")})]
         [:div {:replicant/key "pmc"}
          (ui/chart-card
-          {:title (t "Fitness and fatigue")
-           :legend-items [{:label (t "Fitness (CTL)") :color "--blue"} {:label (t "Fatigue (ATL)") :color "--red"}]
+          {:title (t "Fitness, fatigue and form")
+           :legend-items [{:label (t "Fitness (CTL)") :color "--blue"} {:label (t "Fatigue (ATL)") :color "--red"}
+                          {:label (t "Form (TSB)") :color "--green-ink"}]
            :chart (c/echart
                    {:key "pmc" :class "h280" :group "load"
                     :option-fn (fn []
-                                 (merge (c/base {:y-min 0 :tooltip-fmt (pmc-tooltip pmc)})
+                                 ;; one axis for all three: TSB dips below 0, so no y-min
+                                 (merge (c/base {:tooltip-fmt (pmc-tooltip pmc)})
                                         {:series [(-> (c/line (t "Fitness (CTL)") "--blue" (mapv (juxt :date :ctl) pmc)
                                                               :lineStyle {:width 3})
                                                       (c/area-wash 0.18))
                                                   (c/line (t "Fatigue (ATL)") "--red" (mapv (juxt :date :atl) pmc)
-                                                          :lineStyle {:width 2.5})]}))})})]
+                                                          :lineStyle {:width 2.5})
+                                                  (-> (c/line (t "Form (TSB)") "--green-ink" (mapv (juxt :date :tsb) pmc)
+                                                              :lineStyle {:width 2})
+                                                      (assoc :markLine {:silent true :symbol "none" :label {:show false}
+                                                                        :lineStyle {:color (c/css-var "--text-3") :opacity 0.5
+                                                                                    :type "solid" :width 1}
+                                                                        :data [{:yAxis 0}]}))]}))})
+           :footer [:div.sub (t "Above 0: fresh. −10 to −30: building fitness. Below −30: high strain.")]})]
         [:div.row {:replicant/key "r2"}
          (ui/chart-card
-          {:title (t "Form · TSB") :tint "green" :flex "1 1 420px"
-           :chart (c/echart
-                   {:key "tsb" :class "h150" :group "load"
-                    :option-fn (fn []
-                                 (merge (c/base {:tooltip-fmt (pmc-tooltip pmc)})
-                                        {:series [(-> (c/line (t "Form (TSB)") "--green-ink" (mapv (juxt :date :tsb) pmc)
-                                                              :lineStyle {:width 3})
-                                                      (assoc :markLine {:silent true :symbol "none" :label {:show false}
-                                                                        :lineStyle {:color (c/css-var "--green-ink") :opacity 0.5
-                                                                                    :type "solid" :width 1}
-                                                                        :data [{:yAxis 0}]}
-                                                             :markArea {:silent true
-                                                                        :itemStyle {:color (c/css-var "--pill-on-tint")}
-                                                                        :data [[{:yAxis "min"} {:yAxis 0}]]}))]}))})
-           :footer [:div.sub {:style {:color "var(--green-text)"}}
-                    (t "Above 0: fresh. −10 to −30: building fitness. Below −30: high strain.")]})
-         (ui/chart-card
-          {:title (t "Daily stress · TSS") :tint "amber" :flex "1 1 420px"
+          {:title (t "Daily stress · TSS") :tint "amber"
            :chart (c/echart
                    {:key "tss-bars" :class "h150" :group "load"
                     :option-fn (fn []

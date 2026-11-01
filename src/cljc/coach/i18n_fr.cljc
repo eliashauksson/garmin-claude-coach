@@ -428,7 +428,7 @@
    "fitness − fatigue" "forme physique − fatigue"
    "Ramp rate" "Taux de progression"
    "CTL change / 7 days" "variation de CTL / 7 jours"
-   "Fitness and fatigue" "Forme physique et fatigue"
+   "Fitness, fatigue and form" "Forme physique, fatigue et fraîcheur"
    "Fitness (CTL)" "Forme physique (CTL)"
    "Fatigue (ATL)" "Fatigue (ATL)"
    "Form (TSB)" "Fraîcheur (TSB)"

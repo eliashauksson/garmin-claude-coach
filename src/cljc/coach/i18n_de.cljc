@@ -427,7 +427,7 @@
    "fitness − fatigue" "Fitness − Ermüdung"
    "Ramp rate" "Anstiegsrate"
    "CTL change / 7 days" "CTL-Veränderung / 7 Tage"
-   "Fitness and fatigue" "Fitness und Ermüdung"
+   "Fitness, fatigue and form" "Fitness, Ermüdung und Form"
    "Fitness (CTL)" "Fitness (CTL)"
    "Fatigue (ATL)" "Ermüdung (ATL)"
    "Form (TSB)" "Form (TSB)"
