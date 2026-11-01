@@ -1,7 +1,7 @@
 (ns coach.views.athlete
   "Athlete card on the Plan page: a summary of athlete.md, creating or
-  editing it as a chat with Claude or by uploading a file, and delete /
-  restore with backups."
+  editing it as a chat with Claude, in a plain text editor or by uploading
+  a file, and delete / restore with backups."
   (:require [clojure.string :as str]
             [coach.i18n :refer [t tk]]
             [coach.ui :as ui]))
@@ -118,15 +118,38 @@
        (if exists? (t "Replace with this file") (t "Use this file"))]
       [:button.pill {:on {:click [[:set-in-ui :athlete :upload nil]]}} (t "Cancel")]]]))
 
+(defn- editor-block
+  "The whole of athlete.md in a text area. Nothing is saved until Save."
+  [{:keys [text original]} exists?]
+  (let [changed? (not= (str/trim (or text "")) (str/trim (or original "")))]
+    [:div.athlete-editor
+     [:textarea.athlete-text {:value (or text "") :spellcheck false
+                              :rows (min 40 (max 12 (inc (count (str/split-lines (or text ""))))))
+                              :placeholder (t "Write about yourself as an athlete: your goal race and date, training history, heart rate zones, injuries, how many days a week you can train…")
+                              :on {:input [[:set-in-ui :athlete :editor :text :event/target-value]]}}]
+     [:div.plan-footer
+      [:button.btn-ink {:disabled (or (not changed?) (str/blank? text))
+                        :on {:click [[:api "PUT" url {:content text}] [:set-ui :athlete nil]]}}
+       (t "Save")]
+      [:button.pill {:on {:click [[:set-ui :athlete nil]]}} (t "Cancel")]
+      [:span.sub (str (t "{0} lines · {1} characters." (ui/thousands (count (str/split-lines (or text ""))))
+                         (ui/thousands (count (or text ""))))
+                      " "
+                      (when exists? (str (t "The current version is backed up.") " "))
+                      (t "Claude then writes the summary."))]]]))
+
 (defn card [athlete ui-state]
-  (let [{:keys [chat confirm-delete? summarising? upload]} ui-state
-        open? (some? chat)]
+  (let [{:keys [chat editor confirm-delete? summarising? upload]} ui-state
+        open? (or (some? chat) (some? editor))]
     (ui/card {}
              (ui/label-row {:icon :heart :accent "--blue" :tint "--tint-blue" :soft? true :label (t "Athlete")
                             :right (when-not open?
                                      [:span.plan-actions
                                       [:button.btn-ink {:on {:click [[:set-in-ui :athlete :chat {:messages []}]]}}
                                        (if (:exists athlete) (t "Edit with Claude") (t "Add with Claude"))]
+                                      [:button.pill {:on {:click [[:set-in-ui :athlete :editor
+                                                                   {:text (:content athlete) :original (:content athlete)}]]}}
+                                       (if (:exists athlete) (t "Edit file") (t "Write file"))]
                                       (upload-button)
                                       (when (:exists athlete)
                                         [:button.pill {:on {:click [[:set-in-ui :athlete :confirm-delete? true]]}}
@@ -142,5 +165,6 @@
                  [:div.plan-footer
                   [:button.btn-ink {:on {:click [[:api "DELETE" url nil] [:set-ui :athlete nil]]}} (t "Yes, delete")]
                   [:button.pill {:on {:click [[:set-in-ui :athlete :confirm-delete? false]]}} (t "Cancel")]]]])
-             (when open? (chat-block chat))
+             (when chat (chat-block chat))
+             (when editor (editor-block editor (:exists athlete)))
              (backups-block athlete))))
