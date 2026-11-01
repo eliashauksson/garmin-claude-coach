@@ -9,10 +9,10 @@
             [coach.views.plan :as plan]
             [coach.views.load :as load]
             [coach.views.status :as status]
-            [coach.views.today :as today]
+            [coach.views.day :as day]
             [replicant.dom :as r]))
 
-(defonce state (atom {:route {:page :today} :data {} :loading #{} :errors {} :ui {}}))
+(defonce state (atom {:route {:page :calendar} :data {} :loading #{} :errors {} :ui {}}))
 
 ;; ---------------------------------------------------------------------------
 ;; Routing (hash based: #/activities?range=90)
@@ -32,13 +32,15 @@
       "load"       {:page :load :params params}
       "calendar"   {:page :calendar :params params}
       "plan"       {:page :plan :params params}
+      "day"        {:page :day :date (second segs)}
       "costs"      {:page :costs :params params}
-      {:page :today})))
+      ;; the calendar is the start page (the old Today page is now a day page)
+      {:page :calendar :params params})))
 
 (defn route-hash [{:keys [page id params]}]
   (let [qs (str/join "&" (for [[k v] params :when (some? v)]
                            (str (name k) "=" (js/encodeURIComponent v))))]
-    (str "#/" (case page :today "" :activity (str "activities/" id) (name page))
+    (str "#/" (case page :calendar "calendar" :activity (str "activities/" id) (name page))
          (when (seq qs) (str "?" qs)))))
 
 (def default-range {:activities "365" :load "180"})
@@ -49,7 +51,7 @@
 
 (defn urls [{:keys [page id] :as route}]
   (case page
-    :today      ["/api/today"]
+    :day        [(day/url (:date route))]
     :activities [(str "/api/activities?from=" (range-from route))]
     :activity   [(str "/api/activities/" id "?streams=true")]
     :calendar   (calendar/urls route)
@@ -273,12 +275,12 @@
 ;; ---------------------------------------------------------------------------
 ;; Shell
 
-(def nav-items [[:today "#/" "Today"] [:plan "#/plan" "Plan"] [:calendar "#/calendar" "Calendar"] [:activities "#/activities" "Activities"]
+(def nav-items [[:calendar "#/calendar" "Calendar"] [:plan "#/plan" "Plan"] [:activities "#/activities" "Activities"]
                 [:load "#/load" "Training load"] [:costs "#/costs" "API costs"]])
 
 (defn view [{:keys [route loading] :as s}]
   (let [page (:page route)
-        active (if (= page :activity) :activities page)]
+        active (case page :activity :activities :day :calendar page)]
     [:div.shell
      [:nav.side {:aria-label "Main"}
       [:div.brand [:span.logo] "Coach"]
@@ -295,7 +297,7 @@
      [:main {:class (remove nil? [(when (seq loading) "loading") (when (= page :calendar) "wide")])}
       (status/view s)
       (case page
-        :today      (today/view s)
+        :day        (day/view s (first (urls route)) (:date route))
         :activities (activities/view s (first (urls route)))
         :activity   (activity/view s (first (urls route)))
         :load       (let [[l v] (urls route)] (load/view s l v))

@@ -91,6 +91,23 @@
           (auth-banner (:auth sync) (:last_ok sync))
           (sync-banner sync))))
 
+(defn auth-pill
+  "Garmin login state for a page header; hidden until the final week."
+  [{:keys [level days_left]}]
+  (case level
+    "urgent"  (ui/status-pill :critical (str "Garmin login · " days_left " days left"))
+    "expired" (ui/status-pill :critical "Garmin login expired")
+    "unknown" (ui/status-pill :warn "Garmin login not recorded")
+    nil))
+
+(defn sync-button [{:keys [running last_result]}]
+  [:span {:style {:display "inline-flex" :gap "10px" :align-items "center"}}
+   (when (and (not running) (false? (:ok last_result))) [:span.error "Sync failed"])
+   [:button.btn-ink {:disabled running :on {:click [[:sync]]}}
+    (if running
+      (list [:span.spinner {:aria-hidden "true"}] "Syncing…")
+      "Sync now")]])
+
 (defn backup-link
   "Sidebar: download a fresh backup; shows when the last one was made."
   [{:keys [data]}]

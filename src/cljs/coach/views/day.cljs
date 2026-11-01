@@ -1,4 +1,6 @@
-(ns coach.views.today
+(ns coach.views.day
+  "One day's health data, opened from the calendar: the cards the Today page
+  had, for any date. Intraday series are kept for the last week only."
   (:require [clojure.string :as str]
             [coach.charts :as c]
             [coach.ui :as ui]
@@ -15,9 +17,6 @@
   (when iso (let [d (ui/parse-date iso)]
               (str (long-days (.getDay d)) ", " (.getDate d) " " (long-months (.getMonth d))))))
 
-(defn- greeting []
-  (let [h (.getHours (js/Date.))]
-    (cond (< h 12) "Good morning" (< h 18) "Good afternoon" :else "Good evening")))
 
 (defn- clock [minute]
   (let [m (js/Math.round minute)]
@@ -27,7 +26,17 @@
 
 (def day-axis [:div.ax [:span "00:00"] [:span "06:00"] [:span "12:00"] [:span "18:00"] [:span "24:00"]])
 
-(defn- no-data [] [:div.empty "No data yet — run Sync."])
+(def ^:dynamic *no-data*
+  "Why a card has nothing to show; set per day in `view`."
+  "No data yet — run Sync.")
+
+(defn- no-data [] [:div.empty *no-data*])
+
+(def ^:dynamic *morning* "this morning")
+
+(def intraday-days "Intraday series are kept for this many days (coach.sync/intraday-days + today)." 7)
+
+(defn url [date] (str "/api/day/" date))
 
 (defn- day-series-option
   "A whole-day (0–1440 min) chart with hidden axes."
@@ -45,22 +54,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Header, auth
 
-(defn- auth-pill
-  "Hidden until the final week of the login."
-  [{:keys [level days_left]}]
-  (case level
-    "urgent"  (ui/status-pill :critical (str "Garmin login · " days_left " days left"))
-    "expired" (ui/status-pill :critical "Garmin login expired")
-    "unknown" (ui/status-pill :warn "Garmin login not recorded")
-    nil))
-
-(defn sync-button [{:keys [running last_result]}]
-  [:span {:style {:display "inline-flex" :gap "10px" :align-items "center"}}
-   (when (and (not running) (false? (:ok last_result))) [:span.error "Sync failed"])
-   [:button.btn-ink {:disabled running :on {:click [[:sync]]}}
-    (if running
-      (list [:span.spinner {:aria-hidden "true"}] "Syncing…")
-      "Sync now")]])
 
 ;; ---------------------------------------------------------------------------
 ;; Row 1
@@ -71,7 +64,7 @@
              (ui/label-row {:icon :bolt :accent "--green" :label "Training readiness"})
              [:div.big.xl (or score "—")]
              [:div.sub {:style {:color "var(--green-text)" :font-weight 600}}
-              (if (:readiness_level w) (str (sentence (:readiness_level w)) " · this morning") "No reading this morning")]
+              (if (:readiness_level w) (str (sentence (:readiness_level w)) " · " *morning*) (str "No reading " *morning*))]
              [:div.track [:div {:style {:width (str (or score 0) "%") :background "var(--green)"}}]])))
 
 (defn- body-battery-card [w day intraday]
@@ -291,41 +284,78 @@
        [:div.sub {:style {:color (if (= "rest" (name level)) "var(--red)" "var(--text-2)")}}
         (str/join " · " signals)])]))
 
-(defn- last-activity-card [a check]
+(defn- planned-day
+  "The day's planned sessions, without today's readiness suggestions."
+  [planned]
+  [:div.divider
+   [:div.lab "Planned"]
+   (if (seq planned)
+     (for [w planned]
+       [:div {:replicant/key (:id w)}
+        (plan/session-chip (:session_id w)) " " [:b (:title w)]
+        [:span.sub (str " · " (:slot w) (when (pos? (:duration_min w)) (str " · " (:duration_min w) " min"))
+                        (when (not= "planned" (:status w)) (str " · " (:status w))))]])
+     [:div.sub "Nothing planned."])])
+
+(defn- activities-card
+  "The day's activities, then its planned sessions (with readiness
+  suggestions on today's date)."
+  [acts planned check]
   (ui/card {:flex "1 1 300px"}
-           (ui/label-row {:icon :mountain :accent "--text" :tint "--surface-2" :soft? true :label "Last activity"})
-           (if a
-             [:div {:style {:display "flex" :flex-direction "column" :gap "6px"}}
-              [:a {:href (str "#/activities/" (:id a)) :style {:font-size "20px" :font-weight 800 :text-decoration "none"}}
-               (:name a)]
-              [:div.sub (ui/date-short (:date a))]
-              (ui/pills (some-> (ui/km (:distance_m a)) (str " km") ui/pill)
-                        (some-> (ui/hm (or (:moving_s a) (:duration_s a))) ui/pill)
-                        (some-> (:avg_hr a) js/Math.round (str " bpm") ui/pill))]
-             [:div.empty "No activities yet."])
-           (planned-today check)))
+           (ui/label-row {:icon :mountain :accent "--text" :tint "--surface-2" :soft? true :label "Activities"})
+           (if (seq acts)
+             (for [a acts]
+               [:div {:replicant/key (:id a) :style {:display "flex" :flex-direction "column" :gap "6px"}}
+                [:a {:href (str "#/activities/" (:id a)) :style {:font-size "20px" :font-weight 800 :text-decoration "none"}}
+                 (:name a)]
+                (ui/pills (some-> (ui/km (:distance_m a)) (str " km") ui/pill)
+                          (some-> (ui/hm (or (:moving_s a) (:duration_s a))) ui/pill)
+                          (some-> (:avg_hr a) js/Math.round (str " bpm") ui/pill)
+                          (some-> (:tss a) js/Math.round (str " TSS") ui/pill))])
+             [:div.empty "No activities this day."])
+           (if check (planned-today check) (planned-day planned))))
 
 ;; ---------------------------------------------------------------------------
 
-(defn view [{:keys [data errors sync]}]
-  (let [url "/api/today"
-        d   (get data url)
-        w   (:wellness d)
-        day (:day d)
-        i   (:intraday d)]
-    [:div {:style {:display "contents"}}
-     [:div.page-head
-      [:div.title [:div.sub (header-date (:date d))] [:h1 (greeting)]]
-      (auth-pill (:auth d))
-      (sync-button (or sync (:sync d)))]
-     (when-let [e (get errors url)] [:div.error (str "Could not load: " e)])
-     (when d
-       (list
-        [:div.row {:replicant/key "r1"}
-         (readiness-card w) (body-battery-card w day i) (sleep-card w day)]
-        [:div {:replicant/key "r2"} (heart-rate-card w day i)]
-        [:div.row {:replicant/key "r3"}
-         (stress-card w day i) (steps-card w day i)]
-        [:div.row {:replicant/key "r4"}
-         (sleep-nights-card (:nights d)) (hrv-nights-card w (:nights d))
-         (last-activity-card (:last_activity d) (:readiness_check d))]))]))
+(defn add-days [date n]
+  (let [d (ui/parse-date date)] (.setDate d (+ (.getDate d) n)) (.slice (.toISOString d) 0 10)))
+
+(defn- monday [date]
+  (add-days date (- (mod (+ (.getDay (ui/parse-date date)) 6) 7))))
+
+(defn- days-between [a b]
+  (js/Math.round (/ (- (.getTime (ui/parse-date b)) (.getTime (ui/parse-date a))) 86400000)))
+
+(defn view [{:keys [data errors]} url date]
+  (let [d      (get data url)
+        w      (:wellness d)
+        day    (:day d)
+        i      (:intraday d)
+        today  (or (:today d) (ui/iso-today))
+        today? (= date today)
+        old?   (>= (days-between date today) intraday-days)]
+    (binding [*no-data* (cond
+                          (pos? (compare date today)) "This day hasn't happened yet."
+                          old? "Detail through the day is kept for the last 7 days only."
+                          today? "No data yet — run Sync."
+                          :else "No data for this day.")
+              *morning* (if today? "this morning" "that morning")]
+      [:div {:style {:display "contents"}}
+       [:div.page-head
+        [:div.title [:div.sub (if today? "Today" (ui/date-short date))] [:h1 (header-date date)]]
+        [:div.seg
+         [:button {:on {:click [[:navigate (str "#/day/" (add-days date -1))]]}} "← Previous day"]
+         [:button {:on {:click [[:navigate (str "#/calendar?week=" (monday date))]]}} "Calendar"]
+         [:button {:disabled (not (neg? (compare date today)))
+                   :on {:click [[:navigate (str "#/day/" (add-days date 1))]]}} "Next day →"]]]
+       (when-let [e (get errors url)] [:div.error (str "Could not load: " e)])
+       (when d
+         (list
+          [:div.row {:replicant/key "r1"}
+           (readiness-card w) (body-battery-card w day i) (sleep-card w day)]
+          [:div {:replicant/key "r2"} (heart-rate-card w day i)]
+          [:div.row {:replicant/key "r3"}
+           (stress-card w day i) (steps-card w day i)]
+          [:div.row {:replicant/key "r4"}
+           (sleep-nights-card (:nights d)) (hrv-nights-card w (:nights d))
+           (activities-card (:activities d) (:planned d) (:readiness_check d))]))])))

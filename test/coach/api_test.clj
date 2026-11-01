@@ -34,6 +34,15 @@
       (is (= ["2026-10-13" "2026-10-14"] (map :date load)))
       (is (= 50.0 (:tss (first load)))))
     (is (= "2027-04-27" (:expires_on (second (get-json app "/api/auth")))) "180 days from login")
+    (testing "the day page: any date, with that day's activities"
+      (db/upsert-wellness! ds [{:date "2026-10-13" :rhr 52 :sleep_score 75 :raw {}}])
+      (let [[s d] (get-json app "/api/day/2026-10-13")]
+        (is (= 200 s))
+        (is (= "2026-10-13" (:date d)))
+        (is (= 52 (get-in d [:wellness :rhr])))
+        (is (= [1] (map :id (:activities d))))
+        (is (not (contains? d :readiness_check)) "suggestions only for today"))
+      (is (= 400 (first (get-json app "/api/day/yesterday")))))
     (is (= 404 (first (get-json app "/api/nope"))))))
 
 (defn- send-json [app method uri body]

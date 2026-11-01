@@ -220,16 +220,20 @@
           (db/query ds ["SELECT date, sleep_score, sleep_s, hrv_avg, raw FROM daily_wellness
                          WHERE date BETWEEN ? AND ? ORDER BY date" from date]))))
 
-(defn today-summary [ds]
-  (let [t    (today)
-        well (wellness ds (str (.minusDays (LocalDate/parse t) 1)) t)
-        tr   (trends ds t t)
-        raw  (raw-of (first (db/query ds ["SELECT raw FROM daily_wellness WHERE date = ?" t])))]
-    {:date          t
-     :wellness      (last well)
-     :baselines     (into {} (for [[k v] tr] [k (dissoc (first v) :date :value)]))
-     :load          (last (pmc ds t t))
-     :last_activity (first (activities ds {:limit 1}))
-     :day           (day-extras raw)
-     :nights        (nights ds t)
-     :intraday      (some-> (db/load-intraday ds t) (dissoc :date))}))
+(defn day-summary
+  "One day's health data, as the day page shows it: the day's wellness, its
+  extras and intraday series (kept for the last week only), the 7 nights up
+  to it, the load and the day's activities."
+  [ds date]
+  (let [well (wellness ds date date)
+        tr   (trends ds date date)
+        raw  (raw-of (first (db/query ds ["SELECT raw FROM daily_wellness WHERE date = ?" date])))]
+    {:date       date
+     :today      (today)
+     :wellness   (first well)
+     :baselines  (into {} (for [[k v] tr] [k (dissoc (first v) :date :value)]))
+     :load       (last (pmc ds date date))
+     :activities (vec (sort-by :start_time_local (activities ds {:from date :to date})))
+     :day        (day-extras raw)
+     :nights     (nights ds date)
+     :intraday   (some-> (db/load-intraday ds date) (dissoc :date))}))

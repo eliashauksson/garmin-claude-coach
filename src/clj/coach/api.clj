@@ -207,12 +207,16 @@
 
 (defn routes [ds]
   [["/api"
-    ["/today"       {:get (fn [_] (ok (assoc (analysis/today-summary ds)
-                                             :auth (auth-status ds)
-                                             :sync (dissoc @sync-state :started_at)
-                                             :season (plan/week-info ds (today))
-                                             :readiness_check (readiness-today ds)
-                                             :open_proposals (plan/open-proposals ds))))}]
+    ["/day/:date"   {:get (guarded
+                           (fn [{:keys [path-params]}]
+                             (let [date (:date path-params)]
+                               (when-not (re-matches #"\d{4}-\d{2}-\d{2}" date)
+                                 (throw (ex-info (str "Not a date: " date) {})))
+                               (ok (cond-> (assoc (analysis/day-summary ds date)
+                                                  :season (plan/week-info ds date)
+                                                  :planned (plan/workouts ds date date))
+                                     ;; suggestions for today's sessions, from this morning's readiness
+                                     (= date (today)) (assoc :readiness_check (readiness-today ds)))))))}]
     (plan-routes ds)
     (athlete-routes)
     ["/auth"        {:get (fn [_] (ok (auth-status ds)))}]

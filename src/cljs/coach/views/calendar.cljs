@@ -1,9 +1,10 @@
 (ns coach.views.calendar
-  "Week-per-row calendar: a summary of the week on the left, then Monday to
-  Sunday with each day's activities. Planned workouts (Phase 5) will sit in
-  the same day cells with a dashed outline."
+  "Week-per-row calendar, the start page: a summary of the week on the left,
+  then Monday to Sunday with each day's health data, activities and planned
+  sessions (dashed). A day's health block or date opens the day page."
   (:require [clojure.string :as str]
-            [coach.ui :as ui]))
+            [coach.ui :as ui]
+            [coach.views.status :as status]))
 
 (def weeks-before 4)
 (def weeks-after 1)
@@ -31,7 +32,8 @@
   (let [[from to] (window route)]
     [(str "/api/activities?from=" from "&to=" to)
      (str "/api/load?from=" from "&to=" (min-date to (ui/iso-today)))
-     (str "/api/plan?from=" from "&to=" to)]))
+     (str "/api/plan?from=" from "&to=" to)
+     (str "/api/wellness?from=" from "&to=" (min-date to (ui/iso-today)))]))
 
 ;; ---------------------------------------------------------------------------
 
@@ -56,6 +58,33 @@
       (str/join " · " (remove nil? [(ui/hm (secs a))
                                     (when (and distance_m (pos? distance_m)) (str (ui/km distance_m) " km"))]))]
      (when tss [:div.cal-item-tss (str (js/Math.round tss) " TSS")])]))
+
+(def health-metrics
+  "Shown in a day's health block, with the day page's icons and colours."
+  [[:readiness :bolt "--green" "Readiness" str]
+   [:sleep_score :moon "--purple" "Sleep score" str]
+   [:rhr :heart "--red" "Resting heart rate" #(str % " bpm")]
+   [:hrv_avg :pulse "--blue" "HRV" #(str (js/Math.round %) " ms")]])
+
+(defn- mini-icon [icon color]
+  (into [:svg {:aria-hidden "true" :width 11 :height 11 :viewBox "0 0 24 24" :fill "none"
+               :stroke (str "var(" color ")") :stroke-width 2.6 :stroke-linecap "round" :stroke-linejoin "round"}]
+        (ui/icon-paths icon)))
+
+(defn- health-item
+  "A small block with the day's key health numbers; opens the day page."
+  [date w]
+  (let [shown (for [[k icon color label fmt] health-metrics :let [v (get w k)] :when (some? v)]
+                [k icon color label (fmt v)])]
+    (when (or (seq shown) (:steps w))
+      [:a.cal-health {:replicant/key (str "h" date) :href (str "#/day/" date)
+                      :title (str/join "\n" (concat (for [[_ _ _ label v] shown] (str label ": " v))
+                                                    (when (:steps w) [(str "Steps: " (ui/thousands (:steps w)))])
+                                                    ["Open the day"]))}
+       (if (seq shown)
+         (for [[k icon color _ v] shown]
+           [:span {:replicant/key (name k)} (mini-icon icon color) v])
+         [:span (mini-icon :footprints "--green") (ui/thousands (:steps w))])])))
 
 (defn- planned-item [{:keys [id session_id title slot duration_min distance_km status]}]
   ;; missed sessions keep the dashed card but get a red outline
@@ -99,24 +128,28 @@
      (when (and l (not future?))
        [:div.cal-load (str "Fitness " (js/Math.round (:ctl l)) " · Form " (js/Math.round (:tsb l)))])]))
 
-(defn- week-row [monday acts-by-date plan-by-date load-by-date today]
+(defn- week-row [monday acts-by-date plan-by-date load-by-date well-by-date today]
   (let [days (mapv #(add-days monday %) (range 7))]
     [:div.cal-week {:replicant/key monday}
      (week-summary monday (mapcat acts-by-date days) load-by-date today)
      (for [[i d] (map-indexed vector days)]
        [:div.cal-day {:replicant/key d
                       :class (remove nil? [(when (= d today) "today") (when (pos? (compare d today)) "future")])}
-        [:div.cal-date [:span.cal-dow (day-names i)] (day-label d)]
+        (if (pos? (compare d today))
+          [:div.cal-date [:span.cal-dow (day-names i)] (day-label d)]
+          [:a.cal-date {:href (str "#/day/" d) :title "Open the day"} [:span.cal-dow (day-names i)] (day-label d)])
+        (health-item d (well-by-date d))
         (map activity-item (acts-by-date d))
         (map planned-item (remove #(= "done" (:status %)) (plan-by-date d)))])]))
 
-(defn view [{:keys [data errors route]} [acts-url load-url plan-url]]
+(defn view [{:keys [data errors route sync]} [acts-url load-url plan-url well-url]]
   (let [[from to mondays] (window route)
         acts    (get data acts-url)
         today   (ui/iso-today)
         by-date (group-by :date (sort-by :start_time_local acts))
         load-by (into {} (map (juxt :date identity)) (get data load-url))
         plan-by (group-by :date (:workouts (get data plan-url)))
+        well-by (into {} (map (juxt :date identity)) (get data well-url))
         this-monday (monday today)
         anchor  (monday (get-in route [:params :week] today))
         d1 (ui/parse-date from) d2 (ui/parse-date to)]
@@ -126,13 +159,15 @@
        [:div.sub (str (.getDate d1) " " (ui/months (.getMonth d1)) " " (.getFullYear d1) " – "
                       (.getDate d2) " " (ui/months (.getMonth d2)) " " (.getFullYear d2))]
        [:h1 "Calendar"]]
+      (status/auth-pill (:auth sync))
+      (status/sync-button sync)
       [:div.seg
        [:button {:on {:click [[:set-param :week (add-days anchor -28)]]}} "← Earlier"]
        [:button {:class (when (= anchor this-monday) "on")
                  :on {:click [[:set-param :week nil]]}} "This week"]
        [:button {:on {:click [[:set-param :week (add-days anchor 28)]]}} "Later →"]]]
-     (some (fn [u] (when-let [e (get errors u)] [:div.error (str "Could not load: " e)])) [acts-url load-url])
+     (some (fn [u] (when-let [e (get errors u)] [:div.error (str "Could not load: " e)])) [acts-url load-url well-url])
      [:div.card.cal
       [:div.cal-head [:div "Week"] (for [d day-names] [:div {:replicant/key d} d])]
-      (for [m mondays] (week-row m by-date plan-by load-by today))]
-     [:div.sub "Planned sessions have a dashed outline; once done they're replaced by the recorded activity. Plan them on the Plan page."]]))
+      (for [m mondays] (week-row m by-date plan-by load-by well-by today))]
+     [:div.sub "The small block at the top of a day is its health data (readiness, sleep, resting heart rate, HRV): click it, or the date, for the whole day. Planned sessions have a dashed outline; once done they're replaced by the recorded activity."]]))
