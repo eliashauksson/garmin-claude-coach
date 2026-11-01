@@ -3,6 +3,7 @@
   Options are built at render time from the CSS tokens, so light/dark both work."
   (:require ["echarts" :as echarts]
             ["leaflet" :as L]
+            [coach.i18n :refer [t]]
             [coach.ui :as ui]))
 
 (defn css-var [n]
@@ -141,8 +142,8 @@
                   ^js a (.create du "a" "" div)]
               (set! (.-href a) "#")
               (.setAttribute a "role" "button")
-              (.setAttribute a "title" "Show the whole track")
-              (.setAttribute a "aria-label" "Show the whole track")
+              (.setAttribute a "title" (t "Show the whole track"))
+              (.setAttribute a "aria-label" (t "Show the whole track"))
               (set! (.-innerHTML a)
                     (str "<svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\""
                          " stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"

@@ -3,9 +3,10 @@
   request, like the usage and cost pages of the Claude platform."
   (:require [clojure.string :as str]
             [coach.charts :as c]
+            [coach.i18n :as i18n :refer [t tk]]
             [coach.ui :as ui]))
 
-(def ranges [["30" "30 days"] ["90" "90 days"] ["365" "1 year"] ["all" "All"]])
+(def ranges [["30" (tk "30 days")] ["90" (tk "90 days")] ["365" (tk "1 year")] ["all" (tk "All")]])
 
 (def settings-url "/api/ai-settings")
 
@@ -15,16 +16,17 @@
 
 ;; Fixed order, so a task keeps its colour whatever the range shows.
 (def tasks
-  [{:id "week_plan"       :label "Week plans"       :color "--task-1"}
-   {:id "season_plan"     :label "Season plans"     :color "--task-2"}
-   {:id "adjust"          :label "Plan adjustments" :color "--task-3"}
-   {:id "athlete_chat"    :label "Athlete chat"     :color "--task-4"}
-   {:id "athlete_summary" :label "Athlete summary"  :color "--task-5"}
+  [{:id "week_plan"       :label (tk "Week plans")       :color "--task-1"}
+   {:id "season_plan"     :label (tk "Season plans")     :color "--task-2"}
+   {:id "adjust"          :label (tk "Plan adjustments") :color "--task-3"}
+   {:id "athlete_chat"    :label (tk "Athlete chat")     :color "--task-4"}
+   {:id "athlete_summary" :label (tk "Athlete summary")  :color "--task-5"}
+   {:id "translation"     :label (tk "Translations")     :color "--task-6"}
    ;; neutral grey: not one of the five categorical slots
-   {:id "test"            :label "Test calls"       :color "--fam-other"}])
+   {:id "test"            :label (tk "Test calls")       :color "--fam-other"}])
 
 (def task-by-id (into {} (map (juxt :id identity) tasks)))
-(defn- task-label [id] (:label (task-by-id id) id))
+(defn- task-label [id] (t (:label (task-by-id id) id)))
 
 ;; ---------------------------------------------------------------------------
 ;; Formatting
@@ -43,7 +45,7 @@
           (>= n 1e4) (str (.toFixed (/ n 1e3) 1) "k")
           :else      (ui/thousands n))))
 
-(defn- n-requests [n] (str n (if (= 1 n) " request" " requests")))
+(defn- n-requests [n] (if (= 1 n) (t "1 request") (t "{0} requests" n)))
 
 (defn- pct [a b] (if (and (ui/num? a) (pos? b)) (str (js/Math.round (* 100 (/ a b))) "%") "—"))
 
@@ -53,10 +55,10 @@
   (when iso
     (let [d (js/Date. iso)
           this-year? (= (.getFullYear d) (.getFullYear (js/Date.)))]
-      (str (.toLocaleDateString d "en-GB" (if this-year?
+      (str (.toLocaleDateString d (i18n/locale) (if this-year?
                                             #js {:day "numeric" :month "short"}
                                             #js {:day "numeric" :month "short" :year "numeric"})) ", "
-           (.toLocaleTimeString d "en-GB" #js {:hour "2-digit" :minute "2-digit"})))))
+           (.toLocaleTimeString d (i18n/locale) #js {:hour "2-digit" :minute "2-digit"})))))
 
 (defn- dot [color] [:span.dot {:style {:background (str "var(" color ")")}}])
 
@@ -67,27 +69,27 @@
   (let [in   (input-total totals)
         busy (first by_task)]
     [:div.row {:replicant/key "kpi"}
-     (ui/tile {:label "Spent in this range" :tint "blue" :size "md"
+     (ui/tile {:label (t "Spent in this range") :tint "blue" :size "md"
                :value (usd (:cost_usd totals 0) 2)
                :sub (str (chf (:cost_usd totals 0) usd_chf) " · " (n-requests (:requests totals 0))
-                         (when (pos? (:errors totals 0)) (str " · " (:errors totals) " failed")))})
-     (ui/tile {:label "This month" :size "md"
+                         (when (pos? (:errors totals 0)) (str " · " (t "{0} failed" (:errors totals)))))})
+     (ui/tile {:label (t "This month") :size "md"
                :value (usd (:cost_usd this_month 0) 2)
                :sub (str (chf (:cost_usd this_month 0) usd_chf) " · " (n-requests (:requests this_month 0)))})
-     (ui/tile {:label "Tokens" :size "md"
+     (ui/tile {:label (t "Tokens") :size "md"
                :value (tokens (+ in (:output_tokens totals 0)))
-               :sub (str (tokens in) " in · " (tokens (:output_tokens totals 0)) " out")})
-     (ui/tile {:label "Most spent on" :size "md"
+               :sub (t "{0} in · {1} out" (tokens in) (tokens (:output_tokens totals 0)))})
+     (ui/tile {:label (t "Most spent on") :size "md"
                :value (when busy (pct (:cost_usd busy) (:cost_usd totals 0)))
-               :sub (if busy (str (task-label (:key busy)) " · " (usd (:cost_usd busy))) "No requests yet")})]))
+               :sub (if busy (str (task-label (:key busy)) " · " (usd (:cost_usd busy))) (t "No requests yet"))})]))
 
 (defn- daily-chart [daily]
   (let [dates (vec (distinct (map :date daily)))
         cost  (into {} (for [{:keys [date task cost_usd]} daily] [[date task] cost_usd]))
-        shown (filter (fn [t] (some #(= (:id t) (:task %)) daily)) tasks)]
+        shown (filter (fn [task] (some #(= (:id task) (:task %)) daily)) tasks)]
     (ui/chart-card
-     {:title "Daily cost"
-      :legend-items (for [t shown] {:label (:label t) :color (:color t)})
+     {:title (t "Daily cost")
+      :legend-items (for [task shown] {:label (t (:label task)) :color (:color task)})
       :chart (c/echart
               {:key "cost-daily" :class "h240"
                :option-fn
@@ -98,55 +100,55 @@
                                  :tooltip-fmt
                                  (fn [params]
                                    (let [d (.-name (first params))
-                                         rows (for [t (reverse shown) :let [v (get cost [d (:id t)])] :when v]
-                                                {:label (:label t) :value (usd v) :color (c/css-var (:color t))})]
+                                         rows (for [task (reverse shown) :let [v (get cost [d (:id task)])] :when v]
+                                                {:label (t (:label task)) :value (usd v) :color (c/css-var (:color task))})]
                                      (c/tooltip-rows (str (ui/date-long d) " · " (usd (reduce + (map #(get cost [d (:id %)] 0) shown))))
                                                      rows)))})
                         {:xAxis (merge (:xAxis (c/base {:x-type "category" :x-fmt ui/date-short}))
                                        {:data dates})
-                         :series (for [t shown]
-                                   (c/bars (:label t) (:color t)
-                                           (mapv #(get cost [% (:id t)]) dates)
+                         :series (for [task shown]
+                                   (c/bars (t (:label task)) (:color task)
+                                           (mapv #(get cost [% (:id task)]) dates)
                                            :stack "cost" :barMaxWidth 28
                                            ;; 2px surface gap between stacked segments
-                                           :itemStyle {:color (c/css-var (:color t)) :borderRadius 4
+                                           :itemStyle {:color (c/css-var (:color task)) :borderRadius 4
                                                        :borderColor (c/css-var "--surface") :borderWidth 2}))}))})
-      :footer [:div.sub "Days are in local time."]})))
+      :footer [:div.sub (t "Days are in local time.")]})))
 
-(def token-columns
-  [{:label "Input" :align :r :value #(ui/thousands (:input_tokens %))}
-   {:label "Cache write" :align :r :value #(ui/thousands (+ (:cache_write_5m % 0) (:cache_write_1h % 0)))}
-   {:label "Cache read" :align :r :value #(ui/thousands (:cache_read %))}
-   {:label "Output" :align :r :value #(ui/thousands (:output_tokens %))}])
+(defn- token-columns []
+  [{:label (t "Input") :align :r :value #(ui/thousands (:input_tokens %))}
+   {:label (t "Cache write") :align :r :value #(ui/thousands (+ (:cache_write_5m % 0) (:cache_write_1h % 0)))}
+   {:label (t "Cache read") :align :r :value #(ui/thousands (:cache_read %))}
+   {:label (t "Output") :align :r :value #(ui/thousands (:output_tokens %))}])
 
 (defn- by-task-card [{:keys [by_task totals]}]
   (ui/card {}
-           [:div.lab "By task"]
+           [:div.lab (t "By task")]
            (ui/table (concat
-                      [{:label "Task" :render #(let [t (task-by-id (:key %))]
-                                                 [:span.cell-dot (dot (:color t "--fam-other")) (task-label (:key %))])}
-                       {:label "Requests" :align :r :value :requests}]
-                      token-columns
-                      [{:label "Cost" :align :r :value #(usd (:cost_usd %))}
-                       {:label "Per request" :align :r :value #(usd (/ (:cost_usd %) (max 1 (:requests %))))}
-                       {:label "Share" :align :r :value #(pct (:cost_usd %) (:cost_usd totals 0))}])
+                      [{:label (t "Task") :render #(let [task (task-by-id (:key %))]
+                                                     [:span.cell-dot (dot (:color task "--fam-other")) (task-label (:key %))])}
+                       {:label (t "Requests") :align :r :value :requests}]
+                      (token-columns)
+                      [{:label (t "Cost") :align :r :value #(usd (:cost_usd %))}
+                       {:label (t "Per request") :align :r :value #(usd (/ (:cost_usd %) (max 1 (:requests %))))}
+                       {:label (t "Share") :align :r :value #(pct (:cost_usd %) (:cost_usd totals 0))}])
                      by_task {:key-fn :key})))
 
 (defn- by-model-card [{:keys [by_model]}]
   (ui/card {}
-           [:div.lab "By model"]
+           [:div.lab (t "By model")]
            (ui/table (concat
-                      [{:label "Model" :value :key}
-                       {:label "Requests" :align :r :value :requests}]
-                      token-columns
-                      [{:label "Cost" :align :r :value #(usd (:cost_usd %))}])
+                      [{:label (t "Model") :value :key}
+                       {:label (t "Requests") :align :r :value :requests}]
+                      (token-columns)
+                      [{:label (t "Cost") :align :r :value #(usd (:cost_usd %))}])
                      by_model {:key-fn :key})))
 
 (defn- status-cell [{:keys [status error stop_reason]}]
   (case status
-    "ok"      (ui/status-pill :ok "OK")
-    "refused" [:span {:title (str "stop_reason: " stop_reason)} (ui/status-pill :warn "Refused")]
-    [:span {:title error} (ui/status-pill :critical "Failed")]))
+    "ok"      (ui/status-pill :ok (t "OK"))
+    "refused" [:span {:title (str "stop_reason: " stop_reason)} (ui/status-pill :warn (t "Refused"))]
+    [:span {:title error} (ui/status-pill :critical (t "Failed"))]))
 
 (defn- model-cell
   "The model that answered; after a fallback, \"requested → fallback\"."
@@ -154,37 +156,37 @@
   (let [others (remove #{model_requested} (some-> model_used (.split ", ") js->clj))
         short  #(some-> % (.replace #"^claude-" ""))]
     (if (seq others)
-      (str (short model_requested) " → " (short (first others)) " (fallback)")
+      (str (short model_requested) " → " (short (first others)) " (" (t "fallback") ")")
       (short (or model_used model_requested)))))
 
 (defn- input-breakdown [r]
-  (str (ui/thousands (:input_tokens r 0)) " uncached · "
-       (ui/thousands (+ (:cache_write_5m r 0) (:cache_write_1h r 0))) " cache write · "
-       (ui/thousands (:cache_read r 0)) " cache read"))
+  (t "{0} uncached · {1} cache write · {2} cache read"
+     (ui/thousands (:input_tokens r 0)) (ui/thousands (+ (:cache_write_5m r 0) (:cache_write_1h r 0)))
+     (ui/thousands (:cache_read r 0))))
 
 (defn- requests-card [{:keys [requests]} show-all?]
   (let [rows (if show-all? requests (take 25 requests))]
     (ui/card {}
-             (ui/label-row {:label "Requests"
+             (ui/label-row {:label (t "Requests")
                             :right (when (> (count requests) 25)
                                      [:button.pill {:on {:click [[:set-ui :costs-all (not show-all?)]]}}
-                                      (if show-all? "Show fewer" (str "Show all " (count requests)))])})
+                                      (if show-all? (t "Show fewer") (t "Show all {0}" (count requests)))])})
              (ui/table (concat
-                        [{:label "Time" :value #(local-time (:at %)) :title :ref}
-                         {:label "Task" :render #(let [t (task-by-id (:task %))]
-                                                   [:span.cell-dot (dot (:color t "--fam-other")) (task-label (:task %))])}
-                         {:label "Model" :value model-cell :title #(or (:model_used %) (:model_requested %))}
-                         {:label "Effort" :value :effort}
-                         {:label "Input" :align :r :value #(ui/thousands (input-total %)) :title input-breakdown}
-                         {:label "Output" :align :r :value #(ui/thousands (:output_tokens %))}
-                         {:label "Time taken" :align :r :value #(some-> (:duration_ms %) (/ 1000) (.toFixed 1) (str " s"))}
-                         {:label "Cost" :align :r :value #(str (or (usd (:cost_usd %)) "—") (when (= 1 (:batch %)) " · batch"))
-                          :title #(when (= 1 (:batch %)) "Half-price batch request")}
-                         {:label "Status" :render status-cell}])
+                        [{:label (t "Time") :value #(local-time (:at %)) :title :ref}
+                         {:label (t "Task") :render #(let [task (task-by-id (:task %))]
+                                                       [:span.cell-dot (dot (:color task "--fam-other")) (task-label (:task %))])}
+                         {:label (t "Model") :value model-cell :title #(or (:model_used %) (:model_requested %))}
+                         {:label (t "Effort") :value #(some-> (:effort %) t)}
+                         {:label (t "Input") :align :r :value #(ui/thousands (input-total %)) :title input-breakdown}
+                         {:label (t "Output") :align :r :value #(ui/thousands (:output_tokens %))}
+                         {:label (t "Time taken") :align :r :value #(some-> (:duration_ms %) (/ 1000) (.toFixed 1) (str " s"))}
+                         {:label (t "Cost") :align :r :value #(str (or (usd (:cost_usd %)) "—") (when (= 1 (:batch %)) (str " · " (t "batch"))))
+                          :title #(when (= 1 (:batch %)) (t "Half-price batch request"))}
+                         {:label (t "Status") :render status-cell}])
                        rows {:key-fn :id})
-             [:div.sub "Input includes cached tokens; hover a number for the split."]
+             [:div.sub (t "Input includes cached tokens; hover a number for the split.")]
              (when (some #(= "imported" (:source %)) rows)
-               [:div.sub "Requests from before the cost log existed were imported from the stored plans; their effort is assumed high and their time taken is unknown."]))))
+               [:div.sub (t "Requests from before the cost log existed were imported from the stored plans; their effort is assumed high and their time taken is unknown.")]))))
 
 (defn- prices-card [{:keys [prices by_model usd_chf imported_until unpriced]}]
   (let [used (set (map :key by_model))
@@ -192,23 +194,19 @@
                    :when (or (used m) (#{"claude-fable-5-1" "claude-opus-5-5" "claude-sonnet-5-5" "claude-haiku-5-5"} m))]
                (assoc p :model m))]
     (ui/card {}
-             [:div.lab "How costs are worked out"]
-             [:div.sub "Each request's token counts, as the API reports them, times that model's list price. "
-              "A request that fell back to another model is priced per model. "
-              "Anthropic bills in USD; CHF uses a fixed rate of " usd_chf ". "
-              "The Claude Console's billing page is the final word (taxes, credits)."]
-             (ui/table [{:label "Model ($ per million tokens)" :value :model}
-                        {:label "Input" :align :r :value #(usd (:input %) 2)}
-                        {:label "Cache write 5 min" :align :r :value #(usd (:cache_write_5m %) 2)}
-                        {:label "Cache write 1 h" :align :r :value #(usd (:cache_write_1h %) 2)}
-                        {:label "Cache read" :align :r :value #(usd (:cache_read %) 2)}
-                        {:label "Output" :align :r :value #(usd (:output %) 2)}]
+             [:div.lab (t "How costs are worked out")]
+             [:div.sub (t "Each request's token counts, as the API reports them, times that model's list price. A request that fell back to another model is priced per model. Anthropic bills in USD; CHF uses a fixed rate of {0}. The Claude Console's billing page is the final word (taxes, credits)." usd_chf)]
+             (ui/table [{:label (t "Model ($ per million tokens)") :value :model}
+                        {:label (t "Input") :align :r :value #(usd (:input %) 2)}
+                        {:label (t "Cache write 5 min") :align :r :value #(usd (:cache_write_5m %) 2)}
+                        {:label (t "Cache write 1 h") :align :r :value #(usd (:cache_write_1h %) 2)}
+                        {:label (t "Cache read") :align :r :value #(usd (:cache_read %) 2)}
+                        {:label (t "Output") :align :r :value #(usd (:output %) 2)}]
                        rows {:key-fn :model})
              (when imported_until
-               [:div.sub (str "Logged from " (local-time imported_until)
-                              " on. Before that only plans and adjustments kept their usage; athlete chat and summary requests from then aren't included.")])
+               [:div.sub (t "Logged from {0} on. Before that only plans and adjustments kept their usage; athlete chat and summary requests from then aren't included." (local-time imported_until))])
              (when (pos? unpriced)
-               [:div.error (str unpriced " request(s) used a model without a known price and show no cost.")]))))
+               [:div.error (t "{0} request(s) used a model without a known price and show no cost." unpriced)]))))
 
 (defn- short-model [m] (some-> m (.replace #"^claude-" "")))
 
@@ -245,93 +243,108 @@
 
 (defn- settings-card
   "Choose the model and effort per task, with what each combination has cost so far."
-  [{:keys [tasks models efforts defaults deliveries]} {:keys [by_task by_setting prices pending_batches]}]
+  [{:keys [tasks models efforts defaults deliveries scopes]} {:keys [by_task by_setting prices pending_batches]}]
   (let [task-avg (into {} (for [t by_task :let [n (max 1 (:requests t))]]
                             [(:key t) (update-vals (select-keys t [:input_tokens :output_tokens :cache_read
                                                                    :cache_write_5m :cache_write_1h])
                                                    #(/ % n))]))]
     (ui/card {}
-             (ui/label-row {:label "Model and effort per task"
+             (ui/label-row {:label (t "Model and effort per task")
                             :right [:button.pill {:on {:click [[:api "DELETE" settings-url nil]]}}
-                                    "Reset to recommended"]})
-             [:div.sub "Bigger models and higher effort plan with more care and cost more; effort mostly changes how long Claude thinks, so it shows in the output tokens. Changes apply to the next request."]
+                                    (t "Reset to recommended")]})
+             [:div.sub (t "Bigger models and higher effort plan with more care and cost more; effort mostly changes how long Claude thinks, so it shows in the output tokens. Changes apply to the next request.")]
              (when (pos? (:n pending_batches 0))
-               [:div.sub (str (:n pending_batches) " request(s) waiting in the half-price batch since "
-                              (local-time (:since pending_batches)) ". The dashboard collects them every minute.")])
-             [:div.table-wrap
+               [:div.sub (t "{0} request(s) waiting in the half-price batch since {1}. The dashboard collects them every minute."
+                            (:n pending_batches) (local-time (:since pending_batches)))])
+             [:div.table-wrap.settings-wrap
               [:table.settings
-               [:thead [:tr [:th "Task"] [:th "Model"] [:th "Effort"]
-                        [:th {:title "Batch: the Message Batches API, half price, answers usually within an hour (at most 24 h)."} "Delivery"]
-                        [:th.r {:title "This task's average tokens per request so far, priced for the chosen model. Effort and model change how many tokens are used, so this is a guide."}
-                         "Est. per request"]
-                        [:th "Cost so far per request"]]]
+               [:thead [:tr [:th (t "Task")] [:th (t "Model")] [:th (t "Effort")]
+                        [:th {:title (t "Batch: the Message Batches API, half price, answers usually within an hour (at most 24 h).")} (t "Delivery")]
+                        [:th.r {:title (t "This task's average tokens per request so far, priced for the chosen model. Effort and model change how many tokens are used, so this is a guide.")}
+                         (t "Est. per request")]
+                        [:th (t "Cost so far per request")]]]
                [:tbody
-                (for [{:keys [id label about why model effort delivery]} tasks
-                      :let [t    (task-by-id id)
+                (for [{:keys [id label about why model effort delivery scope]} tasks
+                      :let [task (task-by-id id)
                             hist (filter #(= id (:task %)) by_setting)
                             avg  (task-avg id)]]
                   [:tr {:replicant/key id}
-                   [:td [:div [:span.cell-dot (dot (:color t "--fam-other")) label]]
+                   [:td [:div [:span.cell-dot (dot (:color task "--fam-other")) label]]
                     [:div.sub about]
-                    [:div.sub.muted (str "Recommended: " (short-model (get-in defaults [(keyword id) :model]))
-                                         " · " (get-in defaults [(keyword id) :effort]) ". " why)]]
-                   [:td [:select {:aria-label (str label " model")
+                    [:div.sub.muted (str (t "Recommended: {0} · {1}." (short-model (get-in defaults [(keyword id) :model]))
+                                            (t (get-in defaults [(keyword id) :effort])))
+                                         " " why)]]
+                   [:td [:select {:aria-label (str label " · " (t "Model"))
                                   :on {:change [[:ai-setting id :model :event/target-value]]}}
                          (for [m models]
                            [:option {:replicant/key (:id m) :value (:id m) :selected (= model (:id m))} (:label m)])]]
-                   [:td [:select {:aria-label (str label " effort")
+                   [:td [:select {:aria-label (str label " · " (t "Effort"))
                                   :on {:change [[:ai-setting id :effort :event/target-value]]}}
                          (for [e efforts]
-                           [:option {:replicant/key e :value e :selected (= effort e)} e])]]
-                   [:td (if delivery
+                           [:option {:replicant/key e :value e :selected (= effort e)} (t e)])]]
+                   [:td (cond
+                          delivery
                           [:div
-                           [:select {:aria-label (str label " delivery")
+                           [:select {:aria-label (str label " · " (t "Delivery"))
                                      :on {:change [[:ai-setting id :delivery :event/target-value]]}}
                             (for [d deliveries]
                               [:option {:replicant/key (:id d) :value (:id d) :selected (= delivery (:id d))} (:label d)])]
                            [:div.sub (:about (some #(when (= delivery (:id %)) %) deliveries))]]
-                          [:div.sub "Always instant: you're waiting for the answer."])]
+                          ;; Translations: which languages Claude's texts are kept in
+                          scope
+                          [:div
+                           [:select {:aria-label (str label " · " (t "Languages"))
+                                     :on {:change [[:ai-setting id :scope :event/target-value]]}}
+                            (for [d scopes]
+                              [:option {:replicant/key (:id d) :value (:id d) :selected (= scope (:id d))} (:label d)])]
+                           [:div.sub (:about (some #(when (= scope (:id %)) %) scopes))]]
+                          :else
+                          [:div.sub (t "Always instant: you're waiting for the answer.")])]
                    [:td.r (let [{:keys [tokens source from]} (output-estimate hist effort)
                                 cost (when (and avg tokens) (est-cost prices model (assoc avg :output_tokens tokens)))]
                             (if cost
-                              [:div {:title (str "Input: this task's average so far. Output: "
+                              [:div {:title (str (t "Input: this task's average so far.") " "
                                                  (if (= source :measured)
-                                                   (str "measured at " effort " effort.")
-                                                   (str "scaled from " (str/join ", " from)
-                                                        " effort with rough factors (low ×0.5, medium ×0.75, high ×1, xhigh ×1.4, max ×2)."))
-                                                 " Priced for " model ".")}
+                                                   (t "Output: measured at {0} effort." (t effort))
+                                                   (t "Output: scaled from {0} effort with rough factors (low ×0.5, medium ×0.75, high ×1, xhigh ×1.4, max ×2)."
+                                                      (str/join ", " (map t from))))
+                                                 " " (t "Priced for {0}." model))}
                                (str (when (= source :scaled) "≈ ") (usd cost))
                                [:div.sub (if (= source :measured)
-                                           (str "measured at " effort)
-                                           (str "scaled from " (str/join ", " from)))]
+                                           (t "measured at {0}" (t effort))
+                                           (t "scaled from {0}" (str/join ", " (map t from))))]
                                (when (#{"auto" "batch"} delivery)
-                                 [:div.sub (str "batch: " (usd (* 0.5 cost)))])]
-                              [:span.muted "no history"]))]
+                                 [:div.sub (t "batch: {0}" (usd (* 0.5 cost)))])]
+                              [:span.muted (t "no history")]))]
                    [:td (if (seq hist)
                           [:div.pills
                            (for [{m :model e :effort b :batch :keys [requests avg_cost_usd]} hist]
                              [:span.pill {:replicant/key (str m e b)
                                           :class (when (and (= m model) (= e effort)) "current")
-                                          :title (str requests " request(s) with " m " at " e " effort" (when b ", half-price batch"))}
-                              (str (short-model m) " · " e (when b " · batch") " · " (usd avg_cost_usd) " (" requests ")")])]
+                                          :title (str (t "{0} request(s) with {1} at {2} effort" requests m (t e))
+                                                      (when b (str ", " (t "half-price batch"))))}
+                              (str (short-model m) " · " (t e) (when b (str " · " (t "batch"))) " · " (usd avg_cost_usd) " (" requests ")")])]
                           [:span.muted "—"])]])]]])))
 
-(defn view [{:keys [data errors route flash] ui-state :ui} u]
+(defn view
+  "The model settings and the cost overview; shown in Settings (Claude & API
+  costs), so it has no page title of its own."
+  [{:keys [data errors route flash] ui-state :ui} u]
   (let [d     (get data u)
         st    (get data settings-url)
         range (get-in route [:params :range] "all")]
     [:div {:style {:display "contents"}}
-     [:div.page-head
-      [:h1.title "API costs"]
+     [:div.section-head
+      [:h2.section-title (t "API costs")]
       (ui/seg range ranges [:set-param :range])]
      (when flash [:div.error flash])
-     (some (fn [x] (when-let [e (get errors x)] [:div.error (str "Could not load: " e)])) [u settings-url])
+     (some (fn [x] (when-let [e (get errors x)] [:div.error (t "Could not load: {0}" e)])) [u settings-url])
      (when (and st d) [:div {:replicant/key "settings"} (settings-card st d)])
      (when d
        (if (zero? (get-in d [:totals :requests] 0))
          (ui/card {} [:div.empty (if (pos? (get-in d [:all_time :requests] 0))
-                                   "No Claude requests in this range."
-                                   "No Claude requests yet. Costs appear here after the first plan or athlete chat.")])
+                                   (t "No Claude requests in this range.")
+                                   (t "No Claude requests yet. Costs appear here after the first plan or athlete chat."))])
          (list
           (kpis d)
           [:div {:replicant/key "daily"} (daily-chart (:daily d))]

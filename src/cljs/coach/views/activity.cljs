@@ -1,6 +1,7 @@
 (ns coach.views.activity
   (:require [clojure.string :as str]
             [coach.charts :as c]
+            [coach.i18n :refer [t tk]]
             [coach.ui :as ui]))
 
 (defn- rolling
@@ -13,7 +14,7 @@
           (range n))))
 
 (defn- series-data [ts ys]
-  (into [] (keep (fn [[t y]] (when (some? y) [t y]))) (map vector ts ys)))
+  (into [] (keep (fn [[x y]] (when (some? y) [x y]))) (map vector ts ys)))
 
 (defn- percentile-bounds
   "[p2 p98] of the y values, padded 5%, so GPS spikes don't stretch the axis."
@@ -36,14 +37,14 @@
                        :y-min (when clip? (first (percentile-bounds data)))
                        :y-max (when clip? (second (percentile-bounds data)))
                        :tooltip-fmt (fn [params]
-                                      (let [p (first params) [t y] (js->clj (.-value p))]
-                                        (c/tooltip-rows (str "at " (elapsed-fmt t))
+                                      (let [p (first params) [secs y] (js->clj (.-value p))]
+                                        (c/tooltip-rows (t "at {0}" (elapsed-fmt secs))
                                                         [{:label unit :value (tip y)
                                                           :color (c/css-var color)}])))})
               {:series [(cond-> (c/line title color data) area? c/area-wash)]}))})))
 
 (defn- zones-chart [zones]
-  (let [labels ["Below Z1" "Z1" "Z2" "Z3" "Z4" "Z5"]
+  (let [labels [(t "Below Z1") "Z1" "Z2" "Z3" "Z4" "Z5"]
         ramp   [["--text-3" 0.3] ["--blue" 0.25] ["--blue" 0.4] ["--blue" 0.55] ["--blue" 0.7] ["--blue" 0.85]]
         total  (reduce + zones)
         rows   (map vector labels zones ramp)]
@@ -76,30 +77,30 @@
   (let [secs (or (:moving_s a) (:duration_s a))
         mps  (when (and (:distance_m a) secs (pos? secs)) (/ (:distance_m a) secs))
         tiles (remove nil?
-     [(tile "Distance" (ui/km (:distance_m a)) "km" nil)
-     (tile "Moving time" (ui/hms secs) nil (str "elapsed " (ui/hms (:duration_s a))))
+     [(tile (t "Distance") (ui/km (:distance_m a)) "km" nil)
+     (tile (t "Moving time") (ui/hms secs) nil (t "elapsed {0}" (ui/hms (:duration_s a))))
      (if run?
-       (tile "Avg pace" (ui/pace mps) "/km" (some->> (:ngp_mps a) ui/pace (str "NGP ")))
-       (tile "Avg speed" (ui/kmh mps) "km/h" nil))
-     (tile "Elevation gain" (some-> (:elev_gain_m a) js/Math.round) "m" nil)
-     (tile "Heart rate" (some-> (:avg_hr a) js/Math.round) "bpm" (some->> (:max_hr a) js/Math.round (str "max ")))
-     (tile "Training stress" (some-> (:tss a) js/Math.round) (:tss_method a)
+       (tile (t "Avg pace") (ui/pace mps) "/km" (some->> (:ngp_mps a) ui/pace (str "NGP ")))
+       (tile (t "Avg speed") (ui/kmh mps) "km/h" nil))
+     (tile (t "Elevation gain") (some-> (:elev_gain_m a) js/Math.round) "m" nil)
+     (tile (t "Heart rate") (some-> (:avg_hr a) js/Math.round) "bpm" (some->> (:max_hr a) js/Math.round (t "max {0}")))
+     (tile (t "Training stress") (some-> (:tss a) js/Math.round) (:tss_method a)
               (str/join " · " (remove nil? [(some->> (ui/fixed (:intensity a) 2) (str "IF "))
                                             (some-> (:tss_per_hour a) js/Math.round (str " TSS/h"))])))
-     (when (:np a) (tile "Normalized power" (js/Math.round (:np a)) "W"
+     (when (:np a) (tile (t "Normalized power") (js/Math.round (:np a)) "W"
                             (str/join " · " (remove nil? [(some->> (:vi a) (str "VI ")) (some->> (:kj a) (str "kJ "))]))))
-     (tile "Efficiency factor" (ui/fixed (:ef a) 2) nil
-              (some->> (:decoupling a) (str "decoupling ") (#(str % "%"))))
-     (tile "Garmin load" (some-> (:garmin_load a) js/Math.round) nil
-              (some->> (ui/fixed (:aerobic_te a) 1) (str "aerobic TE ")))])]
+     (tile (t "Efficiency factor") (ui/fixed (:ef a) 2) nil
+              (some->> (:decoupling a) (t "decoupling {0}%")))
+     (tile (t "Garmin load") (some-> (:garmin_load a) js/Math.round) nil
+              (some->> (ui/fixed (:aerobic_te a) 1) (t "aerobic TE {0}")))])]
     (into [:div.row]
-          (map (fn [t tint] (ui/tile (assoc t :tint tint :size "sm" :flex "1 1 160px"))) tiles tints))))
+          (map (fn [tl tint] (ui/tile (assoc tl :tint tint :size "sm" :flex "1 1 160px"))) tiles tints))))
 
 (defn view [{:keys [data errors]} url]
   (let [a    (get data url)
         s    (:streams a)
         run? (= :run (:id (ui/family (:sport a))))
-        t    (:t s)
+        ts   (:t s)
         lat  (:lat s) lon (:lon s)
         pts  (when (and (seq lat) (seq lon))
                (let [pts (keep (fn [[la lo]] (when (and la lo) [la lo])) (map vector lat lon))
@@ -107,8 +108,8 @@
                  (vec (take-nth step pts))))
         speed (some-> (:speed s) (rolling 15))]
     [:div {:style {:display "contents"}}
-     [:div [:a.sub {:href "#/activities"} "← Activities"]]
-     (when-let [e (get errors url)] [:div.error (str "Could not load: " e)])
+     [:div [:button.link-back {:on {:click [[:back]]}} (t "← Back")]]
+     (when-let [e (get errors url)] [:div.error (t "Could not load: {0}" e)])
      (when a
        (list
         [:div {:replicant/key "head"}
@@ -120,41 +121,41 @@
           [:div {:replicant/key "map"}
            (ui/card {} (c/route-map {:key (str "map-" (:id a)) :latlngs pts
                                      :family (:id (ui/family (:sport a)))}))])
-        (when (seq t)
+        (when (seq ts)
           [:div.row {:replicant/key "streams"}
            (when (some some? (:hr s))
-             (stream-chart {:key "hr" :title "Heart rate" :unit "bpm" :color "--red"
-                            :data (series-data t (:hr s)) :tip #(str (js/Math.round %))}))
+             (stream-chart {:key "hr" :title (t "Heart rate") :unit "bpm" :color "--red"
+                            :data (series-data ts (:hr s)) :tip #(str (js/Math.round %))}))
            (when (some some? speed)
              (if run?
-               (stream-chart {:key "pace" :title "Pace (15 s smoothed)" :unit "/km" :color "--blue"
+               (stream-chart {:key "pace" :title (t "Pace (15 s smoothed)") :unit "/km" :color "--blue"
                               :y-inverse true :clip? true :y-fmt #(ui/hms %) :tip #(ui/hms %)
-                              :data (series-data t (map #(when (and % (> % 1.0)) (/ 1000 %)) speed))})
-               (stream-chart {:key "speed" :title "Speed (15 s smoothed)" :unit "km/h" :color "--blue"
-                              :clip? true :tip #(ui/fixed % 1) :data (series-data t (map #(some-> % (* 3.6)) speed))})))
+                              :data (series-data ts (map #(when (and % (> % 1.0)) (/ 1000 %)) speed))})
+               (stream-chart {:key "speed" :title (t "Speed (15 s smoothed)") :unit "km/h" :color "--blue"
+                              :clip? true :tip #(ui/fixed % 1) :data (series-data ts (map #(some-> % (* 3.6)) speed))})))
            (when (some some? (:alt s))
-             (stream-chart {:key "alt" :title "Elevation" :unit "m" :color "--green" :area? true
-                            :tip #(str (js/Math.round %)) :data (series-data t (:alt s))}))
+             (stream-chart {:key "alt" :title (t "Elevation") :unit "m" :color "--green" :area? true
+                            :tip #(str (js/Math.round %)) :data (series-data ts (:alt s))}))
            (when (some some? (:power s))
-             (stream-chart {:key "power" :title "Power" :unit "W" :color "--amber"
-                            :tip #(str (js/Math.round %)) :data (series-data t (:power s))}))])
+             (stream-chart {:key "power" :title (t "Power") :unit "W" :color "--amber"
+                            :tip #(str (js/Math.round %)) :data (series-data ts (:power s))}))])
         [:div.row {:replicant/key "zones"}
          (when (seq (:hr_zones_s a))
-           (ui/card {:flex "1 1 420px"} [:div.lab "Time in heart-rate zones"] (zones-chart (:hr_zones_s a))))
+           (ui/card {:flex "1 1 420px"} [:div.lab (t "Time in heart-rate zones")] (zones-chart (:hr_zones_s a))))
          (when (seq (:peaks a))
            (let [pk (:peaks a)]
              (ui/card {:flex "1 1 420px"}
-              [:div.lab "Peak values"]
-              (ui/table [{:label "Duration" :value #(peak-labels %)}
-                         {:label "Heart rate" :value #(some-> (get-in pk [:hr %]) js/Math.round) :align :r}
-                         {:label (if run? "Pace" "Speed") :value #(when-let [v (get-in pk [:speed %])]
-                                                                    (if run? (str (ui/pace v) " /km") (str (ui/kmh v) " km/h")))
+              [:div.lab (t "Peak values")]
+              (ui/table [{:label (t "Duration") :value #(peak-labels %)}
+                         {:label (t "Heart rate") :value #(some-> (get-in pk [:hr %]) js/Math.round) :align :r}
+                         {:label (if run? (t "Pace") (t "Speed")) :value #(when-let [v (get-in pk [:speed %])]
+                                                                            (if run? (str (ui/pace v) " /km") (str (ui/kmh v) " km/h")))
                           :align :r}
-                         {:label "Power" :value #(some-> (get-in pk [:power %]) js/Math.round) :align :r}]
+                         {:label (t "Power") :value #(some-> (get-in pk [:power %]) js/Math.round) :align :r}]
                         [:5 :60 :300 :1200 :3600]))))]
         (when-let [th (:thresholds a)]
           [:div.sub {:replicant/key "th"}
-           (str "Scored with LTHR " (some-> (:lthr th) js/Math.round) " bpm"
-                (some-> (:threshold_speed th) ui/pace (#(str ", threshold pace " % " /km")))
-                (some->> (:ftp th) js/Math.round (str ", FTP "))
-                ", resting HR " (:rest_hr th) ".")])))]))
+           (str (t "Scored with LTHR {0} bpm" (some-> (:lthr th) js/Math.round))
+                (some->> (:threshold_speed th) ui/pace (t ", threshold pace {0} /km"))
+                (some->> (:ftp th) js/Math.round (t ", FTP {0}"))
+                (t ", resting HR {0}." (:rest_hr th)))])))]))

@@ -1,18 +1,19 @@
 (ns coach.app
   (:require [clojure.string :as str]
+            [coach.i18n :as i18n :refer [t]]
             [coach.ui :as ui]
             [coach.views.athlete :as athlete]
-            [coach.views.activities :as activities]
             [coach.views.activity :as activity]
             [coach.views.calendar :as calendar]
             [coach.views.costs :as costs]
+            [coach.views.dashboard :as dashboard]
+            [coach.views.settings :as settings]
             [coach.views.plan :as plan]
-            [coach.views.load :as load]
             [coach.views.status :as status]
             [coach.views.day :as day]
             [replicant.dom :as r]))
 
-(defonce state (atom {:route {:page :calendar} :data {} :loading #{} :errors {} :ui {}}))
+(defonce state (atom {:route {:page :dashboard} :data {} :loading #{} :errors {} :ui {}}))
 
 ;; ---------------------------------------------------------------------------
 ;; Routing (hash based: #/activities?range=90)
@@ -26,39 +27,33 @@
                                   :let [[k v] (str/split kv #"=" 2)]]
                               [(keyword k) (js/decodeURIComponent (or v ""))]))]
     (case (first segs)
+      ;; an activity's page; the activities list and the Data page are gone
       "activities" (if-let [id (second segs)]
                      {:page :activity :id id}
-                     {:page :activities :params params})
-      "load"       {:page :load :params params}
+                     {:page :dashboard :params {}})
       "calendar"   {:page :calendar :params params}
       "plan"       {:page :plan :params params}
       "day"        {:page :day :date (second segs)}
-      "costs"      {:page :costs :params params}
-      ;; the calendar is the start page (the old Today page is now a day page)
-      {:page :calendar :params params})))
+      "settings"   {:page :settings :params params}
+      ;; old links: the costs now live in Settings
+      "costs"      {:page :settings :params (assoc params :tab "claude")}
+      ;; the dashboard is the start page
+      {:page :dashboard :params params})))
 
 (defn route-hash [{:keys [page id params]}]
   (let [qs (str/join "&" (for [[k v] params :when (some? v)]
                            (str (name k) "=" (js/encodeURIComponent v))))]
-    (str "#/" (case page :calendar "calendar" :activity (str "activities/" id) (name page))
+    (str "#/" (case page :dashboard "" :activity (str "activities/" id) (name page))
          (when (seq qs) (str "?" qs)))))
-
-(def default-range {:activities "365" :load "180"})
-
-(defn range-from [route]
-  (let [r (get-in route [:params :range] (default-range (:page route)))]
-    (if (= r "all") "2021-03-26" (ui/days-ago (js/parseInt r)))))
 
 (defn urls [{:keys [page id] :as route}]
   (case page
     :day        [(day/url (:date route))]
-    :activities [(str "/api/activities?from=" (range-from route))]
     :activity   [(str "/api/activities/" id "?streams=true")]
     :calendar   (calendar/urls route)
     :plan       (plan/urls)
-    :costs      [(costs/url route) costs/settings-url]
-    :load       [(str "/api/load?from=" (range-from route))
-                 (str "/api/volume?from=" (range-from route))]
+    :dashboard  (dashboard/urls route)
+    :settings   (settings/urls route)
     []))
 
 ;; ---------------------------------------------------------------------------
@@ -107,20 +102,26 @@
                (if (.-ok res)
                  (load-route! {:force true})
                  (-> (.json res)
-                     (.then #(swap! state assoc :flash (str "Error: " (.-error %))))))))
-      (.catch #(swap! state assoc :flash (str "Error: " (.-message %))))))
+                     (.then #(swap! state assoc :flash (t "Error: {0}" (.-error %))))))))
+      (.catch #(swap! state assoc :flash (t "Error: {0}" (.-message %))))))
 
 (defonce sync-timer (atom nil))
 
 (defn- sync-state! [s]
-  (let [{was :running done :finished_at} (:sync @state)]
+  (let [{was :running done :finished_at translating :translating} (:sync @state)]
     (swap! state assoc :sync s)
+    ;; Claude's texts were just translated: show them, in place
+    (when (and translating (not (:translating s)))
+      (load-route! {:force true}))
     ;; a sync ended since the last poll (also one shorter than the interval)
     (when (and (not (:running s))
                (or was (and done (not= done (:finished_at s)))))
-      ;; new data: drop the cache and reload this page
-      (swap! state assoc :data {})
-      (load-route!))))
+      ;; new data: drop the cache and reload this page. The sidebar's backup
+      ;; status isn't page data: keep it, and refresh it (a sync can make the
+      ;; day's backup)
+      (swap! state update :data select-keys [status/backup-url])
+      (load-route!)
+      (fetch! status/backup-url {:force true}))))
 
 (defn poll-sync!
   "Polls /api/sync every 3 s while a sync runs, else every 30 s, so syncs the
@@ -137,7 +138,9 @@
                  (fetch! status/backup-url))
                (sync-state! (js->clj body :keywordize-keys true))))
       (.catch (fn [_] (swap! state assoc :server-down true)))
-      (.finally #(reset! sync-timer (js/setTimeout poll-sync! (if (get-in @state [:sync :running]) 3000 30000))))))
+      (.finally #(reset! sync-timer (js/setTimeout poll-sync! (if (or (get-in @state [:sync :running])
+                                                                      (get-in @state [:sync :translating]))
+                                                                3000 30000))))))
 
 (defn start-sync! []
   (-> (js/fetch "/api/sync" #js {:method "POST"})
@@ -172,7 +175,7 @@
             (.catch (fn [e]
                       ;; give the message back so it can be sent again
                       (swap! state update-in path assoc :busy? false :messages messages :input text
-                             :error (str "Error: " (.-message e))))))))))
+                             :error (t "Error: {0}" (.-message e))))))))))
 
 (def max-upload-chars "Same limit as the server (coach.athlete/max-chars)." 200000)
 
@@ -189,18 +192,18 @@
           (.then (fn [text]
                    (put! (cond
                            (str/includes? text "\u0000")
-                           {:error (str (.-name f) " doesn't look like a text file. Upload Markdown (.md) or plain text (.txt).")}
-                           (str/blank? text)  {:error (str (.-name f) " is empty.")}
-                           (> (count text) max-upload-chars) {:error (str (.-name f) " is too long (over 200,000 characters).")}
+                           {:error (t "{0} doesn't look like a text file. Upload Markdown (.md) or plain text (.txt)." (.-name f))}
+                           (str/blank? text)  {:error (t "{0} is empty." (.-name f))}
+                           (> (count text) max-upload-chars) {:error (t "{0} is too long (over 200,000 characters)." (.-name f))}
                            :else {:name (.-name f) :content text}))))
-          (.catch #(put! {:error (str "Could not read the file: " (.-message %))}))))))
+          (.catch #(put! {:error (t "Could not read the file: {0}" (.-message %))}))))))
 
 (defn summarise-athlete! []
   (swap! state assoc-in [:ui :athlete :summarising?] true)
   (-> (post-json (str athlete/url "/summary") {})
       (.then #(swap! state (fn [s] (-> s (assoc-in [:data athlete/url] %)
                                        (assoc-in [:ui :athlete :summarising?] false)))))
-      (.catch #(swap! state (fn [s] (-> s (assoc :flash (str "Error: " (.-message %)))
+      (.catch #(swap! state (fn [s] (-> s (assoc :flash (t "Error: {0}" (.-message %)))
                                         (assoc-in [:ui :athlete :summarising?] false)))))))
 
 ;; ---------------------------------------------------------------------------
@@ -218,8 +221,56 @@
     (set! (.. js/document -documentElement -dataset -theme)
           (if (#{"light" "dark"} saved) saved (if (.-matches system-dark) "dark" "light")))))
 
-(defn toggle-theme! []
-  (.setItem js/localStorage "theme" (if (= "dark" (theme)) "light" "dark"))
+;; ---------------------------------------------------------------------------
+;; Language: a server setting (it also decides the language Claude writes in);
+;; localStorage only avoids a flash of the wrong language on load.
+
+(defn- apply-lang! [lang]
+  (when (i18n/language-ids lang)
+    (reset! i18n/lang lang)
+    (.setItem js/localStorage "lang" lang)
+    (set! (.. js/document -documentElement -lang) lang)
+    (swap! state assoc :lang lang)))
+
+(defn- reload-in-lang!
+  "Refetches the page's data in place: the server's own texts (signals,
+  warnings) come back in the new language. Nothing is cleared first, so no
+  data goes missing while a request is in flight."
+  []
+  (load-route! {:force true})
+  (fetch! status/backup-url {:force true}))
+
+(defn load-lang!
+  "Takes the language the server has (another browser may have changed it)."
+  []
+  (-> (js/fetch "/api/lang")
+      (.then #(.json %))
+      (.then (fn [body]
+               (let [lang (.-lang body)]
+                 (when (not= lang @i18n/lang)
+                   (apply-lang! lang)
+                   (reload-in-lang!)))))
+      (.catch (fn [_]))))
+
+(defn set-lang! [lang]
+  (apply-lang! lang)
+  ;; a switch may start a translation run: watch it closely from now
+  (js/setTimeout poll-sync! 1500)
+  (-> (js/fetch "/api/lang" #js {:method "PUT" :headers #js {"Content-Type" "application/json"}
+                                 :body (js/JSON.stringify #js {:lang lang})})
+      (.then (fn [_] (reload-in-lang!)))
+      (.catch #(swap! state assoc :flash (t "Error: {0}" (.-message %))))))
+
+(defn theme-choice
+  "\"light\", \"dark\" or \"system\" (follow the system setting)."
+  []
+  (let [saved (.getItem js/localStorage "theme")]
+    (if (#{"light" "dark"} saved) saved "system")))
+
+(defn set-theme! [choice]
+  (if (#{"light" "dark"} choice)
+    (.setItem js/localStorage "theme" choice)
+    (.removeItem js/localStorage "theme"))
   (apply-theme!)
   (render!))
 
@@ -244,19 +295,22 @@
                                         (get-in @state [:data costs/settings-url :tasks]))]
                       (swap! state dissoc :flash)
                       (api! "PUT" (str costs/settings-url "/" task)
-                            (assoc (select-keys current [:model :effort :delivery]) field value)))
+                            (assoc (select-keys current [:model :effort :delivery :scope]) field value)))
       :claude-check (do (swap! state assoc-in [:ui :claude-check] {:checking true})
                         (-> (js/fetch "/api/claude/check" #js {:method "POST"})
                             (.then #(.json %))
                             (.then (fn [body]
-                                     (let [{:keys [ok error]} (js->clj body :keywordize-keys true)]
+                                     (let [{:keys [ok error claude]} (js->clj body :keywordize-keys true)]
                                        (swap! state assoc-in [:ui :claude-check]
-                                              (if ok nil {:checking false :result error}))
+                                              (if ok nil {:checking false :result error
+                                                          :still-out (boolean (:credits_out claude))}))
                                        (poll-sync!))))
                             (.catch #(swap! state assoc-in [:ui :claude-check] {:checking false :result (.-message %)}))))
       :backup-started (doseq [ms [3000 10000 30000]] ; the download starts once the zip is written
                         (js/setTimeout #(fetch! status/backup-url {:force true}) ms))
-      :toggle-theme (toggle-theme!)
+      :set-theme    (set-theme! (first args))
+      :back         (if (> (.-length js/history) 1) (.back js/history) (set! (.-hash js/location) "#/"))
+      :set-lang     (set-lang! (first args))
       :athlete-chat-send (send-athlete-chat!)
       :athlete-chat-key  (when (= "Enter" (.-key (first args))) (send-athlete-chat!))
       :athlete-summary   (summarise-athlete!)
@@ -275,35 +329,27 @@
 ;; ---------------------------------------------------------------------------
 ;; Shell
 
-(def nav-items [[:calendar "#/calendar" "Calendar"] [:plan "#/plan" "Plan"] [:activities "#/activities" "Activities"]
-                [:load "#/load" "Training load"] [:costs "#/costs" "API costs"]])
+(def nav-items [[:dashboard "#/" (i18n/tk "Dashboard")] [:calendar "#/calendar" (i18n/tk "Calendar")]
+                [:plan "#/plan" (i18n/tk "Plan")]
+                [:settings "#/settings" (i18n/tk "Settings")]])
 
 (defn view [{:keys [route loading] :as s}]
   (let [page (:page route)
-        active (case page :activity :activities :day :calendar page)]
+        active (case page :activity :dashboard :day :calendar page)]
     [:div.shell
-     [:nav.side {:aria-label "Main"}
+     [:nav.side {:aria-label (t "Main")}
       [:div.brand [:span.logo] "Coach"]
       (for [[k href label] nav-items]
-        [:a {:replicant/key k :href href :class (when (= k active) "active")} label])
-      (let [dark? (= "dark" (theme))]
-        [:button.theme-toggle {:on {:click [[:toggle-theme]]}
-                               :title (if dark? "Switch to light theme" "Switch to dark theme")}
-         (into [:svg {:aria-hidden "true" :width 16 :height 16 :viewBox "0 0 24 24" :fill "none"
-                      :stroke "currentColor" :stroke-width 2.2 :stroke-linecap "round" :stroke-linejoin "round"}]
-               (ui/icon-paths (if dark? :sun :moon)))
-         (if dark? "Light theme" "Dark theme")])
-      (status/backup-link s)]
+        [:a {:replicant/key k :href href :class (when (= k active) "active")} (t label)])]
      [:main {:class (remove nil? [(when (seq loading) "loading") (when (= page :calendar) "wide")])}
       (status/view s)
       (case page
         :day        (day/view s (first (urls route)) (:date route))
-        :activities (activities/view s (first (urls route)))
         :activity   (activity/view s (first (urls route)))
-        :load       (let [[l v] (urls route)] (load/view s l v))
         :calendar   (calendar/view s (urls route))
         :plan       (plan/view s (urls route))
-        :costs      (costs/view s (first (urls route))))]]))
+        :dashboard  (dashboard/view s)
+        :settings   (settings/view s (theme-choice)))]]))
 
 (defn render! []
   (r/render (js/document.getElementById "app") (view @state)))
@@ -319,6 +365,8 @@
   (add-watch state ::render (fn [_ _ _ _] (render!)))
   (.addEventListener js/window "hashchange" on-hash!)
   (apply-theme!)
+  (set! (.. js/document -documentElement -lang) @i18n/lang)
+  (load-lang!)
   (.addEventListener system-dark "change" #(do (apply-theme!) (render!)))
   (on-hash!)
   (fetch! status/backup-url)

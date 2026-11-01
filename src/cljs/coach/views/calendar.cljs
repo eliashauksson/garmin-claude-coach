@@ -3,6 +3,7 @@
   then Monday to Sunday with each day's health data, activities and planned
   sessions (dashed). A day's health block or date opens the day page."
   (:require [clojure.string :as str]
+            [coach.i18n :refer [t tk]]
             [coach.ui :as ui]
             [coach.views.status :as status]))
 
@@ -37,14 +38,14 @@
 
 ;; ---------------------------------------------------------------------------
 
-(def day-names ["Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun"])
+(defn- day-names [] (mapv ui/weekdays [1 2 3 4 5 6 0]))
 
 (defn- secs [a] (or (:moving_s a) (:duration_s a)))
 
 (defn- day-label [date]
   (let [d (ui/parse-date date)]
     (if (= 1 (.getDate d))
-      (str (.getDate d) " " (ui/months (.getMonth d)))
+      (ui/day-month d)
       (str (.getDate d)))))
 
 (defn- activity-item [{:keys [id sport name distance_m tss tss_method] :as a}]
@@ -61,10 +62,10 @@
 
 (def health-metrics
   "Shown in a day's health block, with the day page's icons and colours."
-  [[:readiness :bolt "--green" "Readiness" str]
-   [:sleep_score :moon "--purple" "Sleep score" str]
-   [:rhr :heart "--red" "Resting heart rate" #(str % " bpm")]
-   [:hrv_avg :pulse "--blue" "HRV" #(str (js/Math.round %) " ms")]])
+  [[:readiness :bolt "--green" (tk "Readiness") str]
+   [:sleep_score :moon "--purple" (tk "Sleep score") str]
+   [:rhr :heart "--red" (tk "Resting heart rate") #(str % " bpm")]
+   [:hrv_avg :pulse "--blue" (tk "HRV") #(str (js/Math.round %) " ms")]])
 
 (defn- mini-icon [icon color]
   (into [:svg {:aria-hidden "true" :width 11 :height 11 :viewBox "0 0 24 24" :fill "none"
@@ -78,9 +79,9 @@
                 [k icon color label (fmt v)])]
     (when (or (seq shown) (:steps w))
       [:a.cal-health {:replicant/key (str "h" date) :href (str "#/day/" date)
-                      :title (str/join "\n" (concat (for [[_ _ _ label v] shown] (str label ": " v))
-                                                    (when (:steps w) [(str "Steps: " (ui/thousands (:steps w)))])
-                                                    ["Open the day"]))}
+                      :title (str/join "\n" (concat (for [[_ _ _ label v] shown] (str (t label) ": " v))
+                                                    (when (:steps w) [(t "Steps: {0}" (ui/thousands (:steps w)))])
+                                                    [(t "Open the day")]))}
        (if (seq shown)
          (for [[k icon color _ v] shown]
            [:span {:replicant/key (name k)} (mini-icon icon color) v])
@@ -110,23 +111,22 @@
         l        (load-by-date end)
         d1 (ui/parse-date monday) d2 (ui/parse-date sunday)]
     [:div.cal-summary
-     [:div.cal-range (str (.getDate d1) " " (ui/months (.getMonth d1)) " – "
-                          (.getDate d2) " " (ui/months (.getMonth d2)))]
+     [:div.cal-range (str (ui/day-month d1) " – " (ui/day-month d2))]
      (if (seq acts)
        (list
         [:div.cal-total {:replicant/key "t"} (ui/hm (sum secs))]
         [:div.sub {:replicant/key "s"}
-         (str/join " · " (remove nil? [(str (count acts) (if (= 1 (count acts)) " activity" " activities"))
+         (str/join " · " (remove nil? [(if (= 1 (count acts)) (t "1 activity") (t "{0} activities" (count acts)))
                                        (let [km (/ (sum :distance_m) 1000)] (when (pos? km) (str (js/Math.round km) " km")))
-                                       (let [t (sum :tss)] (when (pos? t) (str (js/Math.round t) " TSS")))]))]
+                                       (let [tss (sum :tss)] (when (pos? tss) (str (js/Math.round tss) " TSS")))]))]
         [:div.cal-fams {:replicant/key "f"}
          (for [[f s] fams]
            [:span {:replicant/key (name (:id f))}
             [:span.dot {:style {:background (str "var(" (:color f) ")")}}]
-            (str (:label f) " " (ui/hm s))])])
-       [:div.sub (if future? "Nothing planned yet" "Rest week")])
+            (str (t (:label f)) " " (ui/hm s))])])
+       [:div.sub (if future? (t "Nothing planned yet") (t "Rest week"))])
      (when (and l (not future?))
-       [:div.cal-load (str "Fitness " (js/Math.round (:ctl l)) " · Form " (js/Math.round (:tsb l)))])]))
+       [:div.cal-load (t "Fitness {0} · Form {1}" (js/Math.round (:ctl l)) (js/Math.round (:tsb l)))])]))
 
 (defn- week-row [monday acts-by-date plan-by-date load-by-date well-by-date today]
   (let [days (mapv #(add-days monday %) (range 7))]
@@ -136,8 +136,8 @@
        [:div.cal-day {:replicant/key d
                       :class (remove nil? [(when (= d today) "today") (when (pos? (compare d today)) "future")])}
         (if (pos? (compare d today))
-          [:div.cal-date [:span.cal-dow (day-names i)] (day-label d)]
-          [:a.cal-date {:href (str "#/day/" d) :title "Open the day"} [:span.cal-dow (day-names i)] (day-label d)])
+          [:div.cal-date [:span.cal-dow ((day-names) i)] (day-label d)]
+          [:a.cal-date {:href (str "#/day/" d) :title (t "Open the day")} [:span.cal-dow ((day-names) i)] (day-label d)])
         (health-item d (well-by-date d))
         (map activity-item (acts-by-date d))
         (map planned-item (remove #(= "done" (:status %)) (plan-by-date d)))])]))
@@ -156,18 +156,17 @@
     [:div {:style {:display "contents"}}
      [:div.page-head
       [:div.title
-       [:div.sub (str (.getDate d1) " " (ui/months (.getMonth d1)) " " (.getFullYear d1) " – "
-                      (.getDate d2) " " (ui/months (.getMonth d2)) " " (.getFullYear d2))]
-       [:h1 "Calendar"]]
+       [:div.sub (str (ui/date-short from) " – " (ui/date-short to))]
+       [:h1 (t "Calendar")]]
       (status/auth-pill (:auth sync))
       (status/sync-button sync)
       [:div.seg
-       [:button {:on {:click [[:set-param :week (add-days anchor -28)]]}} "← Earlier"]
+       [:button {:on {:click [[:set-param :week (add-days anchor -28)]]}} (t "← Earlier")]
        [:button {:class (when (= anchor this-monday) "on")
-                 :on {:click [[:set-param :week nil]]}} "This week"]
-       [:button {:on {:click [[:set-param :week (add-days anchor 28)]]}} "Later →"]]]
-     (some (fn [u] (when-let [e (get errors u)] [:div.error (str "Could not load: " e)])) [acts-url load-url well-url])
+                 :on {:click [[:set-param :week nil]]}} (t "This week")]
+       [:button {:on {:click [[:set-param :week (add-days anchor 28)]]}} (t "Later →")]]]
+     (some (fn [u] (when-let [e (get errors u)] [:div.error (t "Could not load: {0}" e)])) [acts-url load-url well-url])
      [:div.card.cal
-      [:div.cal-head [:div "Week"] (for [d day-names] [:div {:replicant/key d} d])]
+      [:div.cal-head [:div (t "Week")] (for [d (day-names)] [:div {:replicant/key d} d])]
       (for [m mondays] (week-row m by-date plan-by load-by well-by today))]
-     [:div.sub "The small block at the top of a day is its health data (readiness, sleep, resting heart rate, HRV): click it, or the date, for the whole day. Planned sessions have a dashed outline; once done they're replaced by the recorded activity."]]))
+     [:div.sub (t "The small block at the top of a day is its health data (readiness, sleep, resting heart rate, HRV): click it, or the date, for the whole day. Planned sessions have a dashed outline; once done they're replaced by the recorded activity.")]]))

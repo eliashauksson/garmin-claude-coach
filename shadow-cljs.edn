@@ -1,4 +1,4 @@
-{:source-paths ["src/cljs"]
+{:source-paths ["src/cljs" "src/cljc"]
  :dependencies [[no.cjohansen/replicant "2026.07.1"]]
  :builds
  {:app {:target     :browser

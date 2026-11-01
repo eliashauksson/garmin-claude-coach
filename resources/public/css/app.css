@@ -51,7 +51,7 @@
   --chip-other-bg: #f2f3f6; --chip-other-fg: #4b5160; --fam-other: #8a90a0;
   /* API cost tasks: categorical slots 1-5 of the dataviz reference palette,
      validated on these surfaces (light #ffffff, dark #171a21) */
-  --task-1: #2a78d6; --task-2: #eb6834; --task-3: #1baf7a; --task-4: #eda100; --task-5: #e87ba4;
+  --task-1: #2a78d6; --task-2: #eb6834; --task-3: #1baf7a; --task-4: #eda100; --task-5: #e87ba4; --task-6: #008300;
 }
 /* Dark theme: set by the theme toggle, or from the system setting until one is chosen (index.html, coach.app) */
 :root[data-theme="dark"] {
@@ -96,7 +96,7 @@
   --chip-hike-bg: rgba(26,122,67,.18);  --chip-hike-fg: #4cd18a;
   --chip-ski-bg: rgba(163,52,111,.18);  --chip-ski-fg: #f08cc8;
   --chip-other-bg: rgba(75,81,96,.18);  --chip-other-fg: #a3a9b5; --fam-other: #8a909c;
-  --task-1: #3987e5; --task-2: #d95926; --task-3: #199e70; --task-4: #c98500; --task-5: #d55181;
+  --task-1: #3987e5; --task-2: #d95926; --task-3: #199e70; --task-4: #c98500; --task-5: #d55181; --task-6: #008300;
 }
 
 * { box-sizing: border-box; }
@@ -397,3 +397,57 @@ table.settings td:first-child { min-width: 260px; max-width: 380px; white-space:
 a.cal-date { text-decoration: none; }
 a.cal-date:hover { color: var(--text); text-decoration: underline; }
 .seg button[disabled] { opacity: .4; cursor: default; }
+table.settings td:nth-child(4) { white-space: normal; min-width: 190px; max-width: 240px; }
+table.settings td:first-child { max-width: 300px; }
+table.settings td:last-child { white-space: normal; min-width: 150px; }
+table.settings td:last-child .pills { flex-wrap: wrap; }
+table.settings td:first-child { min-width: 210px; max-width: 270px; }
+table.settings td:nth-child(4) { min-width: 165px; max-width: 200px; }
+table.settings td:last-child .pill { white-space: normal; }
+table.settings th { white-space: normal; vertical-align: bottom; }
+table.settings td { white-space: normal; }
+
+/* Language switch in the sidebar: EN · DE · FR */
+nav.side .lang-switch { display: flex; align-items: center; gap: 4px; margin-top: 6px; padding: 4px 14px; color: var(--text-3); }
+nav.side .lang-switch svg { margin-right: 6px; flex: none; }
+nav.side .lang-switch button { border: 0; background: none; font: inherit; font-size: 12px; font-weight: 700; color: var(--text-3);
+  padding: 4px 7px; border-radius: 8px; cursor: pointer; }
+nav.side .lang-switch button:hover { color: var(--text); background: var(--surface); }
+nav.side .lang-switch button.on { color: var(--text); background: var(--surface); box-shadow: var(--shadow-nav); }
+
+/* "Translating…" note above the page */
+.translating .spinner { display: inline-block; width: 11px; height: 11px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; }
+@media (prefers-reduced-motion: reduce) { .translating .spinner { animation-duration: 2.4s; } }
+/* the model settings are a short, fixed list: no inner scrolling */
+.table-wrap.settings-wrap { max-height: none; }
+
+/* --- Overhaul: dashboard, data tabs, settings --------------------------- */
+/* a whole card as a link */
+a.card-link { display: flex; min-width: 0; text-decoration: none; color: var(--text); border-radius: 22px; }
+a.card-link > .card { flex: 1; transition: box-shadow .15s; }
+a.card-link:hover > .card { box-shadow: var(--shadow-nav); }
+a.card-link:hover { color: var(--text); }
+a.card-link:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* dashboard */
+.dash-week { display: flex; flex-direction: column; gap: 6px; }
+.dash-week-row { display: flex; align-items: center; gap: 8px; }
+.dash-week-row.done { opacity: .6; }
+.dash-week-row.missed .sub { color: var(--red); }
+.dash-week-day { width: 32px; font-size: 12px; font-weight: 700; color: var(--text-2); }
+.dash-load { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+
+/* "← Back" on an activity's page */
+.link-back { border: 0; background: none; padding: 0; font: inherit; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.link-back:hover { color: var(--text); text-decoration: underline; }
+
+/* settings */
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.section-title { font-size: 20px; font-weight: 800; color: var(--text); margin: 0; }
+.choice { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice button { border: 0; font: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 12px;
+  background: var(--surface-2); color: var(--text-2); cursor: pointer; }
+.choice button:hover { color: var(--text); }
+.choice button.on { background: var(--ink); color: var(--on-ink); }
+a.btn-ink.inline { display: inline-block; text-decoration: none; }
+a.btn-ink.inline:hover { color: var(--on-ink); }

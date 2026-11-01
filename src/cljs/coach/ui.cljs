@@ -1,6 +1,7 @@
 (ns coach.ui
   "Formatting helpers and small shared components."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [coach.i18n :as i18n :refer [t tk]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Formatting
@@ -10,7 +11,7 @@
 (defn fixed [x digits] (when (num? x) (.toFixed x digits)))
 
 (defn thousands [x]
-  (when (num? x) (.toLocaleString (js/Math.round x) "en-US")))
+  (when (num? x) (.toLocaleString (js/Math.round x) (if (= "en" @i18n/lang) "en-US" (i18n/locale)))))
 
 (defn hms
   "Seconds -> h:mm:ss (or m:ss under an hour)."
@@ -37,20 +38,33 @@
 
 (defn kmh [mps] (when (num? mps) (fixed (* mps 3.6) 1)))
 
-(def months ["Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"])
-(def weekdays ["Sun" "Mon" "Tue" "Wed" "Thu" "Fri" "Sat"])
+(def month-names [(tk "Jan") (tk "Feb") (tk "Mar") (tk "Apr") (tk "May") (tk "Jun") (tk "Jul") (tk "Aug") (tk "Sep") (tk "Oct") (tk "Nov") (tk "Dec")])
+(def weekday-names [(tk "Sun") (tk "Mon") (tk "Tue") (tk "Wed") (tk "Thu") (tk "Fri") (tk "Sat")])
+(def long-month-names [(tk "January") (tk "February") (tk "March") (tk "April") (tk "May") (tk "June") (tk "July") (tk "August")
+                       (tk "September") (tk "October") (tk "November") (tk "December")])
+(def long-weekday-names [(tk "Sunday") (tk "Monday") (tk "Tuesday") (tk "Wednesday") (tk "Thursday") (tk "Friday") (tk "Saturday")])
+
+(defn months "Short month name, 0-11, in the current language." [i] (t (month-names i)))
+(defn weekdays "Short weekday name, 0 = Sunday, in the current language." [i] (t (weekday-names i)))
+(defn long-months [i] (t (long-month-names i)))
+(defn long-weekdays [i] (t (long-weekday-names i)))
+
+(defn day-month
+  "\"1 Nov\" / \"1. Nov\" / \"1 nov.\" for a Date (the pattern is translated)."
+  [^js d]
+  (t "{0} {1}" (.getDate d) (months (.getMonth d))))
 
 (defn parse-date [iso] (js/Date. (str (subs iso 0 10) "T12:00:00")))
 
 (defn date-long [iso]
   (when (string? iso)
     (let [d (parse-date iso)]
-      (str (weekdays (.getDay d)) " " (.getDate d) " " (months (.getMonth d)) " " (.getFullYear d)))))
+      (t "{0} {1} {2}" (weekdays (.getDay d)) (day-month d) (.getFullYear d)))))
 
 (defn date-short [iso]
   (when (string? iso)
     (let [d (parse-date iso)]
-      (str (.getDate d) " " (months (.getMonth d)) " " (.getFullYear d)))))
+      (str (day-month d) " " (.getFullYear d)))))
 
 (defn time-of [iso] (when (and (string? iso) (> (count iso) 15)) (subs iso 11 16)))
 
@@ -69,32 +83,37 @@
       (str/replace "\"" "&quot;")))
 
 (defn sport-label [s]
-  (when s (str/capitalize (str/replace s "_" " "))))
+  (when s (t (str/capitalize (str/replace s "_" " ")))))
 
 ;; Sport families: a fixed colour per family, assigned by entity, never by rank.
 (def families
-  [{:id :run   :label "Run"       :plural "runs"   :color "--fam-run"   :re #"running"}
-   {:id :bike  :label "Bike"      :plural "rides"  :color "--fam-bike"  :re #"cycling|biking|ride"}
-   {:id :swim  :label "Swim"      :plural "swims"  :color "--fam-swim"  :re #"swimming"}
-   {:id :hike  :label "Hike/walk" :plural "hikes"  :color "--fam-hike"  :re #"hiking|walking|mountaineering"}
-   {:id :ski   :label "Ski/snow"  :plural "ski days" :color "--fam-ski" :re #"ski|snowboard"}
-   {:id :other :label "Other"     :plural "other"  :color "--fam-other" :re #".*"}])
+  [{:id :run   :label (tk "Run")       :plural (tk "runs")     :color "--fam-run"   :re #"running"}
+   {:id :bike  :label (tk "Bike")      :plural (tk "rides")    :color "--fam-bike"  :re #"cycling|biking|ride"}
+   {:id :swim  :label (tk "Swim")      :plural (tk "swims")    :color "--fam-swim"  :re #"swimming"}
+   {:id :hike  :label (tk "Hike/walk") :plural (tk "hikes")    :color "--fam-hike"  :re #"hiking|walking|mountaineering"}
+   {:id :ski   :label (tk "Ski/snow")  :plural (tk "ski days") :color "--fam-ski"   :re #"ski|snowboard"}
+   {:id :other :label (tk "Other")     :plural (tk "other")    :color "--fam-other" :re #".*"}])
 
-(def singular {:run "run" :bike "ride" :swim "swim" :hike "hike" :ski "ski day" :other "other"})
+(def singular {:run (tk "run") :bike (tk "ride") :swim (tk "swim") :hike (tk "hike") :ski (tk "ski day") :other (tk "other")})
 
 (defn family [sport]
   (some #(when (re-find (:re %) (str sport)) %) families))
 
 ;; Session library names (training-principles.md: Running › Sessions; athlete.md: Overrides & specifics)
 ;; (same IDs as coach.plan-rules/sessions)
-(def session-names
-  {"REC" "Recovery run" "EASY" "Easy run" "EASY_ST" "Easy + strides" "HILL_SPRINT" "Easy + hill sprints"
-   "DOWNHILL" "Downhill conditioning" "LONG" "Long run" "B2B" "Back-to-back" "LONG_RP" "Long run, race pace"
-   "RACE_PACE" "Race pace" "TEMPO" "Tempo" "THR" "Threshold" "VO2" "VO2max" "HILL_REP" "Hill repeats"
-   "RACE_SIM" "Race simulation" "AET_TEST" "AeT drift test" "LT_TEST" "LT test"
-   "HIKE" "Hike" "RIDE" "Ride"
-   "GYM_LOWER" "Gym: lower body" "GYM_UPPER" "Gym: upper body" "GYM_MAINT" "Gym: maintenance"
-   "REST" "Rest"})
+(def session-names-en
+  {"REC" (tk "Recovery run") "EASY" (tk "Easy run") "EASY_ST" (tk "Easy + strides") "HILL_SPRINT" (tk "Easy + hill sprints")
+   "DOWNHILL" (tk "Downhill conditioning") "LONG" (tk "Long run") "B2B" (tk "Back-to-back") "LONG_RP" (tk "Long run, race pace")
+   "RACE_PACE" (tk "Race pace") "TEMPO" (tk "Tempo") "THR" (tk "Threshold") "VO2" (tk "VO2max") "HILL_REP" (tk "Hill repeats")
+   "RACE_SIM" (tk "Race simulation") "AET_TEST" (tk "AeT drift test") "LT_TEST" (tk "LT test")
+   "HIKE" (tk "Hike") "RIDE" (tk "Ride")
+   "GYM_LOWER" (tk "Gym: lower body") "GYM_UPPER" (tk "Gym: upper body") "GYM_MAINT" (tk "Gym: maintenance")
+   "REST" (tk "Rest")})
+
+(defn session-names
+  "A session ID's name in the current language (or `default`)."
+  ([id] (session-names id nil))
+  ([id default] (if-let [n (session-names-en id)] (t n) default)))
 
 ;; ---------------------------------------------------------------------------
 ;; Icons (inline SVG, 24x24 stroke icons from the mockup)
@@ -165,7 +184,7 @@
      [:button {:replicant/key v
                :class (when (= v current) "on")
                :on {:click [(conj action v)]}}
-      label])])
+      (t label)])])
 
 (defn legend
   "Legend as pills with a colour dot. items: [{:label :color css-var}]"

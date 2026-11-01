@@ -4,15 +4,17 @@
   recorded so far."
   (:require [clojure.string :as str]
             [coach.charts :as c]
+            [coach.i18n :refer [t tk]]
             [coach.ui :as ui]))
 
 (def url "/api/plan/season")
 
+;; Phase names are data (the season plan stores them in English); shown with t.
 (def phase-colors
-  {"Transition" "--fam-other" "Base" "--blue" "Specific" "--amber" "Taper" "--green" "Race week" "--red"})
+  {(tk "Transition") "--fam-other" (tk "Base") "--blue" (tk "Specific") "--amber" (tk "Taper") "--green"
+   (tk "Race week") "--red"})
 
-(defn- day-month [iso]
-  (let [d (ui/parse-date iso)] (str (.getDate d) " " (ui/months (.getMonth d)))))
+(defn- day-month [iso] (ui/day-month (ui/parse-date iso)))
 
 (defn- add-days [iso n]
   (let [d (ui/parse-date iso)] (.setDate d (+ (.getDate d) n)) (.slice (.toISOString d) 0 10)))
@@ -34,15 +36,15 @@
                   (let [i (.-dataIndex (aget ps 0))
                         {:keys [monday phase tss actual_tss cutback focus]} (nth weeks i)]
                     (c/tooltip-rows
-                     (str "Week " (inc i) " · " (day-month monday) " – " (day-month (add-days monday 6)))
-                     [{:value (str tss) :label "TSS planned" :color (c/css-var (phase-colors phase))}
-                      {:value (some-> actual_tss str) :label "TSS done" :color ink}
-                      {:value phase :label (str focus (when cutback " · cutback"))}])))]
+                     (t "Week {0} · {1} – {2}" (inc i) (day-month monday) (day-month (add-days monday 6)))
+                     [{:value (str tss) :label (t "TSS planned") :color (c/css-var (phase-colors phase))}
+                      {:value (some-> actual_tss str) :label (t "TSS done") :color ink}
+                      {:value (t phase) :label (str focus (when cutback (str " · " (t "cutback"))))}])))]
     (-> (c/base {:x-type "category" :y-min 0 :tooltip-fmt tip})
         (assoc-in [:xAxis :data] labels)
         (assoc-in [:grid :top] 26) ; room for the "This week" label
         (assoc :series
-               [(c/bars "Planned" "--blue"
+               [(c/bars (t "Planned") "--blue"
                         (vec (for [{:keys [phase tss cutback]} weeks]
                                {:value tss
                                 :itemStyle {:color (c/css-var (phase-colors phase)) :borderRadius 6
@@ -54,9 +56,9 @@
                                     {:silent true :symbol "none"
                                      :data [{:xAxis (labels now-idx)}]
                                      :lineStyle {:color text-3 :type "dashed" :width 1}
-                                     :label {:formatter "This week" :color text-3 :fontSize 11
+                                     :label {:formatter (t "This week") :color text-3 :fontSize 11
                                              :fontFamily c/font}}))
-                (c/line "Done" "--ink"
+                (c/line (t "Done") "--ink"
                         (vec (for [w weeks] (when (past? w) (or (:actual_tss w) 0))))
                         :showSymbol true :symbol "circle" :symbolSize 7 :z 3)]))))
 
@@ -66,24 +68,24 @@
          :let [f (first weeks) l (last weeks) tss (map :tss weeks)
                now? (some #(= current (:monday %)) weeks)]]
      [:div.season-phase {:replicant/key (str (:n f) phase) :class (when now? "now")}
-      [:div.stat-label [:span.dot {:style {:background (str "var(" (phase-colors phase) ")")}}] phase
-       (when now? [:span.muted " · now"])]
+      [:div.stat-label [:span.dot {:style {:background (str "var(" (phase-colors phase) ")")}}] (t phase)
+       (when now? [:span.muted (str " · " (t "now"))])]
       [:div.stat-value (str (apply min tss) (when (not= (apply min tss) (apply max tss)) (str "–" (apply max tss))))
        [:small "TSS"]]
-      [:div.sub (str (if (= f l) (str "Week " (:n f)) (str "Weeks " (:n f) "–" (:n l)))
+      [:div.sub (str (if (= f l) (t "Week {0}" (:n f)) (t "Weeks {0}–{1}" (:n f) (:n l)))
                      " · " (day-month (:monday f)) " – " (day-month (add-days (:monday l) 6)))]])])
 
 (defn- usage-line [{:keys [model usage]}]
   (when usage
-    [:div.sub (str/join " · " (remove nil? [(str "Model " model)
-                                            (when (:cost_chf usage) (str "cost ≈ CHF " (.toFixed (:cost_chf usage) 2)))]))]))
+    [:div.sub (str/join " · " (remove nil? [(t "Model {0}" model)
+                                            (when (:cost_chf usage) (t "cost ≈ CHF {0}" (.toFixed (:cost_chf usage) 2)))]))]))
 
 (defn- when-text [iso]
   (let [d (js/Date. iso)]
-    (str (.getDate d) " " (ui/months (.getMonth d)) " "
+    (str (ui/day-month d) " "
          (.padStart (str (.getHours d)) 2 "0") ":" (.padStart (str (.getMinutes d)) 2 "0"))))
 
-(def reason-label {"redraft" "replaced by a redraft" "delete" "deleted" "restore" "swapped out by a restore"})
+(def reason-label {"redraft" (tk "replaced by a redraft") "delete" (tk "deleted") "restore" (tk "swapped out by a restore")})
 
 (defn- confirm-box
   "A red confirm banner: title, explanation, then Yes / Cancel."
@@ -95,19 +97,19 @@
     [:div.sub text]
     [:div.plan-footer
      [:button.btn-ink {:on {:click (conj yes-actions [:set-ui :season nil])}} yes-label]
-     [:button.pill {:on {:click [[:set-ui :season nil]]}} "Cancel"]]]])
+     [:button.pill {:on {:click [[:set-ui :season nil]]}} (t "Cancel")]]]])
 
 (defn- backups-block [backups]
   (when (seq backups)
     [:details.athlete-backups
-     [:summary (str "Backups (" (count backups) ")")]
+     [:summary (t "Backups ({0})" (count backups))]
      (for [{:keys [id created_at archived_at archived_reason weeks peak_tss]} backups]
        [:div.plan-footer {:replicant/key id}
-        [:span (str "Drafted " (when-text created_at) " · " weeks " weeks"
-                    (when peak_tss (str " · peak " peak_tss " TSS"))
-                    " · " (reason-label archived_reason archived_reason) " " (when-text archived_at))]
-        [:button.pill {:on {:click [[:api "POST" (str url "/restore") {:id id}]]}} "Restore"]])
-     [:div.sub "Restoring keeps the current plan as a backup. The newest 3 backups are kept."]]))
+        [:span (str (t "Drafted {0}" (when-text created_at)) " · " (t "{0} weeks" weeks)
+                    (when peak_tss (str " · " (t "peak {0} TSS" peak_tss)))
+                    " · " (t (reason-label archived_reason archived_reason)) " " (when-text archived_at))]
+        [:button.pill {:on {:click [[:api "POST" (str url "/restore") {:id id}]]}} (t "Restore")]])
+     [:div.sub (t "Restoring keeps the current plan as a backup. The newest 3 backups are kept.")]]))
 
 (defn card [{:keys [status error plan backups current_monday days_to_race delivery]} ui-state]
   (let [running? (= "running" status)
@@ -116,41 +118,41 @@
         this-wk  (some #(when (= current_monday (:monday %)) %) weeks)
         peak     (some->> (seq (remove #(= "Race week" (:phase %)) weeks)) (apply max-key :tss))]
     (ui/card {}
-             (ui/label-row {:icon :mountain :accent "--blue" :tint "--tint-blue" :soft? true :label "Season plan"})
+             (ui/label-row {:icon :mountain :accent "--blue" :tint "--tint-blue" :soft? true :label (t "Season plan")})
              (when (seq weeks) [:div summary])
              (when (seq weeks)
                (ui/pills
-                (ui/pill (str (count weeks) " weeks · " days_to_race " days to race day"))
+                (ui/pill (t "{0} weeks · {1} days to race day" (count weeks) days_to_race))
                 (when this-wk (ui/pill (phase-colors (:phase this-wk))
-                                       (str "This week: " (:tss this-wk) " TSS target"
-                                            (when (:actual_tss this-wk) (str " · " (:actual_tss this-wk) " done")))))
-                (when peak (ui/pill (str "Peak " (:tss peak) " TSS · week of " (day-month (:monday peak)))))))
-             (when (seq weeks) (ui/legend (for [p (distinct (map :phase weeks))] {:label p :color (phase-colors p)})))
+                                       (str (t "This week: {0} TSS target" (:tss this-wk))
+                                            (when (:actual_tss this-wk) (str " · " (t "{0} done" (:actual_tss this-wk)))))))
+                (when peak (ui/pill (t "Peak {0} TSS · week of {1}" (:tss peak) (day-month (:monday peak)))))))
+             (when (seq weeks) (ui/legend (for [p (distinct (map :phase weeks))] {:label (t p) :color (phase-colors p)})))
              (when (seq weeks) (c/echart {:key "season" :class "h240" :option-fn #(chart-option weeks current_monday)}))
              (when (seq weeks) (phase-summary weeks current_monday))
              (cond
                running?          [:div.sub (if (= "batch" delivery)
-                                             "Waiting for Claude in the half-price batch. Usually within an hour (at most 24 h); you can close the page meanwhile."
-                                             "The coach is drafting the season plan… this usually takes a minute or two.")]
-               (= "failed" status) [:div.error (str "Drafting failed: " error)]
-               (empty? weeks)    [:div.empty "No season plan yet. Create one first: the coach lays out every week to race day, with its phase and target TSS, from the training principles and athlete.md. Then it plans the next two weeks from your training so far, and adds a week every Monday."]
-               :else             [:div.sub "The coach keeps the next two weeks planned and adds a new week every Monday, from your training so far. You review each week before it enters the plan."])
+                                             (t "Waiting for Claude in the half-price batch. Usually within an hour (at most 24 h); you can close the page meanwhile.")
+                                             (t "The coach is drafting the season plan… this usually takes a minute or two."))]
+               (= "failed" status) [:div.error (t "Drafting failed: {0}" error)]
+               (empty? weeks)    [:div.empty (t "No season plan yet. Create one first: the coach lays out every week to race day, with its phase and target TSS, from the training principles and athlete.md. Then it plans the next two weeks from your training so far, and adds a week every Monday.")]
+               :else             [:div.sub (t "The coach keeps the next two weeks planned and adds a new week every Monday, from your training so far. You review each week before it enters the plan.")])
              (case confirm
-               :redraft (confirm-box "Redraft the season plan?"
-                                     "Claude drafts a new plan from your training so far (a paid call, about a minute or two). The current plan is kept as a backup, so you can restore it."
-                                     "Yes, redraft" [[:api "POST" url nil]])
-               :delete  (confirm-box "Delete the season plan?"
-                                     "All upcoming planned sessions that aren't done yet, and open week proposals, are removed too. The coach stops planning until there is a plan again. The plan is kept as a backup: restoring it brings it back, and the coach then plans the next two weeks again."
-                                     "Yes, delete" [[:api "DELETE" url nil]])
+               :redraft (confirm-box (t "Redraft the season plan?")
+                                     (t "Claude drafts a new plan from your training so far (a paid call, about a minute or two). The current plan is kept as a backup, so you can restore it.")
+                                     (t "Yes, redraft") [[:api "POST" url nil]])
+               :delete  (confirm-box (t "Delete the season plan?")
+                                     (t "All upcoming planned sessions that aren't done yet, and open week proposals, are removed too. The coach stops planning until there is a plan again. The plan is kept as a backup: restoring it brings it back, and the coach then plans the next two weeks again.")
+                                     (t "Yes, delete") [[:api "DELETE" url nil]])
                nil)
              (when-not confirm
                [:div.plan-footer
                 (if (seq weeks)
                   [:button.btn-ink {:disabled running? :on {:click [[:set-in-ui :season :confirm :redraft]]}}
-                   (if running? "Drafting…" "Redraft season plan")]
+                   (if running? (t "Drafting…") (t "Redraft season plan"))]
                   [:button.btn-ink {:disabled running? :on {:click [[:api "POST" url nil]]}}
-                   (if running? "Drafting…" "Create season plan")])
+                   (if running? (t "Drafting…") (t "Create season plan"))])
                 (when (seq weeks)
-                  [:button.pill {:disabled running? :on {:click [[:set-in-ui :season :confirm :delete]]}} "Delete"])
+                  [:button.pill {:disabled running? :on {:click [[:set-in-ui :season :confirm :delete]]}} (t "Delete")])
                 (when (seq weeks) (usage-line plan))])
              (backups-block backups))))

@@ -1,12 +1,13 @@
 (ns coach.views.load
   (:require [coach.charts :as c]
+            [coach.i18n :refer [t tk]]
             [coach.ui :as ui]))
 
-(def ranges [["90" "90 days"] ["180" "180 days"] ["365" "1 year"] ["730" "2 years"] ["all" "All"]])
+(def ranges [["90" (tk "90 days")] ["180" (tk "180 days")] ["365" (tk "1 year")] ["730" (tk "2 years")] ["all" (tk "All")]])
 
 (def volume-metrics
-  {"hours" {:label "Hours" :key :duration_s :scale (/ 1 3600) :fmt #(ui/fixed % 1)}
-   "km"    {:label "Distance" :key :distance_m :scale (/ 1 1000) :fmt #(str (js/Math.round %))}
+  {"hours" {:label (tk "Hours") :key :duration_s :scale (/ 1 3600) :fmt #(ui/fixed % 1)}
+   "km"    {:label (tk "Distance") :key :distance_m :scale (/ 1 1000) :fmt #(str (js/Math.round %))}
    "tss"   {:label "TSS" :key :tss :scale 1 :fmt #(str (js/Math.round %))}})
 
 (defn- weekly-by-family
@@ -21,12 +22,21 @@
   (fn [params]
     (let [r (nth rows (.-dataIndex (first params)) nil)]
       (c/tooltip-rows (ui/date-long (:date r))
-                      [{:label "fitness (CTL)" :value (:ctl r) :color (c/css-var "--blue")}
-                       {:label "fatigue (ATL)" :value (:atl r) :color (c/css-var "--red")}
-                       {:label "form (TSB)" :value (:tsb r)}
-                       {:label "TSS that day" :value (:tss r)}]))))
+                      [{:label (t "fitness (CTL)") :value (:ctl r) :color (c/css-var "--blue")}
+                       {:label (t "fatigue (ATL)") :value (:atl r) :color (c/css-var "--red")}
+                       {:label (t "form (TSB)") :value (:tsb r)}
+                       {:label (t "TSS that day") :value (:tss r)}]))))
 
-(defn view [{:keys [data errors route] ui-state :ui} load-url volume-url]
+(defn urls
+  "Load and volume for the range chosen in the route (?range=, default 180 days)."
+  [route]
+  (let [r    (get-in route [:params :range] "180")
+        from (if (= r "all") "2021-03-26" (ui/days-ago (js/parseInt r)))]
+    [(str "/api/load?from=" from) (str "/api/volume?from=" from)]))
+
+(defn section
+  "The training load, as a section of the Dashboard."
+  [{:keys [data errors route] ui-state :ui} [load-url volume-url]]
   (let [pmc    (get data load-url)
         vol    (get data volume-url)
         range  (get-in route [:params :range] "180")
@@ -37,40 +47,40 @@
         fams   (filter (fn [f] (some #(get % (:id f)) (vals weeks))) ui/families)
         any?   (some #(pos? (:tss %)) pmc)]
     [:div {:style {:display "contents"}}
-     [:div.page-head
-      [:h1.title "Training load"]
+     [:div.section-head {:replicant/key "load-head"}
+      [:h2.section-title (t "Training load")]
       (ui/seg range ranges [:set-param :range])]
-     (some (fn [u] (when-let [e (get errors u)] [:div.error (str "Could not load: " e)])) [load-url volume-url])
+     (some (fn [u] (when-let [e (get errors u)] [:div.error (t "Could not load: {0}" e)])) [load-url volume-url])
      (when (and pmc (not any?))
-       (ui/card {} [:div.empty "No training data yet — run Sync."]))
+       (ui/card {} [:div.empty (t "No training data yet — run Sync.")]))
      (when (and pmc any?)
        (list
         [:div.row {:replicant/key "kpi"}
-         (ui/tile {:label "Fitness · CTL" :tint "blue" :size "md" :value (:ctl latest) :sub "42-day load"})
-         (ui/tile {:label "Fatigue · ATL" :tint "red" :size "md" :value (:atl latest) :sub "7-day load"})
-         (ui/tile {:label "Form · TSB" :tint "green" :size "md" :value (:tsb latest) :sub "fitness − fatigue"})
-         (ui/tile {:label "Ramp rate" :tint "amber" :size "md" :value (:ramp latest) :sub "CTL change / 7 days"})]
+         (ui/tile {:label (t "Fitness · CTL") :tint "blue" :size "md" :value (:ctl latest) :sub (t "42-day load")})
+         (ui/tile {:label (t "Fatigue · ATL") :tint "red" :size "md" :value (:atl latest) :sub (t "7-day load")})
+         (ui/tile {:label (t "Form · TSB") :tint "green" :size "md" :value (:tsb latest) :sub (t "fitness − fatigue")})
+         (ui/tile {:label (t "Ramp rate") :tint "amber" :size "md" :value (:ramp latest) :sub (t "CTL change / 7 days")})]
         [:div {:replicant/key "pmc"}
          (ui/chart-card
-          {:title "Fitness and fatigue"
-           :legend-items [{:label "Fitness (CTL)" :color "--blue"} {:label "Fatigue (ATL)" :color "--red"}]
+          {:title (t "Fitness and fatigue")
+           :legend-items [{:label (t "Fitness (CTL)") :color "--blue"} {:label (t "Fatigue (ATL)") :color "--red"}]
            :chart (c/echart
                    {:key "pmc" :class "h280" :group "load"
                     :option-fn (fn []
                                  (merge (c/base {:y-min 0 :tooltip-fmt (pmc-tooltip pmc)})
-                                        {:series [(-> (c/line "Fitness (CTL)" "--blue" (mapv (juxt :date :ctl) pmc)
+                                        {:series [(-> (c/line (t "Fitness (CTL)") "--blue" (mapv (juxt :date :ctl) pmc)
                                                               :lineStyle {:width 3})
                                                       (c/area-wash 0.18))
-                                                  (c/line "Fatigue (ATL)" "--red" (mapv (juxt :date :atl) pmc)
+                                                  (c/line (t "Fatigue (ATL)") "--red" (mapv (juxt :date :atl) pmc)
                                                           :lineStyle {:width 2.5})]}))})})]
         [:div.row {:replicant/key "r2"}
          (ui/chart-card
-          {:title "Form · TSB" :tint "green" :flex "1 1 420px"
+          {:title (t "Form · TSB") :tint "green" :flex "1 1 420px"
            :chart (c/echart
                    {:key "tsb" :class "h150" :group "load"
                     :option-fn (fn []
                                  (merge (c/base {:tooltip-fmt (pmc-tooltip pmc)})
-                                        {:series [(-> (c/line "Form (TSB)" "--green-ink" (mapv (juxt :date :tsb) pmc)
+                                        {:series [(-> (c/line (t "Form (TSB)") "--green-ink" (mapv (juxt :date :tsb) pmc)
                                                               :lineStyle {:width 3})
                                                       (assoc :markLine {:silent true :symbol "none" :label {:show false}
                                                                         :lineStyle {:color (c/css-var "--green-ink") :opacity 0.5
@@ -80,9 +90,9 @@
                                                                         :itemStyle {:color (c/css-var "--pill-on-tint")}
                                                                         :data [[{:yAxis "min"} {:yAxis 0}]]}))]}))})
            :footer [:div.sub {:style {:color "var(--green-text)"}}
-                    "Above 0: fresh. −10 to −30: building fitness. Below −30: high strain."]})
+                    (t "Above 0: fresh. −10 to −30: building fitness. Below −30: high strain.")]})
          (ui/chart-card
-          {:title "Daily stress · TSS" :tint "amber" :flex "1 1 420px"
+          {:title (t "Daily stress · TSS") :tint "amber" :flex "1 1 420px"
            :chart (c/echart
                    {:key "tss-bars" :class "h150" :group "load"
                     :option-fn (fn []
@@ -92,9 +102,9 @@
                                                           :itemStyle {:color (c/css-var "--amber") :borderRadius 5})]}))})})]
         [:div {:replicant/key "vol"}
          (ui/chart-card
-          {:title "Weekly volume"
+          {:title (t "Weekly volume")
            :controls (ui/seg vm-key (for [[k v] volume-metrics] [k (:label v)]) [:set-ui :volume-metric] {:soft? true})
-           :legend-items (for [f fams] {:label (:label f) :color (:color f)})
+           :legend-items (for [f fams] {:label (t (:label f)) :color (:color f)})
            :chart (c/echart
                    {:key "volume" :class "h240"
                     :option-fn
@@ -104,11 +114,11 @@
                                       (fn [params]
                                         (let [wk (first (js->clj (.-value (first params))))
                                               row (get weeks wk)]
-                                          (c/tooltip-rows (str "Week of " (ui/date-short wk))
+                                          (c/tooltip-rows (t "Week of {0}" (ui/date-short wk))
                                                           (for [f (reverse fams) :let [v (get row (:id f))] :when (and v (pos? v))]
-                                                            {:label (:label f) :value ((:fmt vm) v) :color (c/css-var (:color f))}))))})
+                                                            {:label (t (:label f)) :value ((:fmt vm) v) :color (c/css-var (:color f))}))))})
                              {:series (for [f fams]
-                                        (c/bars (:label f) (:color f)
+                                        (c/bars (t (:label f)) (:color f)
                                                 (vec (for [[wk m] weeks] [wk (get m (:id f))]))
                                                 :stack "vol" :barMaxWidth 28
                                                 :itemStyle {:color (c/css-var (:color f)) :borderRadius 6
