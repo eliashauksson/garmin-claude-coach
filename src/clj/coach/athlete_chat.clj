@@ -33,7 +33,8 @@ Output fields:
   (copied exactly from the current file and unique in it) with `new_text`. To write the whole
   file (new file or full rewrite) use a single edit with `old_text` \"\".
 - `summary`: when you propose edits, the overview of the whole athlete file as it will be after
-  the edits (rules below); otherwise leave every field empty (\"\" and []).
+  the edits (rules below); when you are asked for the overview, the overview of the file as it
+  is; otherwise leave every field empty (\"\" and []).
 
 The overview is a small card on the Plan page, read at a glance. Keep only what matters most,
 in short fragments, never sentences:
@@ -131,7 +132,9 @@ in short fragments, never sentences:
      :usage    usage}))
 
 (def summary-request
-  "Write the overview of the current athlete.md (rules above) in `summary`. `reply` can be
+  "Write the overview of the current athlete.md (rules above) in `summary`, filling in every
+field the file gives (race, date, goal, athlete, stats, settings, focus). You are asked for the
+overview, so `summary` must not be left empty even though nothing is edited: `reply` can be
 empty and `edits` must be [].")
 
 

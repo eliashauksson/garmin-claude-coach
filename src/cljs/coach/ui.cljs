@@ -87,13 +87,18 @@
 
 (defn parse-date [iso] (js/Date. (str (subs iso 0 10) "T12:00:00")))
 
+(defn iso-date?
+  "A string that starts with a YYYY-MM-DD date (Claude's summaries can leave a date empty)."
+  [iso]
+  (boolean (and (string? iso) (re-find #"^\d{4}-\d{2}-\d{2}" iso))))
+
 (defn date-long [iso]
-  (when (string? iso)
+  (when (iso-date? iso)
     (let [d (parse-date iso)]
       (t "{0} {1} {2}" (weekdays (.getDay d)) (day-month d) (.getFullYear d)))))
 
 (defn date-short [iso]
-  (when (string? iso)
+  (when (iso-date? iso)
     (let [d (parse-date iso)]
       (str (day-month d) " " (.getFullYear d)))))
 
