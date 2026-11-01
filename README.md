@@ -1,73 +1,103 @@
 # garmin-claude-coach
 
-A personal training dashboard that runs locally on my own Garmin data. It has four pages: the **Dashboard** (the start page, described in `coach-dashboard-spec.md`: this morning's readiness and vitals, the goal race against Garmin's race predictions, recovery over the last 30 days, training over the last 28 days and 26 weeks, the training load with TrainingPeaks-style metrics, and VO₂ max and endurance score over 6 months; it comes from `/api/overview`, worked out in `coach.overview`), the **Calendar**, the **Plan** and **Settings** (language, appearance, backup, Garmin login, and Claude's models and API costs). Each activity still has its own page, opened from the dashboard, the calendar or a day. Each day in the calendar shows a small health block (readiness, sleep, resting heart rate, HRV); clicking it, or the date, opens the day page with all of that day's health data, including heart rate, stress, body battery and steps through the day. Garmin serves that intraday detail only for about the last 4 months, so every sync saves each day in that window that isn't stored yet (and refreshes the last week); saved days are kept for good. Days older than what was ever saved show the daily values only. The Plan page proposes training weeks with Claude and suggests adjustments when recent training, feedback or wellness call for it. The dashboard speaks English, German (Swiss Standard German) and French (as written in French-speaking Switzerland); switch with EN · DE · FR in the sidebar. The language is a server setting, so the coach's signals and warnings follow it too. Texts Claude writes (plans, sessions, summaries) are translated once into the other languages when they come back (task "Translations", Claude Sonnet 5.5 at low effort) and stored, so switching shows them right away; at dashboard start anything missing is filled in. On the API costs page the Translations task has a choice: **All languages** (every result in every language at once; switching is instant) or **Selected language only** (cheaper; switching to another language fills in its translations, which takes about a minute). A result is stored as written in the language that was selected when Claude wrote it, so it's never sent back for that language. Garmin only gives today's training status, race predictions and endurance score, so each sync stores that day's (`make sync` or `clojure -M -m coach.sync overview`); the 6-month prediction trend fills in as days are stored. The goal time and race legs come from the athlete summary Claude writes. The data comes from a local [garmin_mcp](https://github.com/Taxuspt/garmin_mcp) server and is only ever **read**: nothing is written back to Garmin.
+A personal training dashboard that runs locally on my own Garmin data, with Claude as the coach.
+Garmin data comes from a local [garmin_mcp](https://github.com/Taxuspt/garmin_mcp) server and is
+only ever **read**: nothing is written back to Garmin.
 
-The planner reads two documents: `training-principles.md`, the general method for building a running plan, and the athlete document: the athlete, goal race and season outline. Both are referred to by section heading. You add and edit the athlete document on the Plan page, with Claude. On the same page Claude drafts the season plan to race day; the coach then keeps the next two weeks planned.
+## Pages
+- **Dashboard** (start page): this morning's readiness and vitals, the goal race against Garmin's
+  race predictions, recovery over 30 days, training over 28 days and 26 weeks, the training load
+  (CTL/ATL/TSB), and VO₂ max and endurance score. See `coach-dashboard-spec.md`.
+- **Calendar**: activities and planned sessions per week, with a small health block per day. It
+  opens the **day page**: that day's health data, including heart rate, stress, Body Battery and
+  steps through the day.
+- **Plan**: the athlete document, the season plan to race day, and week plans drafted by Claude,
+  with adjustments when training, feedback or wellness call for it.
+- **Settings**: language, appearance, backup and Garmin login (**General**), and Claude's models
+  and costs (**Claude & API costs**).
 
-The **API costs** page lists every Claude request with its tokens, model, effort and cost: in total, per day, per task (week plans, season plans, adjustments, athlete chat and summary) and per model. Costs are the token counts the API reports times each model's list price. A request that fell back to another model is priced per model. At the top of the page you choose the model (Claude Fable 5.1, Opus 5.5, Sonnet 5.5 or Haiku 5.5) and effort (low to max) for each task. Next to each choice you see an estimated cost per request and what each model and effort has cost so far. For season plans, week plans and adjustments you also choose the delivery. **Batch when automatic** (the default) sends requests nobody is waiting for, like the week proposals and adjustments after a sync, through Anthropic's half-price Message Batches API; your own clicks stay instant. **Always batch** and **Always instant** do what they say. Batch answers usually come within an hour (at most 24 hours); the dashboard collects them every minute, also after a restart. Athlete chat and the summary are always instant.
+Each activity has its own page, opened from the dashboard, the calendar or a day.
 
-**Personal data stays local.** Only the general training principles are in git. The athlete document (`data/athlete.md`), its backups, the season plans, planned sessions and all Garmin data live in `data/`, which git ignores. Personal values the rule checks need (AeT and LT heart rates, readiness thresholds, hard-session and progression limits, long-run cap, race date) are read from the athlete document, never hard-coded.
+## How it works
+
+**Data.** Every sync stores activities, daily health and per-second activity data in
+`data/coach.db` (SQLite). Garmin keeps intraday detail only about 4 months, so each sync saves
+every day in that window not stored yet; saved days are kept for good. Training status, race
+predictions and endurance score are only available for today, so each sync stores that day's, and
+their trends fill in over time.
+
+**Planning.** The planner reads `training-principles.md` (the general method) and the athlete
+document (the athlete, goal race and season outline, edited with Claude on the Plan page). Claude
+drafts the season plan to race day; the coach then keeps the next two weeks planned. Rule checks
+in code guard every plan.
+
+**Personal data stays local.** Only the general principles are in git. The athlete document, plans
+and all Garmin data live in `data/`, which git ignores. Personal values (heart-rate thresholds,
+limits, race date and goal time) are read from the athlete document, never hard-coded.
+
+**Languages.** English, German (Swiss Standard German) and French (as written in Switzerland). The
+language is a server setting, so the coach's signals and warnings follow it. Texts Claude writes are
+translated once when they come back and stored, so switching is instant. To save cost, the
+Translations task can be set to translate into the selected language only; switching then takes
+about a minute.
+
+**Claude costs.** Settings › Claude & API costs lists every request with its tokens and cost
+(at list prices), per day, task and model. Per task you choose the model, the effort and, for plans
+and adjustments, the delivery:
+- **Batch when automatic** (default): requests nobody waits for, like proposals after a sync, go
+  through the half-price Batches API (answers usually within an hour); your own clicks stay instant.
+- **Always batch** / **Always instant**.
 
 ## Requirements
 - Clojure CLI and Java 21
 - Node 18 or newer, for the ClojureScript build
 - `uv`/`uvx`, which runs the Garmin MCP server
 
-`npm install` also copies the self-hosted Plus Jakarta Sans font and Leaflet's CSS into `resources/public/`. The page makes no outside requests except for OpenStreetMap map tiles.
+The page makes no outside requests except for OpenStreetMap map tiles (`npm install` copies the
+font and Leaflet's CSS into `resources/public/`).
 
 ## Setup
 ```sh
-clojure -M -m coach.auth login        # Garmin login (email, password, MFA); starts the expiry countdown
+clojure -M -m coach.auth login        # Garmin login (email, password, MFA)
 npm install
 npm run release                       # builds resources/public/js/main.js
-clojure -M -m coach.sync backfill     # one time: full history to 2021 (about 1 h)
-clojure -M -m coach.sync streams      # one time: per-second data for every activity (about 1 h)
+clojure -M -m coach.sync backfill     # one time: full history (about 1 h)
+clojure -M -m coach.sync streams      # one time: per-second activity data (about 1 h)
 clojure -M -m coach.sync vo2max
 ```
 
 ## Run
-```sh
-make run                              # http://127.0.0.1:8080/, syncs on start and every 2 h (06-22 h)
-make offline                          # port 8090, no syncing
-```
-`make start` is the same as `make run`. For frontend development, run `make watch` and reload the page.
-
-| Make target | Runs |
-|---|---|
-| `make run` / `make start` | `clojure -M -m coach.api` |
-| `make offline` | `clojure -M -m coach.api 8090 --no-sync` |
-| `make watch` | `npm run watch` |
-| `make build` | `npm run release` |
-| `make sync` | `clojure -M -m coach.sync sync` |
-| `make status` | `clojure -M -m coach.sync status` |
-| `make test` | `clojure -M:test` |
-| `make backup` | `clojure -M -m coach.backup create` |
-| `make backups` | `clojure -M -m coach.backup list` |
-| `make restore FILE=…` | `clojure -M -m coach.backup restore FILE` |
-
-## Other commands
 | Command | What it does |
 |---|---|
-| `clojure -M -m coach.sync sync` | Incremental sync, the same as the dashboard's Sync button |
-| `clojure -M -m coach.sync intraday [days]` | Fetches intraday HR, stress, body battery and steps for the last N days (default 7). A normal sync does this too. |
-| `clojure -M -m coach.sync status` | Shows row counts and sync progress |
-| `clojure -M -m coach.sync thresholds` | Fetches LTHR, threshold pace, FTP and HR zones from Garmin |
-| `clojure -M -m coach.sync metrics` | Recomputes TSS and the other metrics for every activity |
-| `clojure -M -m coach.auth` | Shows the Garmin login countdown |
-| `clojure -M:test` | Runs the tests |
+| `make run` (or `make start`) | Dashboard on http://127.0.0.1:8080/; syncs on start and every 2 h (06–22 h) |
+| `make offline` | Dashboard on port 8090, no syncing |
+| `make watch` | Rebuilds the frontend on every change (reload the page) |
+| `make build` | Release build of the frontend |
+| `make sync` | Incremental sync, like the Sync now button |
+| `make status` | Row counts and sync progress |
+| `make test` | Runs the tests |
+| `make backup` / `make backups` | Makes a backup / lists them |
+| `make restore FILE=…` | Restores a backup (dashboard stopped) |
 
-All data lives in `data/coach.db` (SQLite). That folder is not tracked by git.
+Single sync steps: `clojure -M -m coach.sync <step>`, where the step is `intraday [days]`,
+`thresholds` (LTHR, threshold pace, FTP, HR zones), `overview` (training status, predictions,
+endurance, sleep need) or `metrics` (recomputes TSS and the other metrics).
+`clojure -M -m coach.auth` shows the Garmin login countdown.
 
 ## When something goes wrong
 A banner above every page says what failed and what to do:
-- **Garmin login expired.** Run `clojure -M -m coach.auth login` in a terminal, then press Sync now. The dashboard doesn't need a restart.
-- **Rate limit, network or a Garmin error.** These are usually temporary. The next automatic sync (within 2 h) tries again. If a Garmin error keeps coming back, Garmin may have changed its API: check `data/mcp-server.log`.
-- **Claude API credits have run out.** Plans, adjustments and the athlete chat stop, and the automatic planning after each sync pauses. Add funds on the [billing page of the Claude Console](https://platform.claude.com/settings/billing), then press **I've added funds, check again**. That sends one tiny request on the cheapest model to confirm.
-- **The coach server isn't running.** Start it with `make run`. The page reconnects by itself.
+- **Garmin login expired.** Run `clojure -M -m coach.auth login`, then press Sync now. No restart needed.
+- **Rate limit, network or Garmin error.** Usually temporary; the next automatic sync tries again.
+  If a Garmin error keeps coming back, check `data/mcp-server.log`.
+- **Claude credits ran out.** Planning pauses. Add funds on the
+  [Claude Console billing page](https://platform.claude.com/settings/billing), then press
+  **I've added funds, check again**.
+- **The server isn't running.** Start it with `make run`; the page reconnects by itself.
 
-A failed sync never damages stored data. It stops at the first login, rate-limit or network error, and a day that comes back empty never replaces a stored day that has data. The last result is kept in the database, so the banner is still there after a restart.
+A failed sync never damages stored data: a day that comes back empty never replaces a stored day.
 
 ## Backups
-Before the first sync of each day, the dashboard writes a backup to `data/backups/`. Each backup is a zip holding a consistent snapshot of the database (taken safely while the dashboard runs), the athlete document, its backups and its summary. The newest 14 are kept. **Download backup** in the sidebar makes a fresh one and downloads it, so you can keep a copy outside `data/`.
-
-To restore, stop the dashboard and run `make restore FILE=data/backups/coach-backup-….zip`. The current state is backed up first, so a restore can be undone.
+Before the first sync of each day, the dashboard zips the database and the athlete document into
+`data/backups/` and keeps the newest 14. **Download backup** in Settings makes a fresh one to keep
+outside `data/`. To restore, stop the dashboard and run
+`make restore FILE=data/backups/coach-backup-….zip`; the current state is backed up first.
