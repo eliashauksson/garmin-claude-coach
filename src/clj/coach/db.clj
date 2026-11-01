@@ -205,7 +205,14 @@
       status       TEXT NOT NULL,
       submitted_at TEXT NOT NULL,
       ended_at     TEXT,
-      error        TEXT)"])
+      error        TEXT)"
+   ;; Claude's texts in every dashboard language (coach.translate)
+   "CREATE TABLE IF NOT EXISTS translations (
+      hash       TEXT NOT NULL,
+      lang       TEXT NOT NULL,
+      text       TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (hash, lang))"])
 
 (def ^:private data-fixes
   ;; Garmin reports -1/-2 stress for "not enough data"; rows stored before

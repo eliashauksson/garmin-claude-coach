@@ -8,8 +8,10 @@
             [coach.ai-settings :as ai]
             [coach.analysis :as analysis]
             [coach.athlete :as athlete]
+            [coach.i18n :as i18n]
             [coach.plan :as plan]
             [coach.planner :as planner]
+            [coach.translate :as translate]
             [coach.season :as season]
             [malli.core :as m]
             [malli.error :as me])
@@ -38,7 +40,7 @@
   "The goal race date from the athlete information, or an error saying it's missing."
   []
   (or (:date (athlete/race))
-      (throw (ex-info "The athlete information has no goal race date yet. Add it on the Plan page first."
+      (throw (ex-info (i18n/t "The athlete information has no goal race date yet. Add it on the Plan page first.")
                       {:type :no-race-date}))))
 
 (defn context [ds today race-date]
@@ -116,9 +118,9 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
   "Schema check, and one entry per week to plan, in order."
   [response ctx]
   (when-let [err (m/explain Response response)]
-    (throw (ex-info (str "Invalid season plan from the model: " (pr-str (me/humanize err))) {:response response})))
+    (throw (ex-info (i18n/t "Invalid season plan from the model: {0}" (pr-str (me/humanize err))) {:response response})))
   (when (not= (:weeks_to_plan ctx) (mapv :monday (:weeks response)))
-    (throw (ex-info "The model's season plan does not cover every week to race day exactly once."
+    (throw (ex-info (i18n/t "The model's season plan does not cover every week to race day exactly once.")
                     {:expected (:weeks_to_plan ctx) :got (mapv :monday (:weeks response))})))
   response)
 
@@ -127,6 +129,7 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
 (defn- finish! [ds id ctx response usage]
   (plan/finish-season-plan! ds id {:context ctx :response (validate response ctx)
                                    :warnings [] :usage usage})
+  (planner/translate-soon! (translate/response-texts response))
   (planner/plan-ahead! ds))
 
 (planner/register-batch-handler!

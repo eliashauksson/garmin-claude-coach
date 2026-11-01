@@ -4,6 +4,7 @@
   Plan procedure step 7) and the athlete's overrides in athlete.md. Pure;
   returns warnings, it never rejects - the athlete decides."
   (:require [clojure.string :as str]
+            [coach.i18n :refer [t]]
             [coach.season :as season]))
 
 (def sessions
@@ -90,46 +91,46 @@
      (remove nil?
              (concat
               [(when (some #(or (neg? (compare (:date %) monday)) (pos? (compare (:date %) sunday))) workouts)
-                 "Some sessions fall outside this week.")
+                 (t "Some sessions fall outside this week."))
                (when (and (:run_min prev) (pos? (:run_min prev))
                           (> run-min (* (+ 1 (/ cap 100.0)) (:run_min prev))))
-                 (format "Running time %d min is more than +%d%% over last week's %d min (Running: Progression)."
-                         run-min cap (long (:run_min prev))))
+                 (t "Running time {0} min is more than +{1}% over last week's {2} min (Running: Progression)."
+                    run-min cap (long (:run_min prev))))
                (when (and long_run_max_min (> longest long_run_max_min))
-                 (format "Long run %d min is over the %d min cap (Running: Progression)." longest (long long_run_max_min)))
+                 (t "Long run {0} min is over the {1} min cap (Running: Progression)." longest (long long_run_max_min)))
                (when (and (:longest_min prev) (pos? (:longest_min prev)) (pos? longest) (not race-sim?)
                           (> longest (+ 30 (:longest_min prev))))
-                 (format "Long run %d min is more than +30 min over the previous longest %d min (Running: Progression)."
-                         longest (long (:longest_min prev))))
+                 (t "Long run {0} min is more than +30 min over the previous longest {1} min (Running: Progression)."
+                    longest (long (:longest_min prev))))
                (when (and (pos? longest) (> longest (* 0.35 endurance)))
-                 (format "Long run %d min is more than 35%% of the week's %d min endurance time (Load & recovery)."
-                         longest endurance))
+                 (t "Long run {0} min is more than 35% of the week's {1} min endurance time (Load & recovery)."
+                    longest endurance))
                (when (> (count hard) q-max)
-                 (format "%d hard sessions; the limit is %d a week (Intensity distribution)." (count hard) (long q-max)))
+                 (t "{0} hard sessions; the limit is {1} a week (Intensity distribution)." (count hard) (long q-max)))
                (when (and gap (> gap 0.10) (some #(and (flag % :z3?) (not (flag % :test?))) workouts))
-                 (format "AeT-LT gap is %.0f%% (ADS): no Z3-Z5 sessions, only strides, hill sprints and strength (ADS)."
-                         (* 100 gap)))
+                 (t "AeT-LT gap is {0}% (ADS): no Z3-Z5 sessions, only strides, hill sprints and strength (ADS)."
+                    (format "%.0f" (* 100 gap))))
                (when (and (= "Transition" phase) (some #(and (hard? %) (not (flag % :test?))) workouts))
-                 "No hard sessions in Transition: easy, unstructured training (Periodization).")
+                 (t "No hard sessions in Transition: easy, unstructured training (Periodization)."))
                (when (some #(and (key-day? %)
                                  (some (fn [w] (and (key-session? w) (not (flag w :b2b?))))
                                        (by-date (season/add-days % 1))))
                            dates)
-                 "Hard or long sessions on consecutive days: the day after is easy (Load & recovery).")
+                 (t "Hard or long sessions on consecutive days: the day after is easy (Load & recovery)."))
                (when (and full-week?
                           (not-any? (fn [d] (every? #(= "REC" (:session_id %)) (by-date d))) dates))
-                 "No rest day (Load & recovery: at least one a week; a recovery run alone counts).")
+                 (t "No rest day (Load & recovery: at least one a week; a recovery run alone counts)."))
                (when (and full-week? (not= "Race week" phase)
                           (not-any? #(= :strength (flag % :kind)) workouts))
-                 "No strength session: never below maintenance, 1 a week (Core).")
+                 (t "No strength session: never below maintenance, 1 a week (Core)."))
                (when (and race-date (some #(and (flag % :heavy-legs?)
                                                 (<= 0 (season/days-between (:date %) race-date) 10))
                                           workouts))
-                 "No lower-body max strength or ME in the final 10 days before the race (Strength / ME).")]
+                 (t "No lower-body max strength or ME in the final 10 days before the race (Strength / ME)."))]
               (for [k   (filter key-session? workouts)
                     gym (filter #(flag % :heavy-legs?) workouts)
                     :let [gap-d (season/days-between (:date gym) (:date k))
                           hrs   (- (* 24 gap-d) (if (= "PM" (:slot gym)) 10 0))]
                     :when (<= 0 hrs 47)]
-                (format "%s on %s is less than 48 h before %s on %s (Strength / ME)."
-                        (:session_id gym) (:date gym) (:session_id k) (:date k))))))))
+                (t "{0} on {1} is less than 48 h before {2} on {3} (Strength / ME)."
+                   (:session_id gym) (:date gym) (:session_id k) (:date k))))))))

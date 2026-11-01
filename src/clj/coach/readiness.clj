@@ -2,7 +2,8 @@
   "Morning readiness check (training-principles.md: Monitoring; thresholds in athlete.md: Baselines). Pure: takes the
   recent wellness rows and today's planned workouts, returns the signals and
   a suggested change per workout. Nothing is applied without approval."
-  (:require [coach.plan-rules :as rules]))
+  (:require [coach.i18n :as i18n]
+            [coach.plan-rules :as rules]))
 
 (defn- easier [session-id key?]
   (cond key?                                         "EASY"
@@ -27,12 +28,12 @@
         ready-bad (and (:readiness t) (< (:readiness t) 30))
         bb-bad   (and (:body_battery_high t) (< (:body_battery_high t) 30))
         signals  (cond-> []
-                   hrv-bad   (conj (str "HRV " (Math/round (double hrv)) " ms is below " hrv_low))
-                   rhr-bad   (conj (str "Resting HR " rhr " is " rhr_high " or higher"))
-                   unbal     (conj "HRV unbalanced or low for 2 days: rest of the week as recovery, plan next week lower")
-                   sleep-bad (conj "Short or poor sleep: move morning runs to the evening, or rest")
-                   ready-bad (conj (str "Training readiness " (:readiness t) " is below 30"))
-                   bb-bad    (conj (str "Body battery " (:body_battery_high t) " this morning is below 30")))
+                   hrv-bad   (conj (i18n/t "HRV {0} ms is below {1}" (Math/round (double hrv)) hrv_low))
+                   rhr-bad   (conj (i18n/t "Resting HR {0} is {1} or higher" rhr rhr_high))
+                   unbal     (conj (i18n/t "HRV unbalanced or low for 2 days: rest of the week as recovery, plan next week lower"))
+                   sleep-bad (conj (i18n/t "Short or poor sleep: move morning runs to the evening, or rest"))
+                   ready-bad (conj (i18n/t "Training readiness {0} is below 30" (:readiness t)))
+                   bb-bad    (conj (i18n/t "Body battery {0} this morning is below 30" (:body_battery_high t))))
         rest?    (and hrv-bad rhr-bad)
         no-key?  (or hrv-bad rhr-bad unbal ready-bad bb-bad)]
     {:signals signals

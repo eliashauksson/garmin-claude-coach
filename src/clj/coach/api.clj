@@ -10,12 +10,14 @@
             [coach.backup :as backup]
             [coach.costs :as costs]
             [coach.db :as db]
+            [coach.i18n :as i18n]
             [coach.plan :as plan]
             [coach.planner :as planner]
             [coach.readiness :as readiness]
             [coach.season :as season]
             [coach.season-plan :as season-plan]
             [coach.sync :as sync]
+            [coach.translate :as translate]
             [clojure.java.io :as io]
             [reitit.ring :as ring]
             [ring.adapter.jetty :as jetty]
@@ -75,6 +77,17 @@
 
 (defn- ok [body] (json-response 200 body))
 
+(defn- ok-tr
+  "ok, with Claude's texts in the current dashboard language (coach.translate)."
+  [ds body]
+  (ok (translate/localize ds @i18n/lang body)))
+
+(defn- athlete-tr
+  "The athlete status with its overview (Claude's) in the current language;
+  athlete.md itself is never translated."
+  [ds status]
+  (update status :summary #(when % (translate/localize ds @i18n/lang %))))
+
 (defn- today [] (str (LocalDate/now)))
 (defn- days-ago [n] (str (.minusDays (LocalDate/now) n)))
 
@@ -89,7 +102,7 @@
   "For the banner on every page: are the Claude credits out?"
   [ds]
   (when-let [out (costs/credits-out ds)]
-    (assoc out :credits_out true :billing_url planner/billing-url :message planner/no-credits-message)))
+    (assoc out :credits_out true :billing_url planner/billing-url :message (planner/no-credits-message))))
 
 (defn- claude-check!
   "After the athlete adds funds: one tiny request on the cheapest model
@@ -130,21 +143,21 @@
   ["/plan"
    ["" {:get (fn [{:keys [query-params]}]
                (let [[from to] (date-range query-params 0)]
-                 (ok {:weeks (plan/weeks ds from to)
+                 (ok-tr ds {:weeks (plan/weeks ds from to)
                       :workouts (plan/workouts ds from to)
                       :season (plan/week-info ds (today))})))}]
-   ["/readiness" {:get (fn [_] (ok (readiness-today ds)))}]
+   ["/readiness" {:get (fn [_] (ok-tr ds (readiness-today ds)))}]
    ["/season"
-    ["" {:get    (fn [_] (ok (season-plan/overview ds (today))))
+    ["" {:get    (fn [_] (ok-tr ds (season-plan/overview ds (today))))
          :post   (guarded (fn [_]
                             (planner/api-key) ; fail fast with a clear message
                             (planner/principles)
                             (season-plan/race-date!)
                             (json-response 202 {:id (season-plan/draft! ds)})))
-         :delete (guarded (fn [_] (season-plan/delete! ds (today)) (ok (season-plan/overview ds (today)))))}]
+         :delete (guarded (fn [_] (season-plan/delete! ds (today)) (ok-tr ds (season-plan/overview ds (today)))))}]
     ["/restore" {:post (guarded (fn [req]
                                   (season-plan/restore! ds (:id (body req)))
-                                  (ok (season-plan/overview ds (today)))))}]]
+                                  (ok-tr ds (season-plan/overview ds (today)))))}]]
    ["/signals"   {:get (fn [_] (ok (adapt/signals (planner/adapt-inputs ds (today)))))}]
    ["/adjust"    {:post (guarded (fn [req]
                                    (planner/api-key)
@@ -155,7 +168,7 @@
    ["/open"      {:get (fn [_] (ok (plan/open-proposals ds)))}]
    ["/proposals"
     ["" {:get  (fn [{:keys [query-params]}]
-                 (ok (plan/latest-proposal ds (season/monday (get query-params "monday" (today)))
+                 (ok-tr ds (plan/latest-proposal ds (season/monday (get query-params "monday" (today)))
                                            (get query-params "kind" "week"))))
          :post (guarded (fn [req]
                           (planner/api-key) ; fail fast with a clear message
@@ -169,11 +182,11 @@
                                          (let [{:keys [decision edits]} (body req)
                                                id (parse-long (:id path-params))]
                                            (plan/decide-item! ds id (parse-long (:idx path-params)) decision edits)
-                                           (ok (plan/proposal ds id)))))}]
+                                           (ok-tr ds (plan/proposal ds id)))))}]
     ["/:id/accept-all" {:post (guarded (fn [{:keys [path-params] :as req}]
                                          (let [id (parse-long (:id path-params))]
                                            (plan/accept-all! ds id (boolean (:replace (body req))))
-                                           (ok (plan/proposal ds id)))))}]]
+                                           (ok-tr ds (plan/proposal ds id)))))}]]
    ["/workouts/:id" {:patch  (guarded (fn [{:keys [path-params] :as req}]
                                         (plan/update-workout! ds (parse-long (:id path-params)) (body req))
                                         (ok {:ok true})))
@@ -181,14 +194,15 @@
                                (plan/delete-workout! ds (parse-long (:id path-params)))
                                (ok {:ok true}))}]])
 
-(defn athlete-routes []
+(defn athlete-routes [ds]
   ["/athlete"
-   ["" {:get    (fn [_] (ok (merge (athlete/status)
-                                       (when (planner/api-key?) (athlete-chat/ensure-summary!)))))
+   ["" {:get    (fn [_] (ok (athlete-tr ds (merge (athlete/status)
+                                       (when (planner/api-key?) (athlete-chat/ensure-summary!))))))
         :put    (guarded (fn [req]
                            (let [{:keys [content summary source]} (body req)]
                              (athlete/save! content summary source)
-                             (ok (athlete/status)))))
+                             (when summary (planner/translate-soon! (translate/overview-texts summary))) ; the chat's new overview
+                             (ok (athlete-tr ds (athlete/status))))))
         :delete (guarded (fn [_] (athlete/delete!) (ok (athlete/status))))}]
    ["/chat"    {:post (guarded (fn [req]
                                  (planner/api-key)
@@ -212,13 +226,13 @@
                              (let [date (:date path-params)]
                                (when-not (re-matches #"\d{4}-\d{2}-\d{2}" date)
                                  (throw (ex-info (str "Not a date: " date) {})))
-                               (ok (cond-> (assoc (analysis/day-summary ds date)
+                               (ok-tr ds (cond-> (assoc (analysis/day-summary ds date)
                                                   :season (plan/week-info ds date)
                                                   :planned (plan/workouts ds date date))
                                      ;; suggestions for today's sessions, from this morning's readiness
                                      (= date (today)) (assoc :readiness_check (readiness-today ds)))))))}]
     (plan-routes ds)
-    (athlete-routes)
+    (athlete-routes ds)
     ["/auth"        {:get (fn [_] (ok (auth-status ds)))}]
     ["/activities"  {:get (fn [{:keys [query-params]}]
                             (let [{:strs [sport from to limit]} query-params]
@@ -254,7 +268,19 @@
     ["/costs"       {:get (fn [{:keys [query-params]}]
                             (ok (costs/overview ds (get query-params "from"))))}]
     ["/claude/check" {:post (fn [_] (ok (claude-check! ds)))}]
-    ["/sync"        {:get  (fn [_] (ok (assoc @sync-state :auth (auth-status ds) :claude (claude-status ds))))
+    ;; the language of the dashboard, the server's messages and what Claude writes
+    ["/lang"        {:get (fn [_] (ok {:lang @i18n/lang :languages i18n/languages}))
+                     :put (guarded (fn [req]
+                                     (let [lang (:lang (body req))]
+                                       (when-not (i18n/language-ids lang)
+                                         (throw (ex-info (str "Unknown language: " lang) {})))
+                                       (db/set-state! ds :lang lang)
+                                       (reset! i18n/lang lang)
+                                       ;; with "selected language only", fill in the new language
+                                       (planner/translate-soon!)
+                                       (ok {:lang lang}))))}]
+    ["/sync"        {:get  (fn [_] (ok (assoc @sync-state :auth (auth-status ds) :claude (claude-status ds)
+                                          :translating (translate/running?))))
                      :post (fn [_] (json-response 202 (assoc (run-sync! ds) :auth (auth-status ds))))}]
     ["/backup"
      ["" {:get  (fn [_] (ok (backup/status)))
@@ -337,6 +363,11 @@
      (load-sync-state! ds)
      (costs/use-db! ds)
      (ai/use-db! ds)
+     (translate/use-db! ds)
+     (let [lang (db/get-state ds :lang)]
+       (reset! i18n/lang (if (i18n/language-ids lang) lang "en")))
+     ;; Claude's older texts, and any translation that failed, in every language
+     (when (planner/api-key?) (planner/translate-soon!))
      (let [n (costs/import-earlier! ds)]
        (when (pos? n) (println "Imported" n "earlier Claude requests into the cost log")))
      (start-batch-poller! ds)

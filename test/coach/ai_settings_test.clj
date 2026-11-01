@@ -53,3 +53,12 @@
         (is (thrown? clojure.lang.ExceptionInfo
                      (ai/save! ds "athlete_chat" {:model "claude-sonnet-5-5" :effort "low" :delivery "batch"}))))
       (finally (ai/use-db! nil)))))
+
+(deftest translation-scope-test
+  (let [ds (temp-ds)]
+    (is (= "all" (get-in (ai/all ds) ["translation" :scope])) "default: every language")
+    (ai/save! ds "translation" {:model "claude-sonnet-5-5" :effort "low" :scope "selected"})
+    (is (= "selected" (get-in (ai/all ds) ["translation" :scope])))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (ai/save! ds "week_plan" {:model "claude-opus-5-5" :effort "medium" :scope "all"}))
+        "only the Translations task has a scope")))

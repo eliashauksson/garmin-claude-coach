@@ -8,6 +8,8 @@
             [clojure.string :as str]
             [coach.analysis :as analysis]
             [coach.ai-settings :as ai]
+            [coach.i18n :as i18n :refer [t]]
+            [coach.translate :as translate]
             [coach.athlete :as athlete]
             [coach.costs :as costs]
             [coach.db :as db]
@@ -46,14 +48,14 @@
   "knowledge for the planning tasks, which need athlete.md."
   []
   (knowledge (or (athlete/content)
-                 (throw (ex-info "No athlete information yet. Add it on the Plan page first." {:type :no-athlete})))))
+                 (throw (ex-info (t "No athlete information yet. Add it on the Plan page first.") {:type :no-athlete})))))
 (def key-file (str (System/getProperty "user.home") "/.config/coach/anthropic-key"))
 
 (defn api-key []
   (let [f (io/file key-file)]
     (or (when (.exists f) (not-empty (str/trim (slurp f))))
         (not-empty (System/getenv "ANTHROPIC_API_KEY"))
-        (throw (ex-info (str "No Anthropic API key. Put it in " key-file) {:type :no-api-key})))))
+        (throw (ex-info (t "No Anthropic API key. Put it in {0}" key-file) {:type :no-api-key})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Context (what the coach sees)
@@ -229,9 +231,10 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
   "The Claude Console page where credits are bought."
   "https://platform.claude.com/settings/billing")
 
-(def no-credits-message
-  (str "Your Claude API credits have run out. Add funds in the Claude Console ("
-       billing-url "), then try again."))
+(defn no-credits-message
+  "In the current language, with the link to add funds."
+  []
+  (t "Your Claude API credits have run out. Add funds in the Claude Console ({0}), then try again." billing-url))
 
 (defn no-credits?
   "True for the API's out-of-credits error: the typed billing_error (HTTP 402),
@@ -265,7 +268,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
             (request* (assoc opts :model model :effort effort))]
         (log {:usage usage-raw :served_model served-model :stop_reason stop :request_id request-id})
         (when (#{"refusal" "max_tokens"} stop)
-          (throw (ex-info (str "The model stopped early: " stop) {:stop_reason stop})))
+          (throw (ex-info (t "The model stopped early: {0}" stop) {:stop_reason stop})))
         (select-keys r [:response :usage]))
       (catch clojure.lang.ExceptionInfo e
         (when-not (:stop_reason (ex-data e)) (log {:error (ex-message e)}))
@@ -273,15 +276,39 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
       (catch Throwable e
         (if (no-credits? e)
           (do (log {:error (or (ex-message e) "billing_error") :error_type "no_credits"})
-              (throw (ex-info no-credits-message {:type :no-credits :billing_url billing-url} e)))
+              (throw (ex-info (no-credits-message) {:type :no-credits :billing_url billing-url} e)))
           (do (log {:error (or (ex-message e) (str (class e)))})
               (throw e)))))))
+
+(def language-instructions
+  "Added to the task instructions when the dashboard isn't in English. It sits
+  after the cached knowledge block, so the cache is the same in every language."
+  (let [keep (str "Keep session IDs, JSON field names, fixed values (such as phase names, slots and "
+                  "intensity codes) and the section headings of the training principles and athlete.md "
+                  "exactly as given. Text you write into athlete.md itself follows the language that "
+                  "document is written in.")]
+    {"de" (str "\n\nLanguage: write every text meant for the athlete (titles, descriptions, reasons, notes, "
+               "summaries, chat replies) in German as written in Switzerland: Swiss Standard German spelling "
+               "with \"ss\", never \"ß\". Address the athlete as \"du\". " keep)
+     "fr" (str "\n\nLanguage: write every text meant for the athlete (titles, descriptions, reasons, notes, "
+               "summaries, chat replies) in French as written in French-speaking Switzerland (standard "
+               "French spelling; Swiss usage such as \"septante\" and \"nonante\" where numbers are "
+               "written out). Address the athlete as \"tu\". " keep)}))
+
+(defn with-language
+  "The task instructions with the language instruction for the current
+  dashboard language (none for English)."
+  [system]
+  (if-let [extra (and system (language-instructions @i18n/lang))]
+    (str system extra)
+    system))
 
 (defn message-params
   "The request as SDK params. Batch requests leave out the server-side
   fallback, which the Message Batches API doesn't accept."
-  [{:keys [knowledge system messages schema model effort cache? batch?]}]
-  (let [block (fn [^String text cache?]
+  [{:keys [knowledge system messages schema model effort cache? batch? task]}]
+  (let [system (if (= :translation task) system (with-language system)) ; it names its own languages
+        block (fn [^String text cache?]
                 (cond-> (.text (BetaTextBlockParam/builder) text)
                   cache? (.cacheControl (.build (BetaCacheControlEphemeral/builder)))
                   true   (.build)))
@@ -337,6 +364,15 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 (defn- request*
   [{:keys [model] :as opts}]
   (parse-message (.create (.messages (.beta (client))) (message-params opts)) model 1.0))
+
+(defn translate-soon!
+  "Translates Claude's texts into the wanted dashboard languages, in the
+  background (coach.translate). `new-texts`: a result Claude just wrote, in
+  the current language. Skipped while the credits are out (like the
+  automatic planning); the next run after that fills in what's missing."
+  [& [new-texts]]
+  (when-not (some-> @costs/log-ds costs/credits-out)
+    (translate/soon! request new-texts)))
 
 (defn claude-opts
   "The planner's request options: the shared knowledge, then the planner's
@@ -403,7 +439,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                        :error (or (ex-message e) (str (class e)))
                        :error_type (when credits? "no_credits")})
           (throw (if credits?
-                   (ex-info no-credits-message {:type :no-credits :billing_url billing-url} e)
+                   (ex-info (no-credits-message) {:type :no-credits :billing_url billing-url} e)
                    e)))))))
 
 (defn- finish-batch-row! [ds cid status error]
@@ -429,16 +465,16 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
         (log {:usage usage-raw :served_model served-model :stop_reason stop :request_id request-id})
         (if (#{"refusal" "max_tokens"} stop)
           (failed! (if (= "refusal" stop)
-                     "Claude declined this request in the half-price batch, which has no automatic fallback to another model. Try again: your own click runs it instantly."
-                     "The answer was cut off (max tokens). Try again."))
+                     (t "Claude declined this request in the half-price batch, which has no automatic fallback to another model. Try again: your own click runs it instantly.")
+                     (t "The answer was cut off (max tokens). Try again.")))
           (try (when done (done ds data response usage))
                (finish-batch-row! ds custom_id "done" nil)
                (catch Throwable e (failed! (or (ex-message e) (str (class e))))))))
       "errored"
       (do (log {:error error :error_type (when (= "billing_error" error-type) "no_credits")})
-          (failed! (if (= "billing_error" error-type) no-credits-message (str "Claude couldn't process it: " error))))
+          (failed! (if (= "billing_error" error-type) (no-credits-message) (t "Claude couldn't process it: {0}" error))))
       ;; expired / canceled: not billed
-      (failed! "The half-price batch didn't finish within 24 hours (not billed). Try again."))))
+      (failed! (t "The half-price batch didn't finish within 24 hours (not billed). Try again.")))))
 
 (defn- batch-result->map [^com.anthropic.models.beta.messages.batches.BetaMessageBatchResult r]
   (cond
@@ -506,7 +542,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
           {:keys [response usage]} (call-claude (user-message ctx) response-schema
                                                     {:task :week_plan :ref (str "proposal " id) :cache? cache?})
           {:keys [response warnings]} (validate monday response ctx)]
-      (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
+      (do (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage})
+                    (translate-soon! (translate/proposal-texts ds id))))
     (catch Throwable e
       (plan/fail-proposal! ds id (or (ex-message e) (str (class e)))))))
 
@@ -535,7 +572,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
  {:done (fn [ds {:keys [id monday ctx] :as data} response usage]
           (try
             (let [{:keys [response warnings]} (validate monday response ctx)]
-              (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage}))
+              (do (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage})
+                    (translate-soon! (translate/proposal-texts ds id))))
             (finally (next-week! ds data))))
   :fail (fn [ds {:keys [id] :as data} msg]
           (plan/fail-proposal! ds id msg)
@@ -662,7 +700,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 (defn- finish-adjustment! [ds id today scope-end in-scope ctx response usage]
   (let [{:keys [response warnings]} (validate-adjustment today scope-end response in-scope
                                                          #(plan/week-info ds %))]
-    (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage})))
+    (do (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage})
+                    (translate-soon! (translate/proposal-texts ds id)))))
 
 (register-batch-handler!
  :adjust

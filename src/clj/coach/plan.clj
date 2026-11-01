@@ -3,6 +3,7 @@
   workouts the athlete accepted. Plans live only here; nothing goes to Garmin."
   (:require [clojure.data.json :as json]
             [coach.db :as db]
+            [coach.i18n :as i18n]
             [coach.plan-rules :as rules]
             [coach.season :as season]
             [next.jdbc :as jdbc]
@@ -194,7 +195,7 @@
         (let [w   (merge item (select-keys edits workout-cols))
               cur (some->> (:target_id item) (workout-row tx))]
           (when (and (#{"change" "remove"} op) (nil? cur))
-            (throw (ex-info "The session to change no longer exists" {:target (:target_id item)})))
+            (throw (ex-info (i18n/t "The session to change no longer exists") {:target (:target_id item)})))
           (let [wid (case op
                       "add"    (add-workout! tx w proposal-id)
                       "change" (do (update-workout! tx (:target_id item) (select-keys w workout-cols)) nil)
@@ -285,7 +286,7 @@
   "Removes the current plan; it is kept as a backup."
   [ds]
   (when-not (latest-season-plan ds "ready")
-    (throw (ex-info "There is no season plan to delete." {})))
+    (throw (ex-info (i18n/t "There is no season plan to delete.") {})))
   (jdbc/with-transaction [tx ds] (archive-current! tx "delete")))
 
 (defn restore-season-plan!

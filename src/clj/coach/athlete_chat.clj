@@ -4,7 +4,9 @@
   athlete applies them (coach.athlete/save!)."
   (:require [clojure.string :as str]
             [coach.athlete :as athlete]
-            [coach.planner :as planner]))
+            [coach.i18n :as i18n]
+            [coach.planner :as planner]
+            [coach.translate :as translate]))
 
 (def system-intro
   "You help the athlete keep their coaching file, athlete.md, up to date. The coach plans their
@@ -88,8 +90,8 @@ in short fragments, never sentences:
             (cond
               (= "" old_text) new_text
               (not= 1 (count (re-seq (re-pattern (java.util.regex.Pattern/quote old_text)) d)))
-              (throw (ex-info (str "An edit didn't match the file exactly once: "
-                                   (subs old_text 0 (min 60 (count old_text))) "…")
+              (throw (ex-info (i18n/t "An edit didn't match the file exactly once: {0}…"
+                                      (subs old_text 0 (min 60 (count old_text))))
                               {:old_text old_text}))
               :else (str/replace d old_text new_text)))
           (or doc "")
@@ -128,13 +130,14 @@ empty and `edits` must be [].")
 (defn summarise!
   "Asks Claude for a summary of the current file and stores it."
   []
-  (let [doc (or (athlete/content) (throw (ex-info "There is no athlete document." {})))
+  (let [doc (or (athlete/content) (throw (ex-info (i18n/t "There is no athlete document.") {})))
         {:keys [response usage]}
         (planner/request {:knowledge (planner/knowledge doc) :system system-intro
                           :messages [[:user summary-request]]
                           :schema schema
                           :task :athlete_summary})]
     (athlete/save-summary-only! (tidy (:summary response)))
+    (planner/translate-soon! (translate/overview-texts (tidy (:summary response))))
     {:summary (tidy (:summary response)) :usage usage}))
 
 ;; Automatic summary: started in the background when the file has none.

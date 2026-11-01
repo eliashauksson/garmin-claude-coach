@@ -4,7 +4,8 @@
   the newest `keep-backups` backups are kept in data/athlete-backups/."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [coach.i18n :as i18n])
   (:import (java.time Instant)))
 
 (def ^:dynamic *doc-file*
@@ -82,17 +83,17 @@
   the `overview` map for it (nil: Claude writes one in the background).
   `action` names the backup: \"edit\" (default) or \"upload\"."
   [text overview & [action]]
-  (when (str/blank? text) (throw (ex-info "The athlete document can't be empty; delete it instead." {})))
+  (when (str/blank? text) (throw (ex-info (i18n/t "The athlete document can't be empty; delete it instead.") {})))
   (when (> (count text) max-chars)
-    (throw (ex-info (str "The athlete document is too long (over " max-chars " characters).") {})))
+    (throw (ex-info (i18n/t "The athlete document is too long (over {0} characters)." max-chars) {})))
   (when (str/includes? text "\u0000")
-    (throw (ex-info "That doesn't look like a text file. Upload Markdown (.md) or plain text (.txt)." {})))
+    (throw (ex-info (i18n/t "That doesn't look like a text file. Upload Markdown (.md) or plain text (.txt).") {})))
   (backup! (if (= "upload" action) "upload" "edit"))
   (spit *doc-file* (str (str/trim text) "\n"))
   (save-summary! (content) overview))
 
 (defn delete! []
-  (when-not (content) (throw (ex-info "There is no athlete document to delete." {})))
+  (when-not (content) (throw (ex-info (i18n/t "There is no athlete document to delete.") {})))
   (backup! "delete")
   (.delete (io/file *doc-file*))
   (save-summary! nil nil))

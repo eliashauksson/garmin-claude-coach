@@ -3,6 +3,7 @@
   computed in code from recent activities, feedback, wellness and the plan.
   A triggering signal leads to an adjustment proposal; the athlete decides."
   (:require [coach.analysis :as analysis]
+            [coach.i18n :refer [t]]
             [coach.plan-rules :as rules]
             [coach.season :as season]))
 
@@ -64,43 +65,44 @@
         [{:key (str "easy-hard:" monday ":" (min 3 (count too-hard))) :id :easy-too-hard
           :severity (if (>= (count too-hard) 3) :warn :info) :trigger? (>= (count too-hard) 3)
           :principle "Monitoring"
-          :message (str (count too-hard) " easy run" (when (> (count too-hard) 1) "s")
-                        " this week averaged above " steady-hr " bpm (that's steady, not easy)")}])
+          :message (if (= 1 (count too-hard))
+                     (t "1 easy run this week averaged above {0} bpm (that's steady, not easy)" steady-hr)
+                     (t "{0} easy runs this week averaged above {1} bpm (that's steady, not easy)" (count too-hard) steady-hr))}])
       (when (and last-long (:decoupling last-long) (> (:decoupling last-long) drift-max))
         [{:key (str "drift:" (:id last-long)) :id :long-drift :severity :warn
           :trigger? (boolean (some #(> (or (:distance_km %) 0) (/ (or (:distance_m last-long) 0) 1000.0)) upcoming-long))
           :principle "Monitoring"
-          :message (format "Long run on %s drifted %.1f%% in the second half: don't lengthen the next long run"
-                           (:date last-long) (double (:decoupling last-long)))}])
+          :message (t "Long run on {0} drifted {1}% in the second half: don't lengthen the next long run"
+                      (:date last-long) (format "%.1f" (double (:decoupling last-long))))}])
       (for [a high-rpe]
         {:key (str "rpe-high:" (:id a)) :id :rpe-high :severity :warn :trigger? true :principle "Monitoring"
-         :message (str "RPE " (Math/round (double (analysis/effective-rpe a))) " on an easy/long run (" (:date a) "): fatigue signal")})
+         :message (t "RPE {0} on an easy/long run ({1}): fatigue signal" (Math/round (double (analysis/effective-rpe a))) (:date a))})
       (when (= 2 (count low-rpe-keys))
         [{:key (str "rpe-low:" (clojure.string/join "," (map :id low-rpe-keys))) :id :too-easy :severity :info
           :trigger? true :principle "Load & recovery"
-          :message "The last two key sessions felt easy (RPE ≤ 3): room to progress within the rules"}])
+          :message (t "The last two key sessions felt easy (RPE ≤ 3): room to progress within the rules")}])
       (for [a pain]
         {:key (str "pain:" (:id a)) :id :pain :severity :high :trigger? true :principle "Monitoring"
-         :message (str "Pain reported after " (:name a) " (" (:date a) ")"
-                       (some->> (:pain_location a) (str ": ")) " - stop what provokes it, use a pain-free low-impact substitute; see a professional if it lasts over a week")})
+         :message (t "Pain reported after {0} ({1}){2} - stop what provokes it, use a pain-free low-impact substitute; see a professional if it lasts over a week"
+                     (:name a) (:date a) (or (some->> (:pain_location a) (str ": ")) ""))})
       (when hrv-bad
         [{:key (str "hrv:" (:date (last last2))) :id :hrv-unbalanced :severity :warn :trigger? true :principle "Monitoring"
-          :message "HRV unbalanced or low for 2 days: rest of the week as recovery, plan next week lower"}])
+          :message (t "HRV unbalanced or low for 2 days: rest of the week as recovery, plan next week lower")}])
       (when rhr-bad
         [{:key (str "rhr:" (:date (last last2))) :id :rhr-high :severity :warn :trigger? true :principle "Monitoring"
-          :message (str "Resting HR " rhr-high " or higher for 2 days: swap hard sessions for easy ones or rest")}])
+          :message (t "Resting HR {0} or higher for 2 days: swap hard sessions for easy ones or rest" rhr-high)}])
       (for [w missed :when (rules/key-session? w)]
         {:key (str "missed:" (:id w)) :id :missed-key :severity :warn :trigger? true :principle "Monitoring"
-         :message (str "Missed " (:title w) " (" (:session_id w) ") on " (:date w)
-                       ": move it only if the hard/easy spacing holds, or drop it - never make it up")})
+         :message (t "Missed {0} ({1}) on {2}: move it only if the hard/easy spacing holds, or drop it - never make it up"
+                     (:title w) (:session_id w) (:date w))})
       (when (and (pos? week-min) (> missed-min (* 0.3 week-min)))
         [{:key (str "missed-vol:" monday) :id :missed-volume :severity :warn :trigger? true :principle "Monitoring"
-          :message (format "%d of %d planned running minutes missed this week (> 30%%): don't raise volume next week"
-                           (long missed-min) (long week-min))}])
+          :message (t "{0} of {1} planned running minutes missed this week (> 30%): don't raise volume next week"
+                      (long missed-min) (long week-min))}])
       (when (and ef-now ef-before (> ef-now (* 1.05 ef-before)))
         [{:key (str "ef-up:" monday) :id :fitter :severity :info :trigger? false :principle "Zones"
-          :message (format "Efficiency on easy runs is up %.0f%% vs the 3 weeks before: paces may need recalibrating"
-                           (* 100 (- (/ ef-now ef-before) 1)))}])
+          :message (t "Efficiency on easy runs is up {0}% vs the 3 weeks before: paces may need recalibrating"
+                      (format "%.0f" (* 100 (- (/ ef-now ef-before) 1))))}])
       (when (and tsb (< tsb -30))
         [{:key (str "tsb:" today) :id :deep-fatigue :severity :info :trigger? false :principle "trend"
-          :message (str "Form (TSB) is " (Math/round (double tsb)) ": recorded load is high")}])))))
+          :message (t "Form (TSB) is {0}: recorded load is high" (Math/round (double tsb)))}])))))
