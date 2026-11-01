@@ -71,43 +71,35 @@ Counts toward aerobic load by zone; not toward sport-specific volume; can't repl
 health/injury > recovery > consistency > aerobic base > specificity > intensity
 
 ## RUNNING
+Structure: RUNNING (shared) applies to every running goal. Tag goal by terrain (ROAD or TRAIL) + modifiers (ULTRA, MULTI-RACE) and apply every matching subsection. ULTRA long-session rules replace the ROAD/TRAIL long-session rules; otherwise, on conflict, the more conservative rule wins.
 
 ### Specifics
 - Tissues adapt slower than cardio → running volume more conservative; carry extra aerobic volume via cross-training.
 - Downhill = high eccentric load, not free even at low HR; progress it.
-- Steep terrain: HR over pace; Z1–Z2 hiking is valid.
-- Prescribe time+zone; pace only as guidance on flat road.
+- Prescribe time+zone; HR primary, pace secondary.
 
 ### Progression
 - Running time ≤10%/wk (d); new/returning from injury ≤5–10% with 2:1 blocks.
-- Road: long run ≤30% weekly running time (d); marathon long run cap 2.5–3 h (d) — beyond that, road impact/recovery cost outweighs aerobic gain.
-- Trail/ultra: no fixed cap; long sessions 3–6 h+ (d) as time on feet (run+hike, Z1–Z2), on race-like terrain. Prefer back-to-back long days over single extreme sessions. Longest single session rarely needs to exceed ~50–60% of expected race time (d). Build long-session duration ≤~30 min/wk (d) and always follow with an easy/rest day.
 - New runners: 3–4 consistent easy runs/wk before any structured intensity.
+- Long session always followed by easy/rest day. Long-session caps: see ROAD / TRAIL / ULTRA.
 
 ### Sessions (dur | zone | notes)
 - Recovery: 20–45 min | Rec–Z1 | day after hard/long
 - Easy: 30–90 min | Z1–Z2 | bulk; hard cap AeT HR
-- Long: 75 min+ | Z1–Z2 | practice fueling if >90 min; max duration by goal, see Progression
+- Long: 75 min+ | Z1–Z2 | practice fueling if >90 min; max duration per subsection
 - Strides: 4–8 × 15–20 s ~mile pace, full rec, after easy run | OK for ADS
 - Hill sprints: see Strength | OK for ADS
 - Tempo: 20–40 min or 2–3 × 10–15 min | Z3 | non-ADS
 - Threshold: e.g. 4–6 × 5–8 min, 1–2 min rec, 20–40 min total Z4 | non-ADS
 - VO2max: 5–6 × 3 min equal rec, or 8–10 × 1 min | Z5 | specific only, sparse
-- Hill repeats/uphill ME: 2–5 min steep or weighted hikes | Z3–Z4/local ME | trail/mountain
-- Downhill conditioning: progressive | Z1–Z2 | trail/mountain, marathon
 - Race pace: blocks in long run or intervals | specific period
+Terrain-specific sessions: see TRAIL.
 
 ### By period
 - Transition: easy unstructured 3–4×/wk + general strength/mobility.
 - Base: 3–6 runs/wk by history, ~all Z1–Z2; strides 1–2×/wk; hill sprints 1×/wk; weekly long run; max strength 2×/wk → ME late base. Non-ADS: 1 Z3/wk in 2nd half, then Z4.
-- Specific (≤2 hard/wk; long run with race pace counts as 1; ME/strength 1–2×/wk continues):
-  - 10K/HM: threshold + VO2max emphasis; 2 quality + long run.
-  - Marathon: long run + race-pace blocks, threshold, high aerobic volume, race fueling practice.
-  - Trail/ultra: vert-specific, uphill ME, downhill conditioning, back-to-backs, race gear/nutrition on terrain.
-- Taper: 10K/HM 7–10 d; marathon/ultra 2–3 wk (d). Volume to 40–60% by race week, keep race-pace/stride touches, strength maintenance, no ME last 10 d.
-
-### Multi-race events (same day or consecutive)
-Train total demand: cumulative duration/fatigue, fueling between efforts, repeated warm-up/recovery. Main specific target = longest race. Include hard running on pre-fatigued legs (race pace late in long run).
+- Specific: ≤2 hard/wk; long run with race pace counts as 1; ME/strength 1–2×/wk continues. Content per subsection.
+- Taper: volume to 40–60% by race week, keep race-pace/stride touches, strength maintenance, no ME last 10 d. Duration per subsection.
 
 ### Monitoring
 - Injury precursors: persistent local pain (shin, Achilles, plantar, knee, hip), gait change, pain worsening during run → act per Monitoring.
@@ -115,11 +107,37 @@ Train total demand: cumulative duration/fatigue, fueling between efforts, repeat
 - Flag shoes >600–800 km (d).
 - Garmin running tolerance/LT/race predictions = supporting only.
 
+### ROAD (10K–marathon)
+- Long run ≤30% weekly running time (d); marathon long run cap 2.5–3 h (d) — beyond that, road impact/recovery cost outweighs aerobic gain.
+- Pace usable as guidance on flat road; easy runs still capped by HR.
+- Specific:
+  - 10K/HM: threshold + VO2max emphasis; 2 quality + long run.
+  - Marathon: long run + race-pace blocks, threshold, high aerobic volume, race fueling practice; downhill conditioning if course has descents.
+- Taper: 10K/HM 7–10 d; marathon 2–3 wk (d).
+
+### TRAIL / MOUNTAIN
+- Steep terrain: HR over pace; Z1–Z2 hiking is valid running-specific work.
+- Track weekly vert (D+ and D−) alongside time; progress downhill volume gradually.
+- Long sessions: no fixed time cap; time on feet (run+hike, Z1–Z2) on race-like terrain. Build long-session duration ≤~30 min/wk (d).
+- Sessions:
+  - Hill repeats/uphill ME: 2–5 min steep or weighted hikes | Z3–Z4/local ME
+  - Downhill conditioning: progressive | Z1–Z2
+- Specific: vert-specific work, uphill ME, downhill conditioning, race gear/nutrition on terrain.
+- Taper: race <~2 h → 7–10 d; longer → 2–3 wk (d).
+
+### ULTRA (modifier: expected race time >~4–5 h (d), road or trail)
+- Long sessions 3–6 h+ (d) as time on feet, Z1–Z2. Prefer back-to-back long days over single extreme sessions. Longest single session rarely needs to exceed ~50–60% of expected race time (d). Build duration ≤~30 min/wk (d).
+- Specific: back-to-backs, race fueling (practice eating on the move), race gear, night running if race includes it.
+- Taper 2–3 wk (d); allow longer post-race transition.
+
+### MULTI-RACE EVENTS (modifier: same day or consecutive days)
+Train total demand: cumulative duration/fatigue, fueling between efforts, repeated warm-up/recovery. Main specific target = longest race. Include hard running on pre-fatigued legs (race pace late in long run).
+
 ## PLAN PROCEDURE
 1. Assess: thresholds (tested/est.), AeT/LT gap, actual volume last 4–8 wk per sport/zone, consistency, recovery signals.
-2. Classify: ADS y/n; current period from weeks to goal.
+2. Classify: ADS y/n; current period from weeks to goal; sport subsections + modifiers (e.g. ROAD + MULTI-RACE, TRAIL + ULTRA).
 3. Weekly load: progress from actual (not planned) volume; place recovery weeks.
 4. Distribute: zones per distribution; place long session, quality (if allowed), strength/ME, rest days; hard/easy; fit availability.
 5. Each session: sport, duration, zone (HR primary, pace/power secondary), structure (WU/main/CD), 1-line purpose.
 6. Explain week purpose, link to goal, rules triggered.
-7. Validate: progression limits, recovery rhythm, ≤2 hard/wk, no consecutive hard, strength not adjacent to key sessions, priority order.
+7. Validate: progression limits (incl. subsection caps), recovery rhythm, ≤2 hard/wk, no consecutive hard, strength not adjacent to key sessions, priority order.
