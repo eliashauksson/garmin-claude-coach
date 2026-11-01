@@ -1,4 +1,4 @@
-.PHONY: run start offline watch build sync status test
+.PHONY: run start offline watch build sync status test backup backups restore
 
 # Dashboard on http://127.0.0.1:8080/, syncs on start and every 2 h
 run:
@@ -25,3 +25,14 @@ status:
 
 test:
 	clojure -M:test
+
+# Snapshot of the database and athlete document into data/backups/
+backup:
+	clojure -M -m coach.backup create
+
+backups:
+	clojure -M -m coach.backup list
+
+# make restore FILE=data/backups/coach-backup-….zip (dashboard stopped)
+restore:
+	clojure -M -m coach.backup restore $(FILE)

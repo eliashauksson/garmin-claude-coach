@@ -45,20 +45,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Header, auth
 
-(defn- auth-notice
-  "Shown only in the final week (urgent) or once expired."
-  [{:keys [level days_left expires_on renew_command sync_error]}]
-  (when (#{"urgent" "expired"} level)
-    [:div.banner {:class "critical"}
-     [:span.icon "!"]
-     [:div
-      [:div [:b (if (= level "expired")
-                  "Garmin login has expired"
-                  (str "Garmin login expires in about " days_left " days"))]
-       (when expires_on [:span.sub (str " · estimated " (ui/date-short expires_on))])]
-      (when sync_error [:div.sub (str "Last sync failed: " sync_error)])
-      [:div.sub "Renew in a terminal: " [:code renew_command]]]]))
-
 (defn- auth-pill
   "Hidden until the final week of the login."
   [{:keys [level days_left]}]
@@ -333,7 +319,6 @@
       (auth-pill (:auth d))
       (sync-button (or sync (:sync d)))]
      (when-let [e (get errors url)] [:div.error (str "Could not load: " e)])
-     (auth-notice (:auth d))
      (when d
        (list
         [:div.row {:replicant/key "r1"}

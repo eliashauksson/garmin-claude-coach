@@ -7,6 +7,7 @@
             [coach.views.calendar :as calendar]
             [coach.views.plan :as plan]
             [coach.views.load :as load]
+            [coach.views.status :as status]
             [coach.views.today :as today]
             [replicant.dom :as r]))
 
@@ -66,7 +67,12 @@
       (swap! state update :loading conj url))
     (-> (js/fetch url)
         (.then (fn [res]
-                 (if (.-ok res) (.json res) (throw (js/Error. (str "HTTP " (.-status res)))))))
+                 (if (.-ok res)
+                   (.json res)
+                   ;; the server sends {"error": "..."}; say that rather than "HTTP 500"
+                   (-> (.json res)
+                       (.catch (fn [_] nil))
+                       (.then #(throw (js/Error. (or (some-> % .-error) (str "HTTP " (.-status res))))))))))
         (.then (fn [body]
                  (let [data   (js->clj body :keywordize-keys true)
                        before (get-in @state [:data url])]
@@ -118,8 +124,14 @@
   (js/clearTimeout @sync-timer)
   (-> (js/fetch "/api/sync")
       (.then #(.json %))
-      (.then #(sync-state! (js->clj % :keywordize-keys true)))
-      (.catch (fn [_]))
+      (.then (fn [body]
+               (when (:server-down @state)
+                 ;; back after a restart: reload what failed while it was down
+                 (swap! state assoc :server-down false :errors {} :data {})
+                 (load-route!)
+                 (fetch! status/backup-url))
+               (sync-state! (js->clj body :keywordize-keys true))))
+      (.catch (fn [_] (swap! state assoc :server-down true)))
       (.finally #(reset! sync-timer (js/setTimeout poll-sync! (if (get-in @state [:sync :running]) 3000 30000))))))
 
 (defn start-sync! []
@@ -222,6 +234,8 @@
                       (swap! state dissoc :flash)
                       (api! method url body))
       :sync         (start-sync!)
+      :backup-started (doseq [ms [3000 10000 30000]] ; the download starts once the zip is written
+                        (js/setTimeout #(fetch! status/backup-url {:force true}) ms))
       :toggle-theme (toggle-theme!)
       :athlete-chat-send (send-athlete-chat!)
       :athlete-chat-key  (when (= "Enter" (.-key (first args))) (send-athlete-chat!))
@@ -258,8 +272,10 @@
          (into [:svg {:aria-hidden "true" :width 16 :height 16 :viewBox "0 0 24 24" :fill "none"
                       :stroke "currentColor" :stroke-width 2.2 :stroke-linecap "round" :stroke-linejoin "round"}]
                (ui/icon-paths (if dark? :sun :moon)))
-         (if dark? "Light theme" "Dark theme")])]
+         (if dark? "Light theme" "Dark theme")])
+      (status/backup-link s)]
      [:main {:class (remove nil? [(when (seq loading) "loading") (when (= page :calendar) "wide")])}
+      (status/view s)
       (case page
         :today      (today/view s)
         :activities (activities/view s (first (urls route)))
@@ -284,5 +300,6 @@
   (apply-theme!)
   (.addEventListener system-dark "change" #(do (apply-theme!) (render!)))
   (on-hash!)
+  (fetch! status/backup-url)
   (poll-sync!)
   (render!))

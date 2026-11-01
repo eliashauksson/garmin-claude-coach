@@ -31,13 +31,49 @@
   [exe & args]
   (into [(uvx-path) "--python" "3.12" "--from" server-ref exe] args))
 
+;; ---------------------------------------------------------------------------
+;; Errors
+;;
+;; The server's tools catch their own exceptions and *return* the message as
+;; plain text ("Error retrieving stats: Garmin login failed. …") with
+;; isError false, which reads just like a "No data for …" day. Left alone, an
+;; expired login would "sync" empty days over good ones. So any text result
+;; starting with "Error " is turned into an exception with a :kind.
+
+(def ^:private error-kinds
+  "First match wins. Phrases come from garmin_mcp's own messages."
+  [[:server      #"(?i)MCP server exited|Cannot run program|uvx"]
+   [:auth        #"(?i)garmin login failed|garmin authentication failed|garmin login did not finish|garmin-mcp-auth|HTTP 401"]
+   [:rate-limit  #"(?i)rate limit|HTTP 429|too many requests"]
+   [:unreachable #"(?i)garmin connect request failed|unreachable|connection (refused|reset|error)|name or service not known|network"]
+   [:timeout     #"(?i)did not return within|timed out|timeout"]
+   [:garmin      #"(?i)server error|HTTP 5\d\d|rejected the request|HTTP 4\d\d"]])
+
+(defn error-kind
+  "Pure: classifies a Garmin error message. :other when nothing matches."
+  [msg]
+  (or (some (fn [[k re]] (when (re-find re (str msg)) k)) error-kinds) :other))
+
+(defn error-text?
+  "Pure: true for a tool's text result that reports a failure."
+  [res]
+  (and (string? res) (str/starts-with? res "Error ")))
+
 (defn call
-  "Calls a Garmin MCP tool, refusing anything outside the read-only allowlist."
+  "Calls a Garmin MCP tool, refusing anything outside the read-only allowlist.
+  Throws ex-info with :tool and :kind when the tool reports an error."
   ([client tool] (call client tool {}))
   ([client tool args]
    (when-not (read-tools tool)
      (throw (ex-info (str "Refusing non-read-only Garmin tool: " tool) {:tool tool})))
-   (mcp/call-tool client tool args)))
+   (let [res (try (mcp/call-tool client tool args)
+                  (catch clojure.lang.ExceptionInfo e
+                    (throw (ex-info (ex-message e)
+                                    (assoc (ex-data e) :tool tool :kind (error-kind (ex-message e)))
+                                    e))))]
+     (if (error-text? res)
+       (throw (ex-info res {:tool tool :args args :kind (error-kind res)}))
+       res))))
 
 ;; ---------------------------------------------------------------------------
 ;; Normalisation (pure)

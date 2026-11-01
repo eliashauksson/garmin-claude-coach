@@ -55,3 +55,66 @@
           (let [before (sync/status ds)]
             (sync/sync-range! src ds "2026-07-01" "2026-10-01")
             (is (= before (sync/status ds)))))))))
+
+;; ---------------------------------------------------------------------------
+;; Failures
+
+(defn- garmin-error [kind] (ex-info (str "Error: " (name kind)) {:tool "t" :kind kind}))
+
+(defrecord FailingSource [kind]
+  source/DataSource
+  (fetch-activities [_ _ _] [])
+  (fetch-activity [_ id] {:id id})
+  (fetch-wellness [_ start end] (for [date (gm/dates start end)] {:date date :raw {}}))
+  (fetch-streams [_ _] (throw (garmin-error kind)))
+  (fetch-intraday [_ _] (throw (garmin-error kind))))
+
+(deftest keep-stored-test
+  (let [rows [{:date "2026-10-30"} {:date "2026-10-31" :rhr 55} {:date "2026-11-01"}]]
+    (is (= ["2026-10-31" "2026-11-01"]
+           (map :date (sync/keep-stored rows sync/empty-wellness? #{"2026-10-30" "2026-10-31"})))
+        "an empty day doesn't replace a stored day; a day with data does; new days go in")))
+
+(deftest empty-days-never-overwrite-test
+  (let [ds (temp-ds)]
+    (binding [*out* (java.io.StringWriter.)]
+      (db/upsert-wellness! ds [{:date "2026-10-30" :rhr 52 :sleep_score 75 :raw {}}])
+      (db/save-intraday! ds {:date "2026-10-30" :hr [[0 50]] :stress [] :body_battery [] :steps []})
+      (testing "wellness"
+        (sync/sync-range! (->FailingSource :other) ds "2026-10-30" "2026-10-31")
+        (is (= [52 nil] (map :rhr (db/query ds ["SELECT rhr FROM daily_wellness ORDER BY date"])))))
+      (testing "intraday"
+        (let [empty-src (reify source/DataSource
+                          (fetch-intraday [_ date] {:date date :hr [] :stress [] :body_battery [] :steps []}))]
+          (sync/sync-intraday! empty-src ds "2026-10-30" "2026-10-30")
+          (is (= [[0 50]] (:hr (db/load-intraday ds "2026-10-30")))))))))
+
+(deftest fatal-and-transient-errors-test
+  (let [ds (temp-ds)]
+    (binding [*out* (java.io.StringWriter.)]
+      (db/upsert-activities! ds [{:id 7 :date "2026-10-30" :sport "running" :raw {}}])
+      (testing "an expired login stops the sync"
+        (is (= :auth (:kind (ex-data (is (thrown? clojure.lang.ExceptionInfo
+                                                  (sync/sync-streams! (->FailingSource :auth) ds)))))))
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (sync/sync-intraday! (->FailingSource :rate-limit) ds "2026-10-30" "2026-10-30")))
+        (is (empty? (db/query ds ["SELECT * FROM activity_streams"]))))
+      (testing "a transient error skips the item without marking it missing"
+        (sync/sync-streams! (->FailingSource :timeout) ds)
+        (is (empty? (db/query ds ["SELECT * FROM activity_streams"]))))
+      (testing "any other per-activity error is recorded so it isn't retried forever"
+        (sync/sync-streams! (->FailingSource :other) ds)
+        (is (= [{:samples 0 :error "Error: other"}]
+               (db/query ds ["SELECT samples, error FROM activity_streams"])))))))
+
+(deftest record-result-test
+  (let [ds (temp-ds)]
+    (sync/record-result! ds {:ok false :kind :auth :message "x" :finished_at "2026-11-01T10:00:00Z"})
+    (is (= :auth (:kind (sync/last-result ds))))
+    (is (nil? (db/get-state ds :last_ok_sync)))
+    (sync/record-result! ds {:ok true :finished_at "2026-11-01T12:00:00Z"})
+    (is (= "2026-11-01T12:00:00Z" (db/get-state ds :last_ok_sync)))
+    (is (= {:kind :unreachable :message "Garmin Connect request failed"}
+           (sync/failure (ex-info "Garmin Connect request failed" {}))))
+    (is (= {:kind :auth :message "Error retrieving stats: Garmin login failed."}
+           (sync/failure (ex-info "Error retrieving stats: Garmin login failed. Run 'garmin-mcp-auth' to authenticate, then restart the server." {}))))))

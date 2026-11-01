@@ -6,6 +6,7 @@
             [coach.adapt :as adapt]
             [coach.athlete :as athlete]
             [coach.athlete-chat :as athlete-chat]
+            [coach.backup :as backup]
             [coach.db :as db]
             [coach.plan :as plan]
             [coach.planner :as planner]
@@ -30,19 +31,36 @@
   (let [[old _] (swap-vals! sync-state #(if (:running %) % (assoc % :running true :started_at (str (java.time.Instant/now)))))]
     (when-not (:running old)
       (future
+        ;; first backup of the day, before anything is written
+        (try (backup/daily! ds)
+             (catch Throwable e (println "Daily backup failed:" (ex-message e))))
         (let [result (try
                        (let [src ((requiring-resolve 'coach.garmin-mcp/start!))]
                          (try (sync/incremental! src ds)
-                              (finally ((requiring-resolve 'coach.garmin-mcp/stop!) src)))
-                         ;; new data may call for adapting the plan
-                         (let [{:keys [proposed]} (planner/check! ds)]
-                           {:ok true :proposals proposed}))
+                              (finally ((requiring-resolve 'coach.garmin-mcp/stop!) src))))
+                       {:ok true}
                        (catch Throwable e
-                         {:ok false :error (ex-message e)}))]
-          (swap! sync-state assoc :running false
-                 :finished_at (str (java.time.Instant/now))
-                 :last_result result))))
+                         (println "Sync failed:" (ex-message e))
+                         (merge {:ok false} (sync/failure e))))
+              ;; new data may call for adapting the plan; a failure here isn't a sync failure
+              result (if (:ok result)
+                       (try (assoc result :proposals (:proposed (planner/check! ds)))
+                            (catch Throwable e (assoc result :plan_check_error (ex-message e))))
+                       result)
+              done   (str (java.time.Instant/now))
+              result (assoc result :finished_at done)]
+          (try (sync/record-result! ds result) (catch Throwable _))
+          (swap! sync-state assoc :running false :finished_at done :last_result result
+                 :last_ok (if (:ok result) done (:last_ok @sync-state))))))
     @sync-state))
+
+(defn- load-sync-state!
+  "After a restart: the last recorded result, so a failure is still shown."
+  [ds]
+  (let [r (sync/last-result ds)]
+    (swap! sync-state merge
+           {:last_ok (db/get-state ds :last_ok_sync)}
+           (when r {:last_result r :finished_at (:finished_at r)}))))
 
 ;; ---------------------------------------------------------------------------
 
@@ -61,12 +79,7 @@
   [params default-days]
   [(get params "from" (days-ago default-days)) (get params "to" (today))])
 
-(defn- auth-status [ds]
-  (let [st (auth/status ds)
-        err (get-in @sync-state [:last_result :error])]
-    (cond-> st
-      (and err (re-find #"(?i)auth|login|token|401|403" err))
-      (assoc :level :expired :sync_error err))))
+(defn- auth-status [ds] (auth/status ds))
 
 (defn- body [req]
   (some-> (:body req) slurp not-empty (json/read-str :key-fn keyword)))
@@ -203,13 +216,33 @@
                             (let [[from to] (date-range query-params 180)]
                               (ok (analysis/volume ds from to))))}]
     ["/thresholds"  {:get (fn [_] (ok (db/thresholds ds)))}]
-    ["/sync"        {:get  (fn [_] (ok @sync-state))
-                     :post (fn [_] (json-response 202 (run-sync! ds)))}]]])
+    ["/sync"        {:get  (fn [_] (ok (assoc @sync-state :auth (auth-status ds))))
+                     :post (fn [_] (json-response 202 (assoc (run-sync! ds) :auth (auth-status ds))))}]
+    ["/backup"
+     ["" {:get  (fn [_] (ok (backup/status)))
+          :post (fn [_] (backup/create! ds) (ok (backup/status)))}]
+     ["/download" {:get (fn [_]
+                          ;; a fresh backup, kept in data/backups like the others
+                          (let [{:keys [name path]} (backup/create! ds)]
+                            {:status  200
+                             :headers {"Content-Type" "application/zip"
+                                       "Content-Disposition" (str "attachment; filename=\"" name "\"")}
+                             :body    (io/file path)}))}]]]])
 
 (defn- index [_]
   (if-let [r (io/resource "public/index.html")]
     {:status 200 :headers {"Content-Type" "text/html; charset=utf-8"} :body (slurp r)}
     {:status 404 :body "index.html missing"}))
+
+(defn- wrap-errors
+  "Unexpected exceptions become a JSON 500 with the message (and a log line),
+  so the page can say what went wrong instead of \"HTTP 500\"."
+  [handler]
+  (fn [req]
+    (try (handler req)
+         (catch Throwable e
+           (println "Error on" (:request-method req) (:uri req) "-" (str e))
+           (json-response 500 {:error (str "Server error: " (or (ex-message e) (str (class e))))})))))
 
 (defn app [ds]
   (-> (ring/ring-handler
@@ -218,6 +251,7 @@
         (ring/create-resource-handler {:path "/" :root "public"})
         (ring/create-default-handler
          {:not-found (constantly (json-response 404 {:error "not found"}))})))
+      wrap-errors
       wrap-params))
 
 (defonce server (atom nil))
@@ -250,6 +284,7 @@
      (reset! server (jetty/run-jetty (app ds) {:port port :host "127.0.0.1" :join? false}))
      (println (str "Dashboard on http://127.0.0.1:" port "/"))
      (println (auth/describe (auth/status ds)))
+     (load-sync-state! ds)
      (when sync?
        (run-sync! ds)
        (start-background-sync! ds))

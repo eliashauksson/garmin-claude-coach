@@ -32,15 +32,29 @@
      :estimate      true
      :renew_command renew-command}))
 
+(defn with-sync-result
+  "Pure: a sync that failed on the login since the last renewal is the real
+  signal, whatever the countdown says. `last-sync` is coach.sync/last-result."
+  [st last-sync login-at]
+  (if (and (= :auth (:kind last-sync))
+           (or (nil? login-at) (pos? (compare (:finished_at last-sync) login-at))))
+    (assoc st :level :expired :sync_error (:message last-sync) :failed_at (:finished_at last-sync))
+    st))
+
 (defn status
-  "Countdown for the stored login date, or {:level :unknown} if none recorded."
+  "Countdown for the stored login date ({:level :unknown} if none recorded),
+  overridden to :expired when the last sync failed on the login."
   [ds]
-  (if-let [d (db/get-state ds :garmin_login_on)]
-    (countdown d (str (LocalDate/now)))
-    {:level :unknown :renew_command renew-command}))
+  (with-sync-result
+    (if-let [d (db/get-state ds :garmin_login_on)]
+      (countdown d (str (LocalDate/now)))
+      {:level :unknown :renew_command renew-command})
+    ((requiring-resolve 'coach.sync/last-result) ds)
+    (db/get-state ds :garmin_login_at)))
 
 (defn record-login! [ds date]
-  (db/set-state! ds :garmin_login_on date))
+  (db/set-state! ds :garmin_login_on date)
+  (db/set-state! ds :garmin_login_at (str (java.time.Instant/now))))
 
 (defn login!
   "Runs the interactive garmin-mcp-auth (email, password, MFA) in this
@@ -52,7 +66,7 @@
         exit (.waitFor proc)]
     (if (zero? exit)
       (do (record-login! ds (str (LocalDate/now)))
-          (println "Login renewed. Countdown restarted.")
+          (println "Login renewed. Countdown restarted. Press Sync now on the dashboard (or run: make sync).")
           true)
       (do (println "Login failed (exit" exit "); countdown unchanged.")
           false))))

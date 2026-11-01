@@ -117,3 +117,20 @@
                               :steps "No steps data found for 2021-03-27"})]
       (is (= {:date "2021-03-27" :hr [] :stress [] :body_battery [] :steps []}
              (dissoc r :raw))))))
+
+(deftest error-kind-test
+  (testing "messages the server really returns (captured with no valid tokens)"
+    (is (= :auth (gm/error-kind "Error retrieving stats: Garmin login failed. Run 'garmin-mcp-auth' to authenticate, then restart the server.")))
+    (is (= :auth (gm/error-kind "Error retrieving HRV data: Garmin authentication failed: 401 Client Error. Re-run 'garmin-mcp-auth' to refresh your tokens and restart the server."))))
+  (is (= :rate-limit (gm/error-kind "Error retrieving stats: Garmin rate limit hit: 429. Wait a few minutes before retrying.")))
+  (is (= :unreachable (gm/error-kind "Error retrieving stats: Garmin Connect request failed: Max retries. Garmin Connect may be unreachable; check your network connection or try again later.")))
+  (is (= :timeout (gm/error-kind "Error retrieving stats: Garmin request 'get_stats' did not return within 60s and was abandoned.")))
+  (is (= :timeout (gm/error-kind "MCP request timed out")))
+  (is (= :garmin (gm/error-kind "Error retrieving stats: Garmin Connect server error: 503. Garmin returned a server error; try again later.")))
+  (is (= :server (gm/error-kind "MCP error: MCP server exited")))
+  (is (= :other (gm/error-kind "Error retrieving stats: 'NoneType' object is not subscriptable"))))
+
+(deftest error-text-test
+  (is (gm/error-text? "Error retrieving stats: boom"))
+  (is (not (gm/error-text? "No stats found for 2026-10-30")) "a day without data is not an error")
+  (is (not (gm/error-text? {:date "2026-10-30"}))))
