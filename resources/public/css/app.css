@@ -559,8 +559,8 @@ a.btn-ink.inline:hover { color: var(--on-ink); }
 .acwr-lab.above { top: 0; }
 .acwr-lab.start { transform: translateX(-2px); } .acwr-lab.end { transform: translateX(calc(-100% + 2px)); }
 .acwr-lab.below { top: 52px; color: var(--text-2); }
-.zone-bar { display: flex; gap: 3px; height: 26px; }
-.zone-bar > div { border-radius: 8px; min-width: 4px; }
+.zone-bar { display: flex; height: 26px; border-radius: 8px; overflow: hidden; }
+.zone-bar > div { min-width: 4px; }
 .zone-legend { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .zone-legend .zl { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; }
 .zone-legend .dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -570,10 +570,12 @@ td.name-wrap { font-weight: 700; white-space: normal; min-width: 160px; }
 
 /* Fitness */
 .endurance { position: relative; padding-top: 12px; }
-.end-segs { display: flex; gap: 3px; }
+.end-segs { display: flex; }
 .end-seg { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.end-bar { height: 22px; border-radius: 5px; background: var(--green); }
-.end-bar.current { box-shadow: 0 0 0 1.5px var(--text); }
+.end-bar { height: 22px; background: var(--green); }
+.end-seg:first-child .end-bar { border-radius: 5px 0 0 5px; }
+.end-seg:last-child .end-bar { border-radius: 0 5px 5px 0; }
+.end-bar.current { box-shadow: 0 0 0 1.5px var(--text); position: relative; z-index: 1; }
 .end-lab { font-size: 11px; color: var(--text-2); text-align: center; overflow: hidden; }
 .end-lab .fit { white-space: nowrap; }
 .end-lab.current { font-weight: 700; color: var(--text); }

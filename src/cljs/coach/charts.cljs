@@ -75,6 +75,29 @@
           :itemStyle {:color (css-var color-var) :borderRadius 4}}
          opts))
 
+(defn stacked
+  "Stacked bar series whose segments touch: no separator border, and only
+  the top segment of each column has rounded corners (radius `r`). Points
+  may be numbers, [x value] pairs or {:value …} maps, aligned by index."
+  [r series]
+  (let [series (mapv #(update % :data vec) series)
+        value  (fn [p] (cond (map? p) (:value p) (vector? p) (second p) :else p))
+        filled? #(let [v (value %)] (and (number? v) (pos? v)))
+        n      (apply max 0 (map (comp count :data) series))
+        top    (vec (for [i (range n)]
+                      (last (filter #(filled? (get-in series [% :data i])) (range (count series))))))]
+    (vec (map-indexed
+          (fn [si s]
+            (-> s
+                (update :itemStyle merge {:borderRadius 0 :borderWidth 0})
+                (update :data #(vec (map-indexed
+                                     (fn [i p]
+                                       (if (= si (top i))
+                                         (assoc-in (if (map? p) p {:value p}) [:itemStyle :borderRadius] [r r 0 0])
+                                         p))
+                                     %)))))
+          series))))
+
 (defn band
   "Normal-range band between lo and hi as two stacked series (the lower one
   invisible). Returns two series."

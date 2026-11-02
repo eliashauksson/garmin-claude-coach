@@ -106,13 +106,12 @@
                                                      rows)))})
                         {:xAxis (merge (:xAxis (c/base {:x-type "category" :x-fmt ui/date-short}))
                                        {:data dates})
-                         :series (for [task shown]
-                                   (c/bars (t (:label task)) (:color task)
-                                           (mapv #(get cost [% (:id task)]) dates)
-                                           :stack "cost" :barMaxWidth 28
-                                           ;; 2px surface gap between stacked segments
-                                           :itemStyle {:color (c/css-var (:color task)) :borderRadius 4
-                                                       :borderColor (c/css-var "--surface") :borderWidth 2}))}))})
+                         :series (c/stacked 4
+                                            (for [task shown]
+                                              (c/bars (t (:label task)) (:color task)
+                                                      (mapv #(get cost [% (:id task)]) dates)
+                                                      :stack "cost" :barMaxWidth 28
+                                                      :itemStyle {:color (c/css-var (:color task))})))}))})
       :footer [:div.sub (t "Days are in local time.")]})))
 
 (defn- token-columns []

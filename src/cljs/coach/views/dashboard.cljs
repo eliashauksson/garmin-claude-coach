@@ -426,11 +426,11 @@
                                                                     [{:label (t "sleep need") :value (some-> (:need_min n) (* 60) ui/h-mm)}])]))})
                   {:series
                    (concat
-                    (for [[k label color] stage-series]
-                      (c/bars (t label) color (mapv #(hours (get % k)) nights)
-                              :stack "sleep" :barMaxWidth 18
-                              :itemStyle {:color (c/css-var color) :borderRadius 3
-                                          :borderColor (c/css-var "--surface") :borderWidth 1.5}))
+                    (c/stacked 3
+                               (for [[k label color] stage-series]
+                                 (c/bars (t label) color (mapv #(hours (get % k)) nights)
+                                         :stack "sleep" :barMaxWidth 18
+                                         :itemStyle {:color (c/css-var color)})))
                     [{:type "custom" :name (t "Sleep need") :z 10 :silent true :tooltip {:show false}
                       :data (vec (map-indexed (fn [i n] [i (or (some-> (:need_min n) (/ 60)) "-")]) nights))
                       :renderItem (fn [_ ^js api]
@@ -712,12 +712,12 @@
                                                        {:label (t (:label (fam f))) :value (str (:load r) " · " (:hours r) " h")
                                                         :color (c/css-var (:color (fam f)))})))))})
                        (assoc-in [:tooltip :axisPointer] {:type "shadow" :shadowStyle {:color (c/alpha "--text-3" 0.12)}})
-                       (merge {:series (for [f fams :let [x (fam f)]]
-                                         (c/bars (t (:label x)) (:color x)
-                                                 (vec (for [wk weeks] (:load (some #(when (= f (:family %)) %) (get by wk)))))
-                                                 :stack "load" :barMaxWidth 22
-                                                 :itemStyle {:color (c/css-var (:color x)) :borderRadius 5
-                                                             :borderColor (c/css-var "--surface") :borderWidth 2}))})))})))})))
+                       (merge {:series (c/stacked 5
+                                                  (for [f fams :let [x (fam f)]]
+                                                    (c/bars (t (:label x)) (:color x)
+                                                            (vec (for [wk weeks] (:load (some #(when (= f (:family %)) %) (get by wk)))))
+                                                            :stack "load" :barMaxWidth 22
+                                                            :itemStyle {:color (c/css-var (:color x))})))})))})))})))
 
 (defn- focus-card [{:keys [status]}]
   (let [{:keys [aer_low aer_low_min aer_low_max aer_high aer_high_min aer_high_max anaer anaer_min anaer_max balance]} status

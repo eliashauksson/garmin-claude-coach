@@ -109,9 +109,9 @@
                                           (c/tooltip-rows (t "Week of {0}" (ui/date-short wk))
                                                           (for [f (reverse fams) :let [v (get row (:id f))] :when (and v (pos? v))]
                                                             {:label (t (:label f)) :value ((:fmt vm) v) :color (c/css-var (:color f))}))))})
-                             {:series (for [f fams]
-                                        (c/bars (t (:label f)) (:color f)
-                                                (vec (for [[wk m] weeks] [wk (get m (:id f))]))
-                                                :stack "vol" :barMaxWidth 28
-                                                :itemStyle {:color (c/css-var (:color f)) :borderRadius 6
-                                                            :borderColor (c/css-var "--surface") :borderWidth 3}))}))})})]))]))
+                             {:series (c/stacked 6
+                                                 (for [f fams]
+                                                   (c/bars (t (:label f)) (:color f)
+                                                           (vec (for [[wk m] weeks] [wk (get m (:id f))]))
+                                                           :stack "vol" :barMaxWidth 28
+                                                           :itemStyle {:color (c/css-var (:color f))})))}))})})]))]))
