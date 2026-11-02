@@ -395,6 +395,44 @@
            (println "Error on" (:request-method req) (:uri req) "-" (str e))
            (json-response 500 {:error (str "Server error: " (or (ex-message e) (str (class e))))})))))
 
+(def ^:private local-hosts #{"127.0.0.1" "localhost" "[::1]"})
+
+(defn- host-name
+  "\"127.0.0.1\" from a Host header like \"127.0.0.1:8080\"; also for [::1]:8080."
+  [h]
+  (when h (second (re-matches #"(?i)(\[[^\]]*\]|[^:]*)(?::\d+)?" (str/trim h)))))
+
+(defn- local-origin? [origin]
+  (boolean (some->> origin (re-matches #"(?i)https?://([^/]+)") second host-name str/lower-case local-hosts)))
+
+(defn foreign-request?
+  "Pure: whether a request comes from another website rather than this page.
+  The server listens on 127.0.0.1 only, but any website open in the browser
+  can still send requests there, or rename itself to 127.0.0.1 (DNS
+  rebinding) to read the answers. So:
+  - the Host must be this computer (a rebound site still sends its own name);
+  - the browser's Sec-Fetch-Site must not say another site sent it;
+  - a changing request with an Origin must come from this computer.
+  Requests without those headers (curl, the installer) are fine."
+  [{:keys [headers request-method]}]
+  (let [host   (get headers "host")
+        site   (get headers "sec-fetch-site")
+        origin (get headers "origin")]
+    (boolean
+     (or (and host (not (local-hosts (some-> (host-name host) str/lower-case))))
+         (#{"cross-site" "same-site"} site)
+         (and origin (not (#{:get :head} request-method)) (not (local-origin? origin)))))))
+
+(defn- wrap-local-only
+  "Refuses requests from other websites (see foreign-request?)."
+  [handler]
+  (fn [req]
+    (if (foreign-request? req)
+      (do (println "Refused a request from another website:" (:request-method req) (:uri req)
+                   (get-in req [:headers "origin"]) (get-in req [:headers "host"]))
+          (json-response 403 {:error "Requests from other websites are not allowed."}))
+      (handler req))))
+
 (defn app [ds]
   (-> (ring/ring-handler
        (ring/router (conj (routes ds) ["/" {:get index}]))
@@ -403,7 +441,8 @@
         (ring/create-default-handler
          {:not-found (constantly (json-response 404 {:error "not found"}))})))
       wrap-errors
-      wrap-params))
+      wrap-params
+      wrap-local-only))
 
 (defonce server (atom nil))
 (defonce scheduler (atom nil))

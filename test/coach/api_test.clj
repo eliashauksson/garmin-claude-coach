@@ -82,3 +82,20 @@
       (db/upsert-activities! ds [{:id 9 :date "2026-11-02" :start_time_local "2026-11-02T06:00:00"
                                   :sport "running" :name "Run" :raw {}}])
       (is (= ["done"] (map :status (:workouts (second (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08")))))))))
+
+(deftest foreign-request-test
+  (let [req (fn [method headers] {:request-method method :uri "/api/quit" :headers headers})
+        foreign? #(api/foreign-request? (req %1 %2))]
+    (testing "this page, the installer and curl"
+      (is (not (foreign? :post {"host" "127.0.0.1:8080" "origin" "http://127.0.0.1:8080" "sec-fetch-site" "same-origin"})))
+      (is (not (foreign? :post {"host" "localhost:8080" "origin" "http://localhost:8080"})))
+      (is (not (foreign? :get {"host" "[::1]:8080"})))
+      (is (not (foreign? :post {"host" "127.0.0.1:8080"})) "curl: no Origin")
+      (is (not (foreign? :get {"host" "127.0.0.1:8080" "sec-fetch-site" "none"})) "typed in the address bar")
+      (is (not (foreign? :get {})) "no headers at all"))
+    (testing "another website"
+      (is (foreign? :post {"host" "127.0.0.1:8080" "origin" "https://evil.example"}) "older browser, no Sec-Fetch-Site")
+      (is (foreign? :get {"host" "127.0.0.1:8080" "sec-fetch-site" "cross-site"}) "e.g. an <img> of /api/backup/download")
+      (is (foreign? :post {"host" "127.0.0.1:8080" "origin" "http://127.0.0.1.evil.example"}))
+      (is (foreign? :get {"host" "evil.example:8080"}) "DNS rebinding: the Host gives it away")
+      (is (foreign? :get {"host" "127.0.0.1.evil.example"})))))
