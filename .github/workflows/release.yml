@@ -1,17 +1,21 @@
-# Builds the installable app and publishes it as a GitHub release.
-# Start one by pushing a version tag:  git tag v1.0.0 && git push origin v1.0.0
-# The installers (installer/) download the newest release's files.
+# Builds the installable app, installs it on fresh Windows and Linux
+# machines and checks it there (installer/smoke-test.ps1), then publishes it
+# as a GitHub release. The installers download the newest release's files.
+#
+# Release: push a version tag   git tag v1.2.3 && git push origin v1.2.3
+# Test only (nothing published): gh workflow run release.yml
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,8 +44,64 @@ jobs:
 
       - name: App jar
         env:
-          COACH_VERSION: ${{ github.ref_name }}
+          COACH_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
         run: clojure -T:build uber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: garmin-coach-jar
+          path: target/garmin-coach.jar
+
+  # The installer and the app on a machine that has never seen them
+  smoke-test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: garmin-coach-jar
+          path: target
+
+      # Windows PowerShell 5.1, the one every Windows has. From the repository
+      # the installer takes target/garmin-coach.jar instead of the release.
+      - name: Install (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          & .\installer\install.ps1
+          if (-not (Test-Path "$env:LOCALAPPDATA\GarminCoach\app\garmin-coach.jar")) { exit 1 }
+
+      - name: Install (Linux)
+        if: runner.os == 'Linux'
+        run: bash installer/install.sh
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\installer\smoke-test.ps1
+
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: ./installer/smoke-test.ps1
+
+  publish:
+    needs: smoke-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: garmin-coach-jar
+          path: target
 
       - name: Publish
         env:

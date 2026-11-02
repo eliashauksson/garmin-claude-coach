@@ -135,12 +135,12 @@ try { Invoke-WebRequest -UseBasicParsing -Method Post -TimeoutSec 2 -Uri 'http:/
 Remove-Item -Force -ErrorAction SilentlyContinue '$startQ\Garmin Coach.lnk', '$deskQ\Garmin Coach.lnk', '$startQ\Uninstall Garmin Coach.lnk'
 Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Garmin Coach' -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '$dirQ\app', '$dirQ\runtime'
-`$answer = Read-Host 'Also delete your training data in $dirQ\data? (y/N)'
+`$answer = if (`$env:GARMIN_COACH_KEEP_DATA) { 'n' } else { Read-Host 'Also delete your training data in $dirQ\data? (y/N)' }
 if (`$answer -match '^[yY]') { Set-Location `$env:TEMP; Remove-Item -Recurse -Force '$dirQ' }
 else { Remove-Item -Force '$dirQ\uninstall.ps1'; Write-Host 'Your data is kept in $dirQ\data.' }
 if (Test-Path '$dirQ\config.edn') { `$c = Get-Content -Raw '$dirQ\config.edn'; if (`$c -match ':data-dir "([^"]*)"') { Write-Host "A data folder you chose in Settings stays where it is: `$(`$Matches[1])" } }
 Write-Host 'Garmin Coach is removed.'
-Read-Host 'Press Enter to close'
+if (-not `$env:GARMIN_COACH_KEEP_DATA) { Read-Host 'Press Enter to close' }
 "@
   Set-Content -Path "$Dir\uninstall.ps1" -Value $uninstall -Encoding UTF8
   $lnk = $shell.CreateShortcut((Join-Path $startMenu 'Uninstall Garmin Coach.lnk'))
