@@ -33,7 +33,8 @@
     (let [[_ load] (get-json app "/api/load" "from=2026-10-13&to=2026-10-14")]
       (is (= ["2026-10-13" "2026-10-14"] (map :date load)))
       (is (= 50.0 (:tss (first load)))))
-    (is (= "2027-04-27" (:expires_on (second (get-json app "/api/auth")))) "180 days from login")
+    (with-redefs [auth/connected? (constantly true)] ; a token file, wherever the tests run
+      (is (= "2027-04-27" (:expires_on (second (get-json app "/api/auth")))) "180 days from login"))
     (testing "the day page: any date, with that day's activities"
       (db/upsert-wellness! ds [{:date "2026-10-13" :rhr 52 :sleep_score 75 :raw {}}])
       (let [[s d] (get-json app "/api/day/2026-10-13")]
