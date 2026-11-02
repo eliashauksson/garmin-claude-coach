@@ -31,7 +31,7 @@
   "Load and volume for the range chosen in the route (?range=, default 180 days)."
   [route]
   (let [r    (get-in route [:params :range] "180")
-        from (if (= r "all") "2021-03-26" (ui/days-ago (js/parseInt r)))]
+        from (if (= r "all") "all" (ui/days-ago (js/parseInt r)))]
     [(str "/api/load?from=" from) (str "/api/volume?from=" from)]))
 
 (defn section

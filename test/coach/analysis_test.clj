@@ -65,3 +65,19 @@
       (is (= {:note "Legs heavy, slept badly" :rpe 7 :pain 0}
              (select-keys (analysis/activity ds 4) [:note :rpe :pain])))
       (is (= [nil nil] ((juxt :note :pain_location) (analysis/activity ds 2)))))))
+
+(deftest pmc-from-first-activity-test
+  (let [ds  (temp-ds)
+        act (fn [id date] {:id id :date date :start_time_local (str date "T07:00:00") :sport "running"
+                           :name (str "Run " id) :raw {}})]
+    (db/upsert-activities! ds [(act 1 "2015-06-01") (act 2 "2015-06-03")])
+    (db/upsert-metrics! ds [{:activity_id 1 :tss 100.0} {:activity_id 2 :tss 50.0}])
+    (testing "\"all\" starts at the first activity, however old"
+      (let [rows (analysis/pmc ds "all" "2015-06-05")]
+        (is (= ["2015-06-01" "2015-06-05"] [(:date (first rows)) (:date (last rows))]))
+        (is (pos? (:ctl (first rows))) "the first day's load counts")))
+    (testing "a window gets the same values as the full history"
+      (is (= (last (analysis/pmc ds "all" "2015-06-05"))
+             (last (analysis/pmc ds "2015-06-04" "2015-06-05")))))
+    (testing "volume from the start"
+      (is (seq (analysis/volume ds "all" "2015-06-05"))))))

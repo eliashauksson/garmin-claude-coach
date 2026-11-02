@@ -8,8 +8,6 @@
             [coach.metrics :as m])
   (:import (java.time LocalDate)))
 
-(def epoch "2021-03-26")
-
 ;; ---------------------------------------------------------------------------
 ;; Thresholds
 
@@ -166,15 +164,20 @@
 (defn- today [] (str (LocalDate/now)))
 
 (defn pmc
-  "CTL/ATL/TSB for [from, to]. Always computed from the start of history so
-  the values are correct regardless of the window."
+  "CTL/ATL/TSB for [from, to]. Always computed from the first activity so
+  the values are correct regardless of the window; `from` \"all\" means
+  from there."
   [ds from to]
   (let [daily (m/daily-tss (db/query ds ["SELECT a.date, m.tss FROM activities a
-                                          JOIN activity_metrics m ON m.activity_id = a.id"]))]
-    (filterv #(>= (compare (:date %) from) 0) (m/pmc daily epoch to))))
+                                          JOIN activity_metrics m ON m.activity_id = a.id"]))
+        start (or (first (sort (keys daily))) to)
+        from  (if (= "all" from) start from)]
+    (filterv #(>= (compare (:date %) from) 0) (m/pmc daily start to))))
 
-(defn volume [ds from to]
-  (m/weekly-volume (activities ds {:from from :to to})))
+(defn volume
+  "Weekly volume for [from, to]; `from` \"all\" means from the first activity."
+  [ds from to]
+  (m/weekly-volume (activities ds {:from (when-not (= "all" from) from) :to to})))
 
 (def wellness-cols
   "SELECT w.date, w.rhr, w.hrv_avg, w.hrv_weekly_avg, w.hrv_status, w.sleep_score, w.sleep_s,
