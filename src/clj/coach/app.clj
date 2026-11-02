@@ -130,18 +130,20 @@
   (io/file (or (not-empty (System/getenv "XDG_CONFIG_HOME")) (str (System/getProperty "user.home") "/.config"))
            "autostart" "garmin-coach.desktop"))
 
-(defn- run! [& cmd]
-  (let [p (-> (ProcessBuilder. ^java.util.List (vec cmd)) (.redirectErrorStream true) .start)]
-    (slurp (.getInputStream p))
-    (.waitFor p)))
+(defn- run!
+  "Runs `cmd` with extra `env`; [exit-code output]."
+  [cmd & [env]]
+  (let [pb (doto (ProcessBuilder. ^java.util.List (vec cmd)) (.redirectErrorStream true))
+        _  (doseq [[k v] env] (.put (.environment pb) k v))
+        p  (.start pb)
+        out (slurp (.getInputStream p))]
+    [(.waitFor p) out]))
 
 (defn autostart? []
   (when (paths/installed?)
     (if (paths/windows?)
-      (zero? (run! "reg" "query" run-key "/v" run-name))
+      (zero? (first (run! ["reg" "query" run-key "/v" run-name])))
       (.isFile (autostart-file)))))
-
-(defn- reg-escape [s] (-> s (str/replace "\\" "\\\\") (str/replace "\"" "\\\"")))
 
 (defn set-autostart!
   "Turns starting with the computer on or off. Returns the new state."
@@ -149,17 +151,18 @@
   (when-not (paths/installed?)
     (throw (ex-info (t "Only the installed app can start with the computer.") {})))
   (if (paths/windows?)
-    (if on?
-      ;; via a .reg file: reg add can't take a value with quotes in it from Java
-      (let [cmd (launch-command port "--background")
-            v   (str "\"" (first cmd) "\" -cp \"" (nth cmd 2) "\" " (str/join " " (drop 3 cmd)))
-            f   (File/createTempFile "garmin-coach" ".reg")]
-        ;; regedit's format: UTF-16 little-endian with a byte-order mark
-        (spit f (str "\uFEFFWindows Registry Editor Version 5.00\r\n\r\n[" run-key "]\r\n\""
-                     run-name "\"=\"" (reg-escape v) "\"\r\n")
-              :encoding "UTF-16LE")
-        (try (run! "reg" "import" (str f)) (finally (.delete f))))
-      (run! "reg" "delete" run-key "/v" run-name "/f"))
+    ;; PowerShell, with the value in an environment variable: no quoting
+    ;; problems with the paths in it
+    (let [cmd (launch-command port "--background")
+          v   (str "\"" (first cmd) "\" -cp \"" (nth cmd 2) "\" " (str/join " " (drop 3 cmd)))
+          ps  (if on?
+                "New-ItemProperty -Path $env:GC_KEY -Name $env:GC_NAME -Value $env:GC_VALUE -PropertyType String -Force | Out-Null"
+                "Remove-ItemProperty -Path $env:GC_KEY -Name $env:GC_NAME -ErrorAction SilentlyContinue")
+          [exit out] (run! ["powershell" "-NoProfile" "-NonInteractive" "-Command" ps]
+                           {"GC_KEY" "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+                            "GC_NAME" run-name "GC_VALUE" v})]
+      (when-not (zero? exit)
+        (throw (ex-info (str "Windows refused the login item: " (str/trim out)) {}))))
     (let [f (autostart-file)]
       (if on?
         (do (io/make-parents f)
