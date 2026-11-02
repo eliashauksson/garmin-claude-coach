@@ -43,3 +43,14 @@
           (spit f "")
           (is (:error (app/check-data-dir (str f))))))
       (finally (paths/use-data-dir! (paths/configured-data-dir))))))
+
+(deftest trim-log-test
+  (let [f (io/file (temp-dir) "x.log")]
+    (spit f (apply str (for [i (range 1000)] (str "line " i "\n"))))
+    (is (not (paths/trim-log! f 100000 1000)) "small enough: untouched")
+    (is (paths/trim-log! f 5000 1000))
+    (let [lines (clojure.string/split-lines (slurp f))]
+      (is (re-find #"older lines removed" (first lines)))
+      (is (= "line 999" (last lines)) "the newest lines stay")
+      (is (every? #(re-matches #"line \d+" %) (rest lines)) "whole lines only")
+      (is (< (.length f) 1100)))))

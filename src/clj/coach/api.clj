@@ -535,13 +535,18 @@
 
 (defonce update-checker (atom nil))
 
+(declare log-stream log-to-file!)
+
 (defn- start-update-checker!
-  "The installed app looks for a newer release at start and twice a day."
+  "Twice a day: the installed app looks for a newer release, and a log file
+  is trimmed."
   []
-  (when (paths/installed?)
-    (let [ex (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
-      (.scheduleAtFixedRate ex #(coach-app/check-for-update!) 0 12 java.util.concurrent.TimeUnit/HOURS)
-      (reset! update-checker ex))))
+  (let [ex (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
+    (.scheduleAtFixedRate ex #(coach-app/check-for-update!) 0 12 java.util.concurrent.TimeUnit/HOURS) ; installed app only
+    ;; app.log stays open while the app runs: reopen it, trimmed
+    (.scheduleAtFixedRate ex #(when @log-stream (try (log-to-file!) (catch Throwable _)))
+                          12 12 java.util.concurrent.TimeUnit/HOURS)
+    (reset! update-checker ex)))
 
 (def sync-every-hours 2)
 
@@ -620,17 +625,17 @@
   "Started from a shortcut there is no terminal: output goes to app.log in
   the data folder. Called again when the data folder changes."
   []
+  (when-let [old @log-stream] (.close ^java.io.PrintStream old)) ; closed first: Windows can't trim an open file
   (let [f  (io/file (paths/data-file "app.log"))
         _  (io/make-parents f)
+        _  (paths/trim-log! f)
         ps (java.io.PrintStream. (java.io.FileOutputStream. f true) true "UTF-8")
-        w  (java.io.PrintWriter. (java.io.OutputStreamWriter. ps java.nio.charset.StandardCharsets/UTF_8) true)
-        old @log-stream]
+        w  (java.io.PrintWriter. (java.io.OutputStreamWriter. ps java.nio.charset.StandardCharsets/UTF_8) true)]
     (System/setOut ps)
     (System/setErr ps)
     (alter-var-root #'*out* (constantly w))
     (alter-var-root #'*err* (constantly w))
     (reset! log-stream ps)
-    (when old (.close ^java.io.PrintStream old))
     (println (str "\n--- " (java.time.LocalDateTime/now) " " (coach-app/version) " ---"))))
 
 (defn- start-app!

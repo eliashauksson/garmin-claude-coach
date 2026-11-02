@@ -99,6 +99,32 @@
               (< (System/currentTimeMillis) deadline) (do (Thread/sleep 500) (recur))
               :else (do (.close raf) false))))))
 
+(def log-max-bytes "A log is trimmed once it is bigger than this…" (* 1024 1024))
+(def log-keep-bytes "…to about its newest this much." (* 256 1024))
+
+(defn trim-log!
+  "Keeps only the end of log `f` once it has grown past `max-bytes`: whole
+  lines, the newest about `keep-bytes`. Call it while the log isn't open
+  (Windows can't replace an open file). Returns true when it trimmed."
+  ([f] (trim-log! f log-max-bytes log-keep-bytes))
+  ([f max-bytes keep-bytes]
+   (let [f (io/file f)]
+     (when (and (.isFile f) (> (.length f) max-bytes))
+       (let [len   (.length f)
+             buf   (byte-array keep-bytes)
+             _     (with-open [raf (RandomAccessFile. f "r")]
+                     (.seek raf (- len keep-bytes))
+                     (.readFully raf buf))
+             nl    (loop [i 0] (cond (>= i (alength buf)) -1 (= 10 (aget buf i)) i :else (recur (inc i))))
+             tail  (if (neg? nl) buf (java.util.Arrays/copyOfRange buf (inc nl) (alength buf)))
+             tmp   (io/file (str f ".trim"))]
+         (with-open [out (io/output-stream tmp)]
+           (.write out (.getBytes (str "[" (java.time.LocalDateTime/now) ": older lines removed]\n") "UTF-8"))
+           (.write out ^bytes tail))
+         (java.nio.file.Files/move (.toPath tmp) (.toPath f)
+                                   (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+         true)))))
+
 (defn unlock-data-dir! []
   (when-let [{l :lock ^RandomAccessFile raf :raf} @lock]
     (try (.release ^FileLock l) (.close raf) (catch Exception _))

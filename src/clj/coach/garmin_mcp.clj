@@ -419,6 +419,7 @@
   ([{:keys [stderr-file delay-ms] :or {delay-ms 250}}]
    (let [stderr-file (or stderr-file (paths/data-file "mcp-server.log"))]
      (.mkdirs (.getParentFile (.getAbsoluteFile (java.io.File. ^String stderr-file))))
+     (paths/trim-log! stderr-file) ; appended to on every sync, for months
      (->GarminMcpSource
       (mcp/start! {:cmd (server-cmd "garmin-mcp")
                    :env (assoc python-env "GARMIN_ENABLED_TOOLS" (str/join "," (sort read-tools)))

@@ -62,7 +62,17 @@
            (reset! latest {:tag tag :checked (str (Instant/now))}))
          (catch Exception e (println "Update check failed:" (ex-message e))))))
 
-(defn update-status []
+(defn- stale? [checked]
+  (or (nil? checked) (.isBefore (Instant/parse checked) (.minus (Instant/now) (Duration/ofHours 1)))))
+
+(defn update-status
+  "The newest release known. Looked up again in the background when the last
+  check is over an hour old (e.g. Settings opened), so a new release shows
+  up soon."
+  []
+  (when (stale? (:checked @latest))
+    (swap! latest assoc :checked (str (Instant/now))) ; one lookup at a time
+    (future (check-for-update!)))
   (let [{:keys [tag checked]} @latest]
     {:latest tag :checked checked :available (newer? tag (version)) :url release-url}))
 
@@ -174,6 +184,7 @@
   (let [env {"GARMIN_COACH_DIR" (str (paths/app-dir)) "GARMIN_COACH_PORT" (str port)
              "GARMIN_COACH_UPDATING" "1"}
         log (paths/data-file "update.log")]
+    (paths/trim-log! log)
     (spit log (str "\n--- " (Instant/now) " ---\n") :append true)
     (spawn! (if (paths/windows?)
               ["powershell" "-NoProfile" "-ExecutionPolicy" "Bypass" "-Command"
