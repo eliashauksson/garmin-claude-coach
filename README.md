@@ -51,6 +51,8 @@ and adjustments, the delivery:
 ## Install (Windows and Linux)
 No programming tools needed: the installer fetches everything the app needs into one folder,
 adds a **Garmin Coach** shortcut to the desktop and the app menu, and starts it. No admin rights.
+A step-by-step guide for people who aren't technical, from installing to costs and backups:
+[`docs/user-guide.html`](docs/user-guide.html).
 
 - **Windows:** download `install-windows.cmd` from the
   [latest release](https://github.com/eliashauksson/garmin-claude-coach/releases/latest) and

@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garmin Coach Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* The app's own look: Plus Jakarta Sans, its blue, quiet grey-blue neutrals.
+   Layout: one reading column with a sticky contents rail on wide screens. */
+:root {
+  --bg: #eef0f4;
+  --paper: #ffffff;
+  --ink: #16181d;
+  --muted: #5b6270;
+  --line: #dde1e8;
+  --blue: #2577d9;
+  --tint: #e6f0fc;
+  --warn: #9a5b00;
+  --warn-tint: #fff4e0;
+  --display: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+  --body: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111317; --paper: #1a1d23; --ink: #f2f3f5; --muted: #a3aab7; --line: #2c313a;
+    --blue: #4c8dff; --tint: #1b2a42; --warn: #f0b45a; --warn-tint: #2e2414;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111317; --paper: #1a1d23; --ink: #f2f3f5; --muted: #a3aab7; --line: #2c313a;
+  --blue: #4c8dff; --tint: #1b2a42; --warn: #f0b45a; --warn-tint: #2e2414;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 400 16px/1.65 var(--body);
+}
+a { color: var(--blue); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+
+.wrap {
+  max-width: 1080px; margin: 0 auto; padding: 40px 20px 80px;
+  display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px;
+}
+@media (max-width: 860px) { .wrap { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; } }
+
+header.top { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; }
+.mark { width: 52px; height: 52px; flex: none; }
+h1 { font: 800 clamp(28px, 4vw, 40px)/1.1 var(--display); margin: 0; letter-spacing: -0.02em; text-wrap: balance; }
+.lede { margin: 4px 0 0; color: var(--muted); }
+
+nav.toc { position: sticky; top: 24px; align-self: start; font-size: 14px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; counter-reset: s; }
+nav.toc li { counter-increment: s; }
+nav.toc a { display: flex; gap: 10px; padding: 6px 10px; border-radius: 10px; color: var(--ink); text-decoration: none; }
+nav.toc a::before { content: counter(s); color: var(--muted); font-variant-numeric: tabular-nums; width: 1.2em; }
+nav.toc a:hover { background: var(--paper); }
+@media (max-width: 860px) {
+  nav.toc { position: static; }
+  nav.toc ol { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  nav.toc a { background: var(--paper); border: 1px solid var(--line); padding: 4px 10px; }
+}
+
+main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+section { background: var(--paper); border-radius: 20px; padding: 28px clamp(20px, 3vw, 32px); }
+section > * { max-width: 68ch; }
+h2 { font: 700 22px/1.25 var(--display); margin: 0 0 12px; letter-spacing: -0.01em; text-wrap: balance; }
+h3 { font: 700 16px/1.3 var(--display); margin: 20px 0 6px; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin: 4px 0; }
+.muted { color: var(--muted); }
+b, strong { font-weight: 700; }
+
+.ui { /* names of buttons and pages in the app */
+  font-weight: 600; white-space: nowrap;
+}
+code, kbd { font: 500 0.88em var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+kbd { border-bottom-width: 2px; }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; max-width: none; margin-top: 8px; }
+.os { border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; display: flex; flex-direction: column; gap: 4px; }
+.os h3 { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+.os ol { margin-bottom: 0; }
+
+.cmd { display: flex; gap: 8px; align-items: stretch; margin: 6px 0; max-width: 100%; }
+.cmd pre {
+  flex: 1; min-width: 0; margin: 0; padding: 10px 12px; overflow-x: auto;
+  font: 500 13px/1.5 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; white-space: pre;
+}
+.copy {
+  flex: none; font: 600 13px var(--body); color: #fff; background: var(--blue); border: 0; border-radius: 10px;
+  padding: 0 14px; cursor: pointer;
+}
+.copy:active { transform: translateY(1px); }
+
+.btn-link {
+  display: inline-flex; align-items: center; gap: 8px; margin: 4px 0 8px;
+  font-weight: 700; color: #fff; background: var(--blue); text-decoration: none; padding: 10px 16px; border-radius: 12px;
+}
+
+.note { background: var(--tint); border-radius: 14px; padding: 12px 16px; margin: 12px 0; max-width: 68ch; }
+.note.warn { background: var(--warn-tint); }
+.note b:first-child { display: block; margin-bottom: 2px; }
+
+.checklist { list-style: none; padding: 0; counter-reset: c; display: flex; flex-direction: column; gap: 10px; }
+.checklist > li { counter-increment: c; display: grid; grid-template-columns: 30px 1fr; gap: 12px; margin: 0; }
+.checklist > li::before {
+  content: counter(c); width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--tint); color: var(--blue); font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.checklist ol, .checklist ul { margin-top: 4px; }
+
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+.table { overflow-x: auto; max-width: none; margin: 8px 0 12px; }
+th, td { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 700; color: var(--muted); font-size: 13px; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+
+dl.trouble { display: flex; flex-direction: column; gap: 14px; margin: 0; }
+dl.trouble dt { font-weight: 700; }
+dl.trouble dd { margin: 2px 0 0; }
+
+footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+      <rect x="2" y="2" width="60" height="60" rx="14" fill="#2577d9"/>
+      <polyline points="11,35 22.5,35 27,24 33,45 38,29.5 41,35 53,35" fill="none" stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div>
+      <h1>Garmin Coach Guide</h1>
+      <p class="lede">Install it, connect it, and let it plan your training. About 15 minutes.</p>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#what">What it is</a></li>
+      <li><a href="#need">What you need</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#setup">First start</a></li>
+      <li><a href="#costs">What Claude costs</a></li>
+      <li><a href="#daily">Every day</a></li>
+      <li><a href="#data">Your data</a></li>
+      <li><a href="#help">When something goes wrong</a></li>
+      <li><a href="#remove">Updating and removing</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <section id="what">
+      <h2>What it is</h2>
+      <p>Garmin Coach is a training dashboard that runs on your own laptop. It reads your activities, sleep, heart rate variability and recovery from Garmin Connect, and shows them on one page: today's readiness, your training load, your progress toward your goal race.</p>
+      <p>Claude, an AI model by Anthropic, is the coach. From your goals and your recent training it drafts a season plan to race day and the next two weeks of sessions, and adjusts them when your training, feedback or recovery call for it. You accept or change every suggestion.</p>
+      <p>It only <b>reads</b> from Garmin; it never changes anything in your Garmin account. The app speaks English, German and French (<span class="ui">Settings › General › Language</span>).</p>
+    </section>
+
+    <section id="need">
+      <h2>What you need</h2>
+      <ul>
+        <li>A laptop or desktop with <b>Windows 10 or 11</b>, or <b>Linux</b> (for example Ubuntu), and about 1&nbsp;GB of free space.</li>
+        <li>Your <b>Garmin Connect</b> email and password, and your phone or email inbox if you use two-step verification.</li>
+        <li>A <b>Claude API key</b> with some credit on it. You create it during the first start; it's explained below.</li>
+      </ul>
+      <p class="muted">No administrator rights and no programming tools are needed. The installer brings everything the app uses into one folder of its own.</p>
+    </section>
+
+    <section id="install">
+      <h2>Install</h2>
+      <div class="two">
+        <div class="os">
+          <h3>Windows</h3>
+          <ol>
+            <li>Download <b>install-windows.cmd</b>:<br>
+              <a class="btn-link" href="https://github.com/eliashauksson/garmin-claude-coach/releases/latest/download/install-windows.cmd">Download the installer</a></li>
+            <li>Open your Downloads folder and double-click <b>install-windows.cmd</b>.</li>
+            <li>If a blue window says <i>“Windows protected your PC”</i>, click <span class="ui">More info</span>, then <span class="ui">Run anyway</span>. The installer isn't signed by a company, which is why Windows asks.</li>
+            <li>A black window shows the progress. It downloads about 200&nbsp;MB and takes a few minutes.</li>
+          </ol>
+        </div>
+        <div class="os">
+          <h3>Linux</h3>
+          <ol>
+            <li>Open a terminal: press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd>.</li>
+            <li>Copy this line, paste it into the terminal (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>) and press <kbd>Enter</kbd>:
+              <div class="cmd">
+                <pre id="linux-cmd">curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/install.sh | bash</pre>
+                <button class="copy" type="button" data-copy="linux-cmd" id="copy-linux">Copy</button>
+              </div>
+            </li>
+            <li>It downloads about 200&nbsp;MB and takes a few minutes.</li>
+          </ol>
+        </div>
+      </div>
+      <p style="margin-top:16px">When it's done, <b>Garmin Coach</b> opens in your web browser, and there is a <b>Garmin Coach</b> icon on your desktop and in your Start menu or app menu. The app runs on your laptop; the browser is only its window.</p>
+      <div class="note">
+        <b>Prefer a different way on Windows?</b>
+        Press <kbd>Win</kbd>+<kbd>R</kbd>, paste this line and press <kbd>Enter</kbd>:
+        <div class="cmd">
+          <pre id="win-cmd">powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/install.ps1 | iex"</pre>
+          <button class="copy" type="button" data-copy="win-cmd" id="copy-win">Copy</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="setup">
+      <h2>First start</h2>
+      <p>The Dashboard shows a <b>Getting started</b> list. Work through it from the top; each step disappears from the list once it's done.</p>
+      <ol class="checklist">
+        <li><div>
+          <b>Connect Garmin.</b> Go to <span class="ui">Settings › General</span>, enter your Garmin Connect email and password, and click <span class="ui">Log in</span>. If Garmin sends you a code by email or in the Garmin Connect app, type it in and click <span class="ui">Confirm</span>. The first login can take a minute.
+        </div></li>
+        <li><div>
+          <b>First sync.</b> It starts by itself after logging in and loads the last 4 weeks. Give it a few minutes.
+        </div></li>
+        <li><div>
+          <b>Connect Claude.</b> This is where the coaching comes from, so it needs your own key:
+          <ol>
+            <li>Go to <a href="https://platform.claude.com">platform.claude.com</a> and create an account.</li>
+            <li>Under <span class="ui">Settings › Billing</span>, add some credit. $10 is a good start; see <a href="#costs">What Claude costs</a>.</li>
+            <li>Under <span class="ui">Settings › API keys</span>, click <span class="ui">Create key</span>, give it a name like “Garmin Coach”, and copy the key. It starts with <code>sk-ant-</code>.</li>
+            <li>Back in Garmin Coach, paste it into the Claude card in <span class="ui">Settings › General</span> and click <span class="ui">Save and test</span>.</li>
+          </ol>
+        </div></li>
+        <li><div>
+          <b>Load your full history.</b> One click fetches every activity and health day Garmin has from before the first sync. It takes an hour or two in the background; you can keep using the app, and if you close it, it carries on next time.
+        </div></li>
+        <li><div>
+          <b>Tell the coach about yourself.</b> On the <span class="ui">Plan</span> page, chat with Claude about your goal race and date, your target time, how many days a week you can train, past injuries and what you've done so far. Then let it draft your season plan to race day.
+        </div></li>
+      </ol>
+    </section>
+
+    <section id="costs">
+      <h2>What Claude costs</h2>
+      <p>You pay Anthropic directly, per request, from the credit you added. There is no subscription and Garmin Coach takes nothing. What it costs depends on how often plans are drafted and adjusted and which Claude model each task uses.</p>
+      <ul>
+        <li><span class="ui">Settings › Claude &amp; API costs</span> lists every request with its cost, per day, per task and per model, so you always know where you stand.</li>
+        <li>There you can also choose a smaller, cheaper model for each task, and send requests nobody is waiting for through Anthropic's half-price batch service. That's the default.</li>
+        <li>When the credit runs out, the app says so and planning pauses. Your data and plans stay. Add credit on the <a href="https://platform.claude.com/settings/billing">billing page</a> and click <span class="ui">I've added funds, check again</span>.</li>
+      </ul>
+      <p class="muted">Start with a small amount, watch the cost page for a couple of weeks, and top up from there.</p>
+    </section>
+
+    <section id="daily">
+      <h2>Every day</h2>
+      <ul>
+        <li><b>Open it</b> with the <b>Garmin Coach</b> icon. If it's already running, the icon just opens it in your browser again.</li>
+        <li>The app <b>keeps running in the background</b> after you close the browser tab, and syncs with Garmin every 2 hours between 6:00 and 22:00. The <span class="ui">Sync now</span> button syncs right away.</li>
+        <li>Turn on <span class="ui">Settings › General › Start with the computer</span> so it starts by itself when you log in. Garmin keeps some numbers, like training status and race predictions, only for the day itself; the app can only save them on days it runs.</li>
+        <li>After a workout, answer <b>How did it go?</b> on the Dashboard. The coach uses your feedback when it adjusts the plan.</li>
+        <li>To stop it, use <span class="ui">Settings › General › Quit the app</span>.</li>
+      </ul>
+    </section>
+
+    <section id="data">
+      <h2>Your data</h2>
+      <p>Everything stays on your laptop, in the app's <b>data folder</b>. <span class="ui">Settings › General › Data folder</span> shows where it is and can move it, for example into a folder that is backed up.</p>
+      <div class="table">
+        <table>
+          <thead><tr><th>What</th><th>Where it goes</th></tr></thead>
+          <tbody>
+            <tr><td>Training and health data</td><td>The data folder on your laptop. Read from Garmin, never sent back.</td></tr>
+            <tr><td>Garmin password</td><td>Passed to Garmin once to log in, and not stored. Garmin returns a login that lasts about 6 months; it's kept in the <code>.garminconnect</code> folder in your user folder.</td></tr>
+            <tr><td>Claude API key</td><td>In <code>.config/coach/anthropic-key</code> in your user folder, readable only by you.</td></tr>
+            <tr><td>What Claude sees</td><td>To plan, Claude receives your athlete description, your recent training, recovery data such as sleep, HRV and resting heart rate, and your workout feedback. They go to Anthropic through your own API key.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Backups</h3>
+      <p>Each day before the first sync, the app saves a backup of your database and athlete description, and keeps the newest 14. <span class="ui">Download backup</span> in Settings saves one you can keep elsewhere, like on a USB stick. To go back to a backup, open <span class="ui">Settings › General › Backup › Restore a backup</span> and pick one from the list, or choose a downloaded file. The app first backs up how things are now, so a restore can always be undone.</p>
+    </section>
+
+    <section id="help">
+      <h2>When something goes wrong</h2>
+      <p>A banner at the top of the page says what failed and what to do. The most common ones:</p>
+      <dl class="trouble">
+        <dt>“Garmin login has expired”</dt>
+        <dd>This happens about every 6 months; the app warns you a week before. Go to <span class="ui">Settings › General</span>, log in again, and press <span class="ui">Sync now</span>.</dd>
+        <dt>“The last sync failed”</dt>
+        <dd>Usually Garmin is busy or the internet dropped. The next automatic sync tries again; nothing you have is lost.</dd>
+        <dt>“Your Claude API credits have run out”</dt>
+        <dd>Add credit on the <a href="https://platform.claude.com/settings/billing">billing page</a>, then click <span class="ui">I've added funds, check again</span>.</dd>
+        <dt>“Can't reach the coach server”</dt>
+        <dd>The app isn't running. Open it with the <b>Garmin Coach</b> icon; the page reconnects by itself.</dd>
+        <dt>The icon does nothing (Linux)</dt>
+        <dd>Some desktops ask before running a new icon: right-click it and choose <span class="ui">Allow Launching</span>.</dd>
+        <dt>Still stuck?</dt>
+        <dd>The file <code>app.log</code> in the data folder says what the app was doing. Send it along when you ask for help.</dd>
+      </dl>
+    </section>
+
+    <section id="remove">
+      <h2>Updating and removing</h2>
+      <p><b>Updates.</b> When a new version is out, <span class="ui">Settings › General</span> shows it with an <span class="ui">Update now</span> button. The app downloads the new version and restarts by itself in a minute or two; your data stays.</p>
+      <p><b>Removing it.</b> On Windows, use <span class="ui">Start menu › Uninstall Garmin Coach</span>. On Linux, run <code>~/.local/share/garmin-coach/uninstall.sh</code> in a terminal. Either way it asks whether to delete your training data too; the answer “no” keeps it, so you can reinstall later and pick up where you left off.</p>
+    </section>
+  </main>
+
+  <footer>Garmin Coach is not made by or affiliated with Garmin or Anthropic.</footer>
+</div>
+<script>
+document.querySelectorAll(".copy").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var text = document.getElementById(btn.dataset.copy).textContent;
+    var done = function (label) { btn.textContent = label; setTimeout(function () { btn.textContent = "Copy"; }, 1600); };
+    try {
+      navigator.clipboard.writeText(text).then(function () { done("Copied"); }, function () { done("Select it"); });
+    } catch (e) { done("Select it"); }
+  });
+});
+</script>
+</body>
+</html>
