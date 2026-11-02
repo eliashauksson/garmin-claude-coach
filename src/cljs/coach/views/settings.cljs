@@ -9,13 +9,14 @@
 (def tabs [["general" (tk "General")] ["claude" (tk "Claude & API costs")]])
 
 (def key-url "/api/claude/key")
+(def app-url "/api/app")
 
 (defn tab [route] (get-in route [:params :tab] "general"))
 
 (defn urls [route]
   (if (= "claude" (tab route))
     [(costs/url route) costs/settings-url]
-    [status/backup-url key-url]))
+    [status/backup-url key-url app-url]))
 
 (defn- choice
   "A row of buttons; the current one is highlighted."
@@ -38,19 +39,36 @@
            [:div.lab (t "Appearance")]
            (choice theme-choice [["light" (t "Light theme")] ["dark" (t "Dark theme")] ["system" (t "Like the system")]] [:set-theme])))
 
-(defn- backup-card [{:keys [latest count keep]}]
+(defn- backup-time
+  "\"2 Nov, 07:41\" from a backup's created stamp (2026-11-02-074100)."
+  [c]
+  (str (ui/date-short (subs c 0 10)) ", " (subs c 11 13) ":" (subs c 13 15)))
+
+(defn- backup-card [{:keys [latest count keep backups]} {:keys [busy error]}]
   (ui/card {:flex "1 1 320px"}
            [:div.lab (t "Backup")]
            [:div (if-let [c (:created latest)]
-                   (t "Last backup: {0}" (str (ui/date-short (subs c 0 10)) ", " (subs c 11 13) ":" (subs c 13 15)))
+                   (t "Last backup: {0}" (backup-time c))
                    (t "No backup yet"))]
-           [:div.sub (t "A backup (database and athlete document) is made before the first sync of each day; the newest {0} are kept in data/backups ({1} now)."
+           [:div.sub (t "A backup (database and athlete document) is made before the first sync of each day; the newest {0} are kept ({1} now)."
                         (or keep 14) (or count 0))]
            [:div [:a.btn-ink.inline {:href (str status/backup-url "/download") :download true
                                      :on {:click [[:backup-started]]}}
                   (t "Download backup")]]
-           [:div.sub (t "To restore one, stop the dashboard and run")
-            " " [:code "make restore FILE=…"]]))
+           [:details.connect-replace
+            [:summary (t "Restore a backup")]
+            [:div.sub (t "Puts the database and athlete document back as they were then. The current state is backed up first, so you can go back. The app restarts.")]
+            (when (seq backups)
+              [:ul.backup-list
+               (for [{:keys [name created size]} backups]
+                 [:li {:replicant/key name}
+                  [:span (backup-time created)] [:span.sub (str (.toFixed (/ size 1048576) 1) " MB")]
+                  [:button.pill {:disabled busy :on {:click [[:restore name (backup-time created)]]}} (t "Restore")]])])
+            [:label.pill.file-pick {:class (when busy "disabled")}
+             (t "Restore from a file…")
+             [:input {:type "file" :accept ".zip,application/zip" :disabled busy
+                      :on {:change [[:restore-file]]}}]]
+            (when error [:div.error error])]))
 
 (defn- connected-pill [connected?]
   (if connected?
@@ -144,11 +162,61 @@
                  (garmin-login login)])
               (history-section sync)))))
 
-(defn- app-card []
+(defn- notice-line [{:keys [ok message]}]
+  (when message
+    [:div {:replicant/key "notice" :class (if ok "ok-line" "error")}
+     message " " [:button.pill {:on {:click [[:dismiss-notice]]}} (t "OK")]]))
+
+(defn- app-card [{:keys [version installed update autostart notice]} ui-state]
+  (let [{:keys [latest available url]} update
+        updating (get-in ui-state [:app-update :busy])]
+    (ui/card {:flex "1 1 320px"}
+             [:div.lab (t "App")]
+             (notice-line (when (= "restore" (:kind notice)) notice))
+             [:div (t "Version {0}" version)]
+             (cond
+               available
+               [:div.connect-row {:replicant/key "u"}
+                [:span (t "Version {0} is available." latest)]
+                [:button.btn-ink {:disabled updating :on {:click [[:app-update]]}} (t "Update now")]
+                [:a {:href url :target "_blank" :rel "noopener noreferrer"} (t "What's new")]]
+               (and installed latest)
+               [:div.sub {:replicant/key "u"} (t "This is the newest version.")])
+             (when-let [e (get-in ui-state [:app-update :error])] [:div.error e])
+             [:div.lab {:style {:margin-top "6px"}} (t "Start with the computer")]
+             (if installed
+               (list
+                (choice (if autostart "on" "off") [["on" (t "On")] ["off" (t "Off")]] [:autostart-set])
+                [:div.sub {:replicant/key "as"} (t "Starts the app in the background when you log in, so it keeps syncing: Garmin keeps some data (training status, race predictions) only for the day itself.")])
+               [:div.sub (t "Only in the installed app.")])
+             (when-let [e (get-in ui-state [:autostart :error])] [:div.error e])
+             [:div.sub (t "The app keeps running in the background, syncing every 2 hours, until you quit it or shut down the computer. Its shortcut opens it again.")]
+             [:div [:button.pill {:on {:click [[:quit]]}} (t "Quit the app")]])))
+
+(defn- data-card [{:keys [data_dir default_data_dir data_dir_env notice]} {:keys [input busy error existing]}]
   (ui/card {:flex "1 1 320px"}
-           [:div.lab (t "App")]
-           [:div.sub (t "The app keeps running in the background, syncing every 2 hours, until you quit it or shut down the computer. Its shortcut opens it again.")]
-           [:div [:button.pill {:on {:click [[:quit]]}} (t "Quit the app")]]))
+           [:div.lab (t "Data folder")]
+           (notice-line (when (= "data-dir" (:kind notice)) notice))
+           [:div.sub (t "Your training data, the athlete document, backups and logs are all here:")]
+           [:div [:code.path data_dir]]
+           (if data_dir_env
+             [:div.sub (t "Set by COACH_DATA_DIR.")]
+             [:details.connect-replace {:open (boolean (or existing error))}
+              [:summary (t "Change the data folder")]
+              [:div.sub (t "For example a folder that is backed up, or synced to another computer. The data moves there and the app restarts; with a lot of data this takes a minute.")]
+              [:div.connect-row
+               [:input.note {:type "text" :spellcheck "false" :value (or input "")
+                             :placeholder default_data_dir :aria-label (t "New data folder")
+                             :on {:input [[:set-in-ui :data-dir :input :event/target-value]]}}]
+               [:button.btn-ink {:disabled (or busy (empty? input)) :on {:click [[:data-dir :move]]}}
+                (t "Move the data here")]]
+              (when existing
+                [:div {:replicant/key "ex"}
+                 [:div (t "That folder already has Garmin Coach data. Use it instead? The current data stays where it is.")]
+                 [:div.connect-row
+                  [:button.btn-ink {:disabled busy :on {:click [[:data-dir :use]]}} (t "Use that data")]
+                  [:button.pill {:on {:click [[:data-dir-cancel]]}} (t "Cancel")]]])
+              (when error [:div.error error])])))
 
 (defn- claude-card [{:keys [connected source hint file]} {:keys [input busy result]}]
   (let [save [:button.btn-ink {:disabled (or busy (empty? input)) :on {:click [[:claude-key :save]]}}
@@ -196,4 +264,5 @@
        (list
         [:div.row {:replicant/key "r0"} (garmin-card sync (get-in s [:ui :garmin-login])) (claude-card (get data key-url) (get-in s [:ui :claude-key]))]
         [:div.row {:replicant/key "r1"} (language-card) (appearance-card theme-choice)]
-        [:div.row {:replicant/key "r2"} (backup-card (get data status/backup-url)) (app-card)]))]))
+        [:div.row {:replicant/key "r2"} (app-card (get data app-url) (:ui s)) (data-card (get data app-url) (get-in s [:ui :data-dir]))]
+        [:div.row {:replicant/key "r3"} (backup-card (get data status/backup-url) (get-in s [:ui :restore]))]))]))

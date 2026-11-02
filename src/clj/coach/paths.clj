@@ -1,0 +1,105 @@
+(ns coach.paths
+  "Where the app and its data live.
+
+  The app folder is the installed app's folder (the one holding app/ and
+  runtime/), found from the jar's own location, so it doesn't matter which
+  folder the app was started from (Windows starts login items in System32).
+  In development it is the project folder.
+
+  The data folder is, in order: $COACH_DATA_DIR, the folder chosen in
+  Settings (config.edn in the app folder), or data/ in the app folder. It
+  is fixed while the app runs; changing it restarts the app.
+
+  A lock file in the data folder makes sure only one running app uses it."
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str])
+  (:import (java.io File RandomAccessFile)
+           (java.nio.channels FileLock)))
+
+(defn windows? []
+  (str/starts-with? (str/lower-case (System/getProperty "os.name")) "windows"))
+
+(defn- jar-app-dir
+  "The installed layout: <app folder>/app/garmin-coach.jar."
+  []
+  (try
+    (let [f (some-> (Class/forName "coach.paths__init") .getProtectionDomain .getCodeSource .getLocation .toURI io/file)]
+      (when (and f (.isFile f) (= "app" (some-> f .getParentFile .getName)))
+        (-> f .getParentFile .getParentFile)))
+    (catch Throwable _ nil)))
+
+(def ^:private app-dir* (delay (.getAbsoluteFile ^File (or (jar-app-dir) (io/file (System/getProperty "user.dir"))))))
+
+(defn app-dir ^File [] @app-dir*)
+
+(defn app-file ^File [& parts] (apply io/file (app-dir) parts))
+
+(defn installed?
+  "Whether this is the installed app (with its own Java), not a development run."
+  []
+  (.isDirectory (app-file "runtime" "jre")))
+
+;; ---------------------------------------------------------------------------
+;; config.edn: settings that can't live in the database because they say
+;; where the database is
+
+(defn config-file ^File [] (app-file "config.edn"))
+
+(defn read-config []
+  (let [f (config-file)]
+    (or (when (.isFile f) (try (edn/read-string (slurp f)) (catch Exception _ nil))) {})))
+
+(defn write-config! [m]
+  (spit (config-file) (pr-str (into (sorted-map) (remove (comp nil? val) m)))))
+
+(defn update-config! [f & args] (write-config! (apply f (read-config) args)))
+
+;; ---------------------------------------------------------------------------
+
+(defn default-data-dir ^File [] (app-file "data"))
+
+(defn env-data-dir [] (not-empty (System/getenv "COACH_DATA_DIR")))
+
+(defn configured-data-dir
+  "The data folder as configured now (before any restart)."
+  ^File []
+  (.getAbsoluteFile ^File (io/file (or (env-data-dir) (:data-dir (read-config)) (default-data-dir)))))
+
+(def ^:private data-dir* (atom nil))
+
+(defn data-dir
+  "The data folder this run uses."
+  ^File []
+  (or @data-dir* (reset! data-dir* (configured-data-dir))))
+
+(defn use-data-dir! [dir] (reset! data-dir* (.getAbsoluteFile (io/file dir))))
+
+(defn data-file
+  "Path (a string) of a file in the data folder."
+  [& parts]
+  (str (apply io/file (data-dir) parts)))
+
+;; ---------------------------------------------------------------------------
+;; One app per data folder
+
+(defonce ^:private lock (atom nil))
+
+(defn lock-data-dir!
+  "Takes the data folder's lock, waiting up to `wait-ms` for another app (or
+  the one restarting) to let go. Returns true when held."
+  [wait-ms]
+  (let [dir (doto (data-dir) .mkdirs)
+        raf (RandomAccessFile. (io/file dir "app.lock") "rw")
+        ch  (.getChannel raf)
+        deadline (+ (System/currentTimeMillis) wait-ms)]
+    (loop []
+      (let [^FileLock l (try (.tryLock ch) (catch java.nio.channels.OverlappingFileLockException _ nil))]
+        (cond l (do (reset! lock {:lock l :raf raf}) true)
+              (< (System/currentTimeMillis) deadline) (do (Thread/sleep 500) (recur))
+              :else (do (.close raf) false))))))
+
+(defn unlock-data-dir! []
+  (when-let [{l :lock ^RandomAccessFile raf :raf} @lock]
+    (try (.release ^FileLock l) (.close raf) (catch Exception _))
+    (reset! lock nil)))

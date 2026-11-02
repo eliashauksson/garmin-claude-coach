@@ -5,20 +5,25 @@
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [coach.i18n :as i18n])
+            [coach.i18n :as i18n]
+            [coach.paths :as paths])
   (:import (java.time Instant)))
 
 (def ^:dynamic *doc-file*
-  "Personal, so it lives in data/ (not in git)."
-  "data/athlete.md")
+  "Personal, so it lives in the data folder (not in git). nil: the default there."
+  nil)
 (def old-doc-file "Where the document used to be (project root); moved on first read." "athlete.md")
-(def ^:dynamic *backup-dir* "data/athlete-backups")
-(def ^:dynamic *summary-file* "data/athlete-summary.json")
+(def ^:dynamic *backup-dir* nil)
+(def ^:dynamic *summary-file* nil)
+
+(defn- doc-file [] (or *doc-file* (paths/data-file "athlete.md")))
+(defn- backup-dir [] (or *backup-dir* (paths/data-file "athlete-backups")))
+(defn- summary-file [] (or *summary-file* (paths/data-file "athlete-summary.json")))
 (def keep-backups 3)
 
 (defn- move-old-doc! []
-  (let [old (io/file old-doc-file) f (io/file *doc-file*)]
-    (when (and (= *doc-file* "data/athlete.md") (.exists old) (not (.exists f)))
+  (let [old (io/file old-doc-file) f (io/file (doc-file))]
+    (when (and (nil? *doc-file*) (.exists old) (not (.exists f)))
       (io/make-parents f)
       (.renameTo old f))))
 
@@ -26,7 +31,7 @@
   "The document text, or nil when there is none."
   []
   (move-old-doc!)
-  (let [f (io/file *doc-file*)]
+  (let [f (io/file (doc-file))]
     (when (.exists f) (not-empty (str/trim (slurp f))))))
 
 (defn sha [^String s]
@@ -38,14 +43,14 @@
   "The stored overview map ({:race :race_date :race_detail :athlete :stats
   :focus}), if it was made for the current text."
   []
-  (let [f (io/file *summary-file*)
+  (let [f (io/file (summary-file))
         c (content)]
     (when (and c (.exists f))
       (let [{:keys [hash overview]} (json/read-str (slurp f) :key-fn keyword)]
         (when (= hash (sha c)) overview)))))
 
 (defn- save-summary! [text overview]
-  (let [f (io/file *summary-file*)]
+  (let [f (io/file (summary-file))]
     (io/make-parents f)
     (if (and text (map? overview) (seq overview))
       (spit f (json/write-str {:hash (sha text) :overview overview}))
@@ -55,7 +60,7 @@
 ;; Backups: <timestamp>__<action>.md, newest first
 
 (defn- backup-files []
-  (let [d (io/file *backup-dir*)]
+  (let [d (io/file (backup-dir))]
     (->> (.listFiles d)
          (filter #(str/ends-with? (.getName %) ".md"))
          (sort-by #(.getName %) #(compare %2 %1)))))
@@ -69,7 +74,7 @@
 (defn- backup! [action]
   (when-let [c (content)]
     (let [at (str/replace (str (Instant/now)) #":" "_")
-          f  (io/file *backup-dir* (str at "__" action ".md"))]
+          f  (io/file (backup-dir) (str at "__" action ".md"))]
       (io/make-parents f)
       (spit f c)
       (doseq [old (drop keep-backups (backup-files))] (.delete old)))))
@@ -89,24 +94,24 @@
   (when (str/includes? text "\u0000")
     (throw (ex-info (i18n/t "That doesn't look like a text file. Upload Markdown (.md) or plain text (.txt).") {})))
   (backup! (if (= "upload" action) "upload" "edit"))
-  (spit *doc-file* (str (str/trim text) "\n"))
+  (spit (doc-file) (str (str/trim text) "\n"))
   (save-summary! (content) overview))
 
 (defn delete! []
   (when-not (content) (throw (ex-info (i18n/t "There is no athlete document to delete.") {})))
   (backup! "delete")
-  (.delete (io/file *doc-file*))
+  (.delete (io/file (doc-file)))
   (save-summary! nil nil))
 
 (defn restore!
   "Puts backup `id` back as the document; the current one is backed up first."
   [id]
-  (let [f (io/file *backup-dir* id)]
+  (let [f (io/file (backup-dir) id)]
     (when-not (and (re-matches #"[\w.:-]+__\w+\.md" id) (.exists f))
       (throw (ex-info "Unknown backup" {:id id})))
     (let [text (slurp f)]
       (backup! "restore")
-      (spit *doc-file* (str (str/trim text) "\n"))
+      (spit (doc-file) (str (str/trim text) "\n"))
       (save-summary! nil nil))))
 
 (defn save-summary-only! [overview] (save-summary! (content) overview))

@@ -3,15 +3,16 @@
   metrics can be recomputed without refetching."
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
+            [coach.paths :as paths]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
   (:import (java.io ByteArrayInputStream ByteArrayOutputStream)
            (java.util.zip GZIPInputStream GZIPOutputStream)))
 
-(def default-path "data/coach.db")
+(defn default-path [] (paths/data-file "coach.db"))
 
 (defn datasource
-  ([] (datasource default-path))
+  ([] (datasource (default-path)))
   ([path]
    (some-> (java.io.File. ^String path) .getAbsoluteFile .getParentFile .mkdirs)
    ;; sync, backfill and the API server may write concurrently

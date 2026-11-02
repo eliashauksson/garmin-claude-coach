@@ -2,6 +2,8 @@
   "Local JSON API for the dashboard. Binds to 127.0.0.1 only."
   (:require [clojure.data.json :as json]
             [coach.analysis :as analysis]
+            [coach.app :as coach-app]
+            [coach.paths :as paths]
             [coach.auth :as auth]
             [coach.adapt :as adapt]
             [coach.ai-settings :as ai]
@@ -266,6 +268,55 @@
                                  (athlete/restore! (:id (body req)))
                                  (ok (athlete/status))))}]])
 
+(declare stop!)
+(defonce started-at (str (java.time.Instant/now)))
+(defonce current-port (atom 8080))
+(defonce syncing? (atom true)) ; false with --no-sync; kept on a restart
+
+(defn- busy-response
+  "Restoring or moving the data waits for a running sync or history load."
+  []
+  (when (:running @sync-state)
+    (json-response 409 {:error (i18n/t "Wait until the sync has finished, then try again.")})))
+
+(defn- restart-soon!
+  "Answers first, then restarts (the page shows \"Restarting…\" and reconnects)."
+  []
+  (future (Thread/sleep 500)
+          (coach-app/restart! @current-port (when-not @syncing? ["--no-sync"]) stop!)))
+
+(defn- app-status []
+  {:version          (coach-app/version)
+   :installed        (paths/installed?)
+   :windows          (paths/windows?)
+   :data_dir         (str (paths/data-dir))
+   :default_data_dir (str (paths/default-data-dir))
+   :data_dir_env     (boolean (paths/env-data-dir))
+   :autostart        (coach-app/autostart?)
+   :update           (coach-app/update-status)
+   :notice           (coach-app/notice-message)})
+
+(defn app-routes [ds]
+  ["/app"
+   ["" {:get (fn [_] (ok (app-status)))}]
+   ["/notice" {:delete (fn [_] (reset! coach-app/notice nil) (ok (app-status)))}]
+   ["/autostart" {:put (guarded (fn [req]
+                                  (coach-app/set-autostart! (boolean (:on (body req))) @current-port)
+                                  (ok (app-status))))}]
+   ["/update" {:post (guarded (fn [_] (ok (coach-app/start-update! @current-port))))}]
+   ;; {:path "…"} moves the data there; {:path "…" :use_existing true} switches
+   ;; to the coach data already in that folder. Both restart the app.
+   ["/data-dir" {:post (fn [req]
+                         (or (busy-response)
+                             (let [{:keys [path use_existing]} (body req)
+                                   {:keys [existing to error] :as r} (coach-app/check-data-dir path)]
+                               (cond
+                                 error (json-response 400 {:error error})
+                                 (and existing (not use_existing)) (ok r)
+                                 :else (do (coach-app/set-pending! (if existing {:use-data to} {:move-data to}))
+                                           (restart-soon!)
+                                           (ok {:restarting true}))))))}]])
+
 (defn routes [ds]
   [["/api"
     ["/day/:date"   {:get (guarded
@@ -291,6 +342,7 @@
                                        (:summarising job) (assoc :summarising true)))))))}]
     (plan-routes ds)
     (athlete-routes ds)
+    (app-routes ds)
     ["/auth"        {:get (fn [_] (ok (auth-status ds)))}]
     ;; logging in to Garmin from the page: email and password, then the
     ;; two-step code if Garmin sends one. A new login starts a sync.
@@ -366,12 +418,34 @@
                                        (planner/translate-soon!)
                                        (ok {:lang lang}))))}]
     ["/sync"        {:get  (fn [_] (ok (assoc @sync-state :auth (auth-status ds) :claude (claude-status ds)
+                                          :started_at started-at ; the page notices a restart by this
+                                          :update (coach-app/update-status)
                                           :translating (translate/running?)
                                           :setup (setup ds) :history (sync/history-status ds))))
                      :post (fn [_] (json-response 202 (assoc (run-sync! ds) :auth (auth-status ds))))}]
     ["/backup"
      ["" {:get  (fn [_] (ok (backup/status)))
           :post (fn [_] (backup/create! ds) (ok (backup/status)))}]
+     ;; restoring replaces the data folder's files, so it happens on a restart
+     ["/restore" {:post (fn [req]
+                          (or (busy-response)
+                              (let [n (:name (body req))]
+                                (if-let [{:keys [path]} (some #(when (= n (:name %)) %) (backup/backups))]
+                                  (do (coach-app/set-pending! {:restore (str (.getAbsoluteFile (io/file path)))})
+                                      (restart-soon!)
+                                      (ok {:restarting true}))
+                                  (json-response 404 {:error (i18n/t "That backup doesn't exist any more.")})))))}]
+     ;; a backup kept elsewhere, sent as the request body
+     ["/restore-upload" {:post (fn [req]
+                                 (or (busy-response)
+                                     (let [f (io/file (paths/data-file "restore-upload.zip"))]
+                                       (with-open [in ^java.io.InputStream (:body req)] (io/copy in f))
+                                       (if (backup/backup-file? f)
+                                         (do (coach-app/set-pending! {:restore (str f) :delete-after true})
+                                             (restart-soon!)
+                                             (ok {:restarting true}))
+                                         (do (.delete f)
+                                             (json-response 400 {:error (i18n/t "That file isn't a Garmin Coach backup.")}))))))}]
      ["/download" {:get (fn [_]
                           ;; a fresh backup, kept in data/backups like the others
                           (let [{:keys [name path]} (backup/create! ds)]
@@ -459,6 +533,16 @@
                              0 60 java.util.concurrent.TimeUnit/SECONDS)
     (reset! batch-poller ex)))
 
+(defonce update-checker (atom nil))
+
+(defn- start-update-checker!
+  "The installed app looks for a newer release at start and twice a day."
+  []
+  (when (paths/installed?)
+    (let [ex (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
+      (.scheduleAtFixedRate ex #(coach-app/check-for-update!) 0 12 java.util.concurrent.TimeUnit/HOURS)
+      (reset! update-checker ex))))
+
 (def sync-every-hours 2)
 
 (defn- due-for-sync? []
@@ -482,6 +566,8 @@
   incremental sync runs in the background on startup."
   ([] (start! {}))
   ([{:keys [port sync?] :or {port 8080 sync? true}}]
+   (reset! current-port port)
+   (reset! syncing? sync?)
    (let [ds (doto (db/datasource) db/migrate!)]
      (reset! server (jetty/run-jetty (app ds) {:port port :host "127.0.0.1" :join? false}))
      (println (str "Dashboard on http://127.0.0.1:" port "/"))
@@ -497,25 +583,24 @@
      (let [n (costs/import-earlier! ds)]
        (when (pos? n) (println "Imported" n "earlier Claude requests into the cost log")))
      (start-batch-poller! ds)
+     (start-update-checker!)
      (when sync?
        (run-sync! ds)
        (start-background-sync! ds))
      @server)))
 
 (defn stop! []
+  (when-let [ex @update-checker] (.shutdownNow ex) (reset! update-checker nil))
   (when-let [ex @scheduler] (.shutdownNow ex) (reset! scheduler nil))
   (when-let [ex @batch-poller] (.shutdownNow ex) (reset! batch-poller nil))
   (when-let [s @server] (.stop s) (reset! server nil)))
-
-(defn- windows? []
-  (str/starts-with? (str/lower-case (System/getProperty "os.name")) "windows"))
 
 (defn- open-browser!
   "Opens `url` in the default browser."
   [url]
   (try
     (.start (ProcessBuilder. ^java.util.List
-                             (cond (windows?) ["rundll32" "url.dll,FileProtocolHandler" url]
+                             (cond (paths/windows?) ["rundll32" "url.dll,FileProtocolHandler" url]
                                    (str/includes? (str/lower-case (System/getProperty "os.name")) "mac") ["open" url]
                                    :else ["xdg-open" url])))
     (catch Exception e (println "Couldn't open the browser:" (ex-message e) "- open" url))))
@@ -529,37 +614,59 @@
       (= 200 (.getResponseCode c)))
     (catch Exception _ false)))
 
+(defonce ^:private log-stream (atom nil))
+
 (defn- log-to-file!
-  "Started from a shortcut there is no terminal: output goes to data/app.log."
+  "Started from a shortcut there is no terminal: output goes to app.log in
+  the data folder. Called again when the data folder changes."
   []
-  (.mkdirs (io/file "data"))
-  (let [ps (java.io.PrintStream. (java.io.FileOutputStream. "data/app.log" true) true "UTF-8")
-        w  (java.io.PrintWriter. (java.io.OutputStreamWriter. ps java.nio.charset.StandardCharsets/UTF_8) true)]
+  (let [f  (io/file (paths/data-file "app.log"))
+        _  (io/make-parents f)
+        ps (java.io.PrintStream. (java.io.FileOutputStream. f true) true "UTF-8")
+        w  (java.io.PrintWriter. (java.io.OutputStreamWriter. ps java.nio.charset.StandardCharsets/UTF_8) true)
+        old @log-stream]
     (System/setOut ps)
     (System/setErr ps)
     (alter-var-root #'*out* (constantly w))
     (alter-var-root #'*err* (constantly w))
-    (println (str "\n--- " (java.time.LocalDateTime/now) " ---"))))
+    (reset! log-stream ps)
+    (when old (.close ^java.io.PrintStream old))
+    (println (str "\n--- " (java.time.LocalDateTime/now) " " (coach-app/version) " ---"))))
+
+(defn- start-app!
+  "Takes the data folder (one app per folder), does what the last run left
+  pending (restore, move the data), then starts the dashboard."
+  [opts log?]
+  (when-not (paths/lock-data-dir! 30000)
+    (throw (ex-info (str "The data folder " (paths/data-dir) " is in use by another Garmin Coach. Quit that one first.") {})))
+  (coach-app/apply-pending! (fn [f] (backup/restore! (doto (db/datasource) db/migrate!) f))
+                            {:after-switch (when log? log-to-file!)})
+  (start! opts))
 
 (defn -main
-  "clojure -M -m coach.api [port] [--no-sync] [--open]
+  "clojure -M -m coach.api [port] [--no-sync] [--open | --background]
 
   --open is what the app shortcut runs: it starts the dashboard unless it is
-  already running, logs to data/app.log and opens it in the browser."
+  already running, logs to app.log in the data folder and opens it in the
+  browser. --background does the same without the browser (starting with
+  the computer, restarts)."
   [& args]
   (let [port (or (some parse-long args) 8080)
         url  (str "http://127.0.0.1:" port "/")
+        bg?  (some #{"--background"} args)
+        shortcut? (or bg? (some #{"--open"} args))
+        open! #(when-not bg? (open-browser! url))
         opts {:port port :sync? (not (some #{"--no-sync"} args))}]
-    (if-not (some #{"--open"} args)
-      (start! opts)
+    (if-not shortcut?
+      (start-app! opts false)
       (if (running? port)
-        (do (open-browser! url) (System/exit 0))
+        (do (open!) (System/exit 0))
         (do (log-to-file!)
-            (try (start! opts)
+            (try (start-app! opts true)
                  (catch Throwable e
                    ;; e.g. a second click while the first is still starting
                    (println "Couldn't start:" (ex-message e))
                    (if (some (fn [_] (Thread/sleep 1000) (running? port)) (range 60))
-                     (do (open-browser! url) (System/exit 0))
+                     (do (open!) (System/exit 0))
                      (System/exit 1))))
-            (open-browser! url))))))
+            (open!))))))

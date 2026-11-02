@@ -6,6 +6,7 @@
             [coach.adapt :as adapt]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [coach.paths :as paths]
             [coach.analysis :as analysis]
             [coach.ai-settings :as ai]
             [coach.i18n :as i18n :refer [t]]
@@ -37,7 +38,7 @@
   "training-principles.md from the project folder, else the copy inside the
   installed app's jar."
   []
-  (let [f (io/file general-file)]
+  (let [f (paths/app-file general-file)]
     (slurp (if (.exists f) f (or (io/resource general-file)
                                  (throw (ex-info "training-principles.md is missing" {})))))))
 

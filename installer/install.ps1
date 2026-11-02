@@ -133,10 +133,12 @@ function Install-GarminCoach {
 # Removes Garmin Coach. Asks before deleting your training data.
 try { Invoke-WebRequest -UseBasicParsing -Method Post -TimeoutSec 2 -Uri 'http://127.0.0.1:$Port/api/quit' | Out-Null; Start-Sleep -Seconds 3 } catch { }
 Remove-Item -Force -ErrorAction SilentlyContinue '$startQ\Garmin Coach.lnk', '$deskQ\Garmin Coach.lnk', '$startQ\Uninstall Garmin Coach.lnk'
+Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Garmin Coach' -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '$dirQ\app', '$dirQ\runtime'
 `$answer = Read-Host 'Also delete your training data in $dirQ\data? (y/N)'
 if (`$answer -match '^[yY]') { Set-Location `$env:TEMP; Remove-Item -Recurse -Force '$dirQ' }
 else { Remove-Item -Force '$dirQ\uninstall.ps1'; Write-Host 'Your data is kept in $dirQ\data.' }
+if (Test-Path '$dirQ\config.edn') { `$c = Get-Content -Raw '$dirQ\config.edn'; if (`$c -match ':data-dir "([^"]*)"') { Write-Host "A data folder you chose in Settings stays where it is: `$(`$Matches[1])" } }
 Write-Host 'Garmin Coach is removed.'
 Read-Host 'Press Enter to close'
 "@
@@ -149,9 +151,14 @@ Read-Host 'Press Enter to close'
   Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 
   Say 'Done! Garmin Coach is installed.'
-  Write-Host 'Find it in the Start menu or on the desktop. Starting it now...'
-  Start-Process -FilePath $javaw -ArgumentList $appArgs -WorkingDirectory $Dir
-  Write-Host 'It opens in your browser in a few seconds.'
+  if ($env:GARMIN_COACH_UPDATING) {
+    # updated from the app's Settings: the open page reconnects by itself
+    Start-Process -FilePath $javaw -ArgumentList ($appArgs -replace '--open$', '--background') -WorkingDirectory $Dir
+  } else {
+    Write-Host 'Find it in the Start menu or on the desktop. Starting it now...'
+    Start-Process -FilePath $javaw -ArgumentList $appArgs -WorkingDirectory $Dir
+    Write-Host 'It opens in your browser in a few seconds.'
+  }
   Write-Host 'To uninstall later: Start menu > Uninstall Garmin Coach.'
 }
 

@@ -39,6 +39,8 @@ jobs:
           npm run release
 
       - name: App jar
+        env:
+          COACH_VERSION: ${{ github.ref_name }}
         run: clojure -T:build uber
 
       - name: Publish

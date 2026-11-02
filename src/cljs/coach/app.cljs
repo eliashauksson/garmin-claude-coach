@@ -131,16 +131,43 @@
   (-> (js/fetch "/api/sync")
       (.then #(.json %))
       (.then (fn [body]
-               (when (:server-down @state)
-                 ;; back after a restart: reload what failed while it was down
-                 (swap! state assoc :server-down false :quit false :errors {} :data {})
-                 (load-route!)
-                 (fetch! status/backup-url))
-               (sync-state! (js->clj body :keywordize-keys true))))
+               (let [b (js->clj body :keywordize-keys true)
+                     restarted (when-let [{:keys [from]} (:restarting @state)]
+                                 (not= from (:started_at b)))]
+                 (when (or (:server-down @state) restarted)
+                   ;; back after a restart: reload what failed while it was down
+                   (swap! state assoc :server-down false :quit false :restarting nil :errors {} :data {})
+                   (load-route!)
+                   (fetch! status/backup-url))
+                 (sync-state! b))))
       (.catch (fn [_] (swap! state assoc :server-down true)))
-      (.finally #(reset! sync-timer (js/setTimeout poll-sync! (if (or (get-in @state [:sync :running])
-                                                                      (get-in @state [:sync :translating]))
-                                                                3000 30000))))))
+      (.finally #(reset! sync-timer (js/setTimeout poll-sync! (cond (:restarting @state) 1500
+                                                                     (or (get-in @state [:sync :running])
+                                                                         (get-in @state [:sync :translating])) 3000
+                                                                     :else 30000))))))
+
+(defn- restarting!
+  "The server restarts (restore, data folder) or updates: say so and poll
+  until a new server answers."
+  [kind]
+  (swap! state assoc :restarting {:kind kind :from (get-in @state [:sync :started_at])})
+  (poll-sync!))
+
+(defn- app-request!
+  "A request that may restart the app. Errors land in [:ui k :error]."
+  [k method url body]
+  (swap! state update-in [:ui k] assoc :busy true :error nil)
+  (-> (js/fetch url (clj->js (cond-> {:method method}
+                               (some? body) (assoc :headers {"Content-Type" "application/json"}
+                                                   :body (js/JSON.stringify (clj->js body))))))
+      (.then (fn [res] (.then (.json res) #(let [r (js->clj % :keywordize-keys true)]
+                                             (if (.-ok res) r (throw (js/Error. (:error r))))))))
+      (.then (fn [r]
+               (swap! state update-in [:ui k] assoc :busy false :existing (when (:existing r) (:to r)))
+               (cond (:restarting r) (restarting! k)
+                     (:started r)    (restarting! :update))
+               r))
+      (.catch (fn [e] (swap! state update-in [:ui k] assoc :busy false :error (.-message e))))))
 
 (defn start-sync! []
   (-> (js/fetch "/api/sync" #js {:method "POST"})
@@ -348,6 +375,25 @@
                                 (.then done)
                                 (.catch #(done {:status "error" :error (.-message %)}))))))
       :garmin-login-key (let [[op ev] args] (when (= "Enter" (.-key ev)) (handle [:garmin-login op])))
+      ;; the installed app: update, data folder, restore, start with the computer
+      :app-update   (app-request! :app-update "POST" "/api/app/update" nil)
+      :data-dir     (app-request! :data-dir "POST" "/api/app/data-dir"
+                                  {:path (get-in @state [:ui :data-dir :input]) :use_existing (= :use (first args))})
+      :data-dir-cancel (swap! state assoc-in [:ui :data-dir] {})
+      :autostart    (-> (app-request! :autostart "PUT" "/api/app/autostart" {:on (first args)})
+                        (.then #(when (map? %) (swap! state assoc-in [:data settings/app-url] %))))
+      :autostart-set (handle [:autostart (= "on" (first args))])
+      :dismiss-notice (-> (js/fetch "/api/app/notice" #js {:method "DELETE"})
+                          (.then #(fetch! settings/app-url {:force true})))
+      :restore      (when (js/confirm (t "Restore the backup from {0}? The current state is backed up first, and the app restarts." (second args)))
+                      (app-request! :restore "POST" (str status/backup-url "/restore") {:name (first args)}))
+      :restore-file (let [file (some-> ^js (first args) .-target .-files (aget 0))]
+                      (when (and file (js/confirm (t "Restore the backup {0}? The current state is backed up first, and the app restarts." (.-name file))))
+                        (swap! state update-in [:ui :restore] assoc :busy true :error nil)
+                        (-> (js/fetch (str status/backup-url "/restore-upload") #js {:method "POST" :body file :headers #js {"Content-Type" "application/zip"}})
+                            (.then (fn [res] (.then (.json res) #(if (.-ok res) % (throw (js/Error. (.-error %)))))))
+                            (.then (fn [_] (swap! state assoc-in [:ui :restore :busy] false) (restarting! :restore)))
+                            (.catch (fn [e] (swap! state update-in [:ui :restore] assoc :busy false :error (.-message e)))))))
       :quit         (-> (js/fetch "/api/quit" #js {:method "POST"})
                         (.then #(swap! state assoc :quit true :server-down true)))
       :load-history (-> (js/fetch "/api/history" #js {:method "POST"})
@@ -370,6 +416,7 @@
                 (= :event/target-value (last action)) (conj (vec (butlast action)) (.. ev -target -value))
                 (= :athlete-chat-key (first action))  [:athlete-chat-key ev]
                 (= :garmin-login-key (first action))  [:garmin-login-key (second action) ev]
+                (= :restore-file (first action))      [:restore-file ev]
                 (= :athlete-upload (first action))    [:athlete-upload ev]
                 :else action)))))
 

@@ -4,6 +4,7 @@
   `read-tools` (GARMIN_ENABLED_TOOLS), and `call` refuses anything else."
   (:require [clojure.string :as str]
             [coach.mcp :as mcp]
+            [coach.paths :as paths]
             [coach.source :as source])
   (:import (java.time LocalDate LocalDateTime ZoneOffset)))
 
@@ -30,7 +31,7 @@
   []
   (let [exe (if (str/starts-with? (str/lower-case (System/getProperty "os.name")) "windows") "uvx.exe" "uvx")]
     (or (some #(let [f (java.io.File. ^String %)] (when (.isFile f) (.getAbsolutePath f)))
-              [(str "runtime/uv/" exe)
+              [(str (paths/app-file "runtime" "uv" exe))
                (str (System/getProperty "user.home") "/.local/bin/" exe)])
         "uvx")))
 
@@ -415,13 +416,14 @@
   ~/.garminconnect (or GARMINTOKENS), written there by garmin-mcp-auth.
   `delay-ms` throttles calls to Garmin's (unofficial) API."
   ([] (start! {}))
-  ([{:keys [stderr-file delay-ms] :or {stderr-file "data/mcp-server.log" delay-ms 250}}]
-   (.mkdirs (.getParentFile (.getAbsoluteFile (java.io.File. ^String stderr-file))))
-   (->GarminMcpSource
-    (mcp/start! {:cmd (server-cmd "garmin-mcp")
-                 :env (assoc python-env "GARMIN_ENABLED_TOOLS" (str/join "," (sort read-tools)))
-                 :stderr-file stderr-file})
-    delay-ms)))
+  ([{:keys [stderr-file delay-ms] :or {delay-ms 250}}]
+   (let [stderr-file (or stderr-file (paths/data-file "mcp-server.log"))]
+     (.mkdirs (.getParentFile (.getAbsoluteFile (java.io.File. ^String stderr-file))))
+     (->GarminMcpSource
+      (mcp/start! {:cmd (server-cmd "garmin-mcp")
+                   :env (assoc python-env "GARMIN_ENABLED_TOOLS" (str/join "," (sort read-tools)))
+                   :stderr-file stderr-file})
+      delay-ms))))
 
 (defn stop! [{:keys [client]}]
   (mcp/stop! client))

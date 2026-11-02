@@ -1,8 +1,9 @@
 .PHONY: run start offline watch build app sync status test backup backups restore
 
-# Dashboard on http://127.0.0.1:8080/, syncs on start and every 2 h
+# Dashboard on http://127.0.0.1:8081/, syncs on start and every 2 h.
+# (8080 is the installed app's.) Data: data/, or COACH_DATA_DIR=… make run
 run:
-	clojure -M -m coach.api
+	clojure -M -m coach.api 8081
 
 start: run
 

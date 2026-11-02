@@ -11,14 +11,18 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [coach.db :as db]
+            [coach.paths :as paths]
             [next.jdbc :as jdbc])
   (:import (java.io File)
            (java.time LocalDateTime)
            (java.time.format DateTimeFormatter)
            (java.util.zip ZipEntry ZipInputStream ZipOutputStream)))
 
-(def ^:dynamic *data-dir* "data")
-(def ^:dynamic *backup-dir* "data/backups")
+(def ^:dynamic *data-dir* "nil: the data folder (coach.paths)" nil)
+(def ^:dynamic *backup-dir* nil)
+
+(defn data-dir [] (or *data-dir* (str (paths/data-dir))))
+(defn backup-dir [] (or *backup-dir* (paths/data-file "backups")))
 (def keep-count "Automatic and manual backups kept; older ones are deleted." 14)
 
 (def prefix "coach-backup-")
@@ -27,7 +31,7 @@
 (defn- extra-files
   "Personal files besides the DB, as [zip-entry-name File]."
   []
-  (let [d (io/file *data-dir*)]
+  (let [d (io/file (data-dir))]
     (concat
      (for [n ["athlete.md" "athlete-summary.json"]
            :let [f (io/file d n)] :when (.isFile f)]
@@ -39,7 +43,7 @@
 (defn backups
   "Existing backups, newest first: [{:name :path :size :created}]."
   []
-  (->> (.listFiles (io/file *backup-dir*))
+  (->> (.listFiles (io/file (backup-dir)))
        (filter #(and (.isFile ^File %) (str/starts-with? (.getName ^File %) prefix)
                      (str/ends-with? (.getName ^File %) ".zip")))
        (sort-by #(.getName ^File %) #(compare %2 %1))
@@ -81,10 +85,10 @@
     (mapv :name old)))
 
 (defn create!
-  "Writes a new backup into *backup-dir* and (unless :prune? false) prunes
+  "Writes a new backup into (backup-dir) and (unless :prune? false) prunes
   old ones. Returns its entry."
   [ds & [{:keys [prune?] :or {prune? true}}]]
-  (let [dir  (doto (io/file *backup-dir*) .mkdirs)
+  (let [dir  (doto (io/file (backup-dir)) .mkdirs)
         name (str prefix (.format (LocalDateTime/now) stamp-fmt) ".zip")
         part (io/file dir (str name ".part"))]
     ;; written under a temporary name so a crash never leaves a half backup
@@ -102,7 +106,8 @@
 
 (defn status []
   (let [bs (backups)]
-    {:dir *backup-dir* :count (count bs) :latest (first bs) :keep keep-count}))
+    {:dir (backup-dir) :count (count bs) :latest (first bs) :keep keep-count
+     :backups (mapv #(dissoc % :path) bs)}))
 
 ;; ---------------------------------------------------------------------------
 ;; Restore (CLI only)
@@ -114,6 +119,13 @@
        (not (str/starts-with? n "/"))
        (or (#{"coach.db" "athlete.md" "athlete-summary.json"} n)
            (re-matches #"athlete-backups/[^/]+" n))))
+
+(defn backup-file?
+  "Whether `file` is a coach backup (a zip with coach.db in it)."
+  [file]
+  (try (with-open [zin (ZipInputStream. (io/input-stream (io/file file)))]
+         (boolean (some #{"coach.db"} (take-while some? (repeatedly #(some-> (.getNextEntry zin) .getName))))))
+       (catch Exception _ false)))
 
 (defn restore!
   "Replaces data/ files with those in backup `file`. Backs up the current
@@ -128,7 +140,7 @@
     ;; not pruned: that could delete the very backup being restored
     (let [before (create! ds {:prune? false})]
       (println "Current state backed up to" (:path before)))
-    (let [data (io/file *data-dir*)]
+    (let [data (io/file (data-dir))]
       ;; a leftover write-ahead log belongs to the old database: replayed onto
       ;; the restored file it would corrupt it (its content is in the backup above)
       (doseq [ext ["-wal" "-shm"]] (io/delete-file (io/file data (str "coach.db" ext)) true))
@@ -155,11 +167,12 @@
           (when-not (some #{n} (take-while some? (repeatedly #(some-> (.getNextEntry zin) .getName))))
             (io/delete-file (io/file data n) true)))))))
 
-(defn- dashboard-running? []
-  (some (fn [port]
-          (try (with-open [_ (java.net.Socket. "127.0.0.1" (int port))] true)
-               (catch java.io.IOException _ false)))
-        [8080 8090]))
+(defn- dashboard-running?
+  "Whether an app holds this data folder (coach.paths/lock-data-dir!)."
+  []
+  (if (paths/lock-data-dir! 0)
+    (do (paths/unlock-data-dir!) false)
+    true))
 
 (defn- human-size [n]
   (format "%.1f MB" (/ n 1048576.0)))
@@ -177,7 +190,7 @@
                       (println "Usage: clojure -M -m coach.backup restore data/backups/coach-backup-….zip")
                       (System/exit 2))
                     (when (dashboard-running?)
-                      (println "The dashboard is running (port 8080 or 8090). Stop it, then restore.")
+                      (println "The app is running on this data folder. Quit it (Settings › General), then restore. Or restore from Settings › General › Backup.")
                       (System/exit 1))
                     (restore! ds file)
                     (println "Restored from" file)))

@@ -64,13 +64,24 @@ The browser opens on the Dashboard, whose **Getting started** checklist walks th
 log in to Garmin and paste a Claude API key (both in Settings › General), then the first sync.
 
 The app then runs in the background (syncing every 2 h) until **Settings › General › Quit the app**
-or the computer shuts down; the shortcut starts it again, or just opens it if it's running. To
-update, run the installer again: your data stays. Where things are:
+or the computer shuts down; the shortcut starts it again, or just opens it if it's running.
+Settings › General also has:
+- **Start with the computer**: starts the app in the background at login, so syncing never pauses
+  (Garmin keeps training status and race predictions only for the day itself).
+- **Update now**, when a newer release exists (checked at start and twice a day). It runs the
+  installer, which replaces the app and restarts it; the data stays. Running the installer by
+  hand does the same.
+- **Data folder**: move the data elsewhere (e.g. a folder that is backed up), or point the app
+  at a folder that already has coach data. The app restarts.
+- **Restore a backup**, from the list or from a file kept elsewhere. The app restarts.
+
+Where things are:
 
 | | Windows | Linux |
 |---|---|---|
-| App and data | `%LOCALAPPDATA%\GarminCoach` (data in `data\`) | `~/.local/share/garmin-coach` (data in `data/`) |
-| Log | `data\app.log` | `data/app.log` |
+| App | `%LOCALAPPDATA%\GarminCoach` | `~/.local/share/garmin-coach` |
+| Data (unless moved in Settings) | `data\` in the app folder | `data/` in the app folder |
+| Log | `app.log` in the data folder | `app.log` in the data folder |
 | Uninstall | Start menu › Uninstall Garmin Coach | `~/.local/share/garmin-coach/uninstall.sh` |
 
 The installer downloads Java 21 ([Adoptium](https://adoptium.net)), [uv](https://github.com/astral-sh/uv)
@@ -90,13 +101,14 @@ from the repository: it installs `target/garmin-coach.jar` instead of the releas
 - `uv`/`uvx`, which runs the Garmin MCP server
 
 The page makes no outside requests except for OpenStreetMap map tiles (`npm install` copies the
-font and Leaflet's CSS into `resources/public/`).
+font and Leaflet's CSS into `resources/public/`). The server talks to Garmin, Claude and, in the
+installed app only, GitHub (the update check).
 
 ### Setup
 ```sh
 npm install
 npm run release                       # builds resources/public/js/main.js
-make run                              # http://127.0.0.1:8080/
+make run                              # http://127.0.0.1:8081/
 ```
 The Dashboard then shows a **Getting started** checklist until everything is set up:
 1. **Connect Garmin**: log in with your Garmin email and password (and the code, with two-step
@@ -112,7 +124,7 @@ The Dashboard then shows a **Getting started** checklist until everything is set
 ### Run
 | Command | What it does |
 |---|---|
-| `make run` (or `make start`) | Dashboard on http://127.0.0.1:8080/; syncs on start and every 2 h (06–22 h) |
+| `make run` (or `make start`) | Dashboard on http://127.0.0.1:8081/ (8080 is the installed app's); syncs on start and every 2 h (06–22 h) |
 | `make offline` | Dashboard on port 8090, no syncing |
 | `make watch` | Rebuilds the frontend on every change (reload the page) |
 | `make build` | Release build of the frontend |
@@ -122,6 +134,10 @@ The Dashboard then shows a **Getting started** checklist until everything is set
 | `make app` | Builds the installable `target/garmin-coach.jar` (frontend included) |
 | `make backup` / `make backups` | Makes a backup / lists them |
 | `make restore FILE=…` | Restores a backup (dashboard stopped) |
+
+The data is in `data/`; `COACH_DATA_DIR=… make run` uses another folder, e.g. the installed app's
+(`~/.local/share/garmin-coach/data`). Only one app runs on a data folder at a time (a lock file
+in it): quit the installed app first.
 
 Single sync steps: `clojure -M -m coach.sync <step>`, where the step is `intraday [days]`,
 `history` (everything before the first sync), `thresholds` (LTHR, threshold pace, FTP, HR zones), `overview` (training status, predictions,
@@ -138,15 +154,13 @@ A banner above every page says what failed and what to do:
   [Claude Console billing page](https://platform.claude.com/settings/billing), then press
   **I've added funds, check again**.
 - **The server isn't running.** Open the app from its shortcut (or run `make run`); the page
-  reconnects by itself. If it won't start, `data/app.log` says why.
+  reconnects by itself. If it won't start, `app.log` in the data folder says why.
 
 A failed sync never damages stored data: a day that comes back empty never replaces a stored day.
 
 ## Backups
 Before the first sync of each day, the dashboard zips the database and the athlete document into
-`data/backups/` and keeps the newest 14. **Download backup** in Settings makes a fresh one to keep
-outside `data/`. To restore, stop the dashboard and run
-`make restore FILE=data/backups/coach-backup-….zip`; the current state is backed up first.
-In the installed app, quit it and run, in its folder:
-`runtime/jre/bin/java -cp app/garmin-coach.jar clojure.main -m coach.backup restore data/backups/coach-backup-….zip`
-(on Windows `runtime\jre\bin\java` and backslashes).
+`backups/` in the data folder and keeps the newest 14. **Download backup** in Settings makes a
+fresh one to keep elsewhere. **Restore a backup** in Settings restores one from the list or from a
+file; the current state is backed up first, and the app restarts. In a terminal (app stopped):
+`make restore FILE=data/backups/coach-backup-….zip`.

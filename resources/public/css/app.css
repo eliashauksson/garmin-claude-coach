@@ -631,3 +631,13 @@ td.name-wrap { font-weight: 700; white-space: normal; min-width: 160px; }
 .setup-title { font-weight: 700; }
 .setup-step .sub { margin-top: 2px; }
 .setup-step .sub .btn-ink { padding: 6px 12px; font-size: 13px; }
+
+/* Settings: backups to restore, the data folder */
+.backup-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.backup-list li { display: flex; align-items: center; gap: 10px; }
+.backup-list li > span:first-child { min-width: 110px; }
+.backup-list .pill { margin-left: auto; }
+.file-pick { display: inline-flex; cursor: pointer; margin-top: 6px; }
+.file-pick input { display: none; }
+.file-pick.disabled { opacity: .5; pointer-events: none; }
+code.path { word-break: break-all; }

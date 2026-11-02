@@ -134,8 +134,9 @@ cat > "$DIR/uninstall.sh" <<EOF
 #!/usr/bin/env bash
 # Removes Garmin Coach. Asks before deleting your training data.
 curl -fs -m 2 -X POST "http://127.0.0.1:$PORT/api/quit" >/dev/null 2>&1 && sleep 3
-rm -f "$APPS/garmin-coach.desktop" "$DESKTOP_DIR/garmin-coach.desktop"
+rm -f "$APPS/garmin-coach.desktop" "$DESKTOP_DIR/garmin-coach.desktop" "\${XDG_CONFIG_HOME:-\$HOME/.config}/autostart/garmin-coach.desktop"
 rm -rf "$DIR/app" "$DIR/runtime" "$DIR/garmin-coach"
+grep -q ':data-dir' "$DIR/config.edn" 2>/dev/null && echo "A data folder you chose in Settings stays where it is: \$(grep -o ':data-dir "[^"]*"' "$DIR/config.edn")"
 answer=n
 if (exec </dev/tty) 2>/dev/null; then
   read -r -p "Also delete your training data in $DIR/data? [y/N] " answer </dev/tty || answer=n
@@ -150,7 +151,12 @@ chmod +x "$DIR/uninstall.sh"
 
 trap - ERR
 bold "Done! Garmin Coach is installed."
-echo "Find it in your app menu or on the desktop. Starting it now…"
-nohup setsid "$DIR/garmin-coach" >/dev/null 2>&1 &
-echo "It opens in your browser in a few seconds."
+if [ -n "${GARMIN_COACH_UPDATING:-}" ]; then
+  # updated from the app's Settings: the open page reconnects by itself
+  nohup setsid "$DIR/garmin-coach" --background >/dev/null 2>&1 &
+else
+  echo "Find it in your app menu or on the desktop. Starting it now…"
+  nohup setsid "$DIR/garmin-coach" >/dev/null 2>&1 &
+  echo "It opens in your browser in a few seconds."
+fi
 echo "To uninstall later: $DIR/uninstall.sh"
