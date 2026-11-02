@@ -156,7 +156,9 @@
     (let [cmd (launch-command port "--background")
           v   (str "\"" (first cmd) "\" -cp \"" (nth cmd 2) "\" " (str/join " " (drop 3 cmd)))
           ps  (if on?
-                "New-ItemProperty -Path $env:GC_KEY -Name $env:GC_NAME -Value $env:GC_VALUE -PropertyType String -Force | Out-Null"
+                ;; the Run key is missing on a fresh Windows (seen on a test machine)
+                (str "if (-not (Test-Path $env:GC_KEY)) { New-Item -Path $env:GC_KEY -Force | Out-Null }; "
+                     "New-ItemProperty -Path $env:GC_KEY -Name $env:GC_NAME -Value $env:GC_VALUE -PropertyType String -Force | Out-Null")
                 "Remove-ItemProperty -Path $env:GC_KEY -Name $env:GC_NAME -ErrorAction SilentlyContinue")
           [exit out] (run! ["powershell" "-NoProfile" "-NonInteractive" "-Command" ps]
                            {"GC_KEY" "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
