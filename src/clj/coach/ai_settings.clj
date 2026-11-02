@@ -62,10 +62,10 @@
 
 (def scopes
   "For the Translations task: which languages Claude's texts are kept in."
-  [{:id "all"      :label (tk "All languages")
-    :about (tk "Every result is translated into every language right away; switching is instant.")}
-   {:id "selected" :label (tk "Selected language only")
-    :about (tk "Translated only into the language in use; switching fills in the rest (about a minute). Cheaper.")}])
+  [{:id "selected" :label (tk "Selected language only")
+    :about (tk "Translated only into the language in use; switching fills in the rest (about a minute). Cheaper.")}
+   {:id "all"      :label (tk "All languages")
+    :about (tk "Every result is translated into every language right away; switching is instant.")}])
 
 (def scope-ids (set (map :id scopes)))
 
@@ -73,7 +73,7 @@
   (into {} (for [t tasks]
              [(:id t) (cond-> (select-keys t [:model :effort])
                         (batchable (:id t)) (assoc :delivery "auto")
-                        (= "translation" (:id t)) (assoc :scope "all"))])))
+                        (= "translation" (:id t)) (assoc :scope "selected"))])))
 
 (defonce ^{:doc "The DB the choices live in; set by the dashboard on start.
   nil (tests, REPL) means the defaults apply."}

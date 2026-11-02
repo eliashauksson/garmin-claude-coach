@@ -36,8 +36,14 @@
                            VALUES (?, 'AM', 'EASY', ?, 30, 5, 'Z1-Z2', ?, NULL, 'planned', 'x', 'x')"
                           date title description]))
 
+(defn- all-languages
+  "Runs `f` with the Translations scope set to all languages (the default is the selected one)."
+  [f]
+  (with-redefs [coach.ai-settings/for-task (constantly {:scope "all"})] (f)))
+
 (deftest translate-once-and-store
-  (let [ds    (temp-ds)
+  (all-languages
+   #(let [ds    (temp-ds)
         calls (atom [])
         today (str (java.time.LocalDate/now))]
     (add-workout! ds today "Easy run" "Relaxed 30 minutes on flat ground.")
@@ -58,7 +64,7 @@
       (add-workout! ds today "Easy run" "Relaxed 40 minutes, a few strides.")
       (reset! calls [])
       (is (= 1 (tr/translate-missing! ds (fake-claude calls))))
-      (is (= ["Relaxed 40 minutes, a few strides."] (:texts (first @calls)))))))
+      (is (= ["Relaxed 40 minutes, a few strides."] (:texts (first @calls))))))))
 
 (deftest a-wrong-answer-stores-nothing
   (let [ds (temp-ds)
@@ -81,7 +87,8 @@
   (is (= ["de"] (tr/wanted-languages "selected" "de"))))
 
 (deftest a-new-result-is-not-sent-back-for-its-own-language
-  (let [ds    (temp-ds)
+  (all-languages
+   #(let [ds    (temp-ds)
         calls (atom [])
         today (str (java.time.LocalDate/now))]
     (add-workout! ds today "Lockerer Lauf" "Locker 30 Minuten auf flachem Gelände.")
@@ -89,7 +96,7 @@
     (tr/remember-source! ds "de" ["Lockerer Lauf" "Locker 30 Minuten auf flachem Gelände."])
     (tr/translate-missing! ds (fake-claude calls))
     (is (= ["en" "fr"] (:targets (first @calls))) "all languages: only the other two are requested")
-    (is (= "Lockerer Lauf" (tr/localize ds "de" "Lockerer Lauf")))))
+    (is (= "Lockerer Lauf" (tr/localize ds "de" "Lockerer Lauf"))))))
 
 (deftest selected-language-only
   (let [ds    (temp-ds)
