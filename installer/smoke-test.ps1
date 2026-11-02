@@ -16,7 +16,12 @@ function Check($ok, $what) {
 function Api($method, $path, $body) {
   $p = @{ Method = $method; Uri = "$base$path"; TimeoutSec = 400; UseBasicParsing = $true }
   if ($null -ne $body) { $p.ContentType = 'application/json'; $p.Body = ($body | ConvertTo-Json -Compress) }
-  Invoke-RestMethod @p
+  try { Invoke-RestMethod @p }
+  catch {
+    # the app's own error message, not just "(400) Bad Request"
+    $detail = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { '' }
+    throw "$method $path failed: $($_.Exception.Message) $detail"
+  }
 }
 
 function Started { try { (Invoke-RestMethod -Uri "$base/api/sync" -TimeoutSec 3 -UseBasicParsing).started_at } catch { $null } }
