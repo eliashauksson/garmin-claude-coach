@@ -885,7 +885,7 @@
        (ui/label-row {:icon :bolt :accent "--blue" :tint "--tint-blue" :soft? true :label (t "Getting started")})
        [:ol.setup-steps
         (step "garmin" garmin (t "Connect Garmin")
-              [:span (t "Log in once in a terminal.") " " [:a {:href "#/settings"} (t "How to connect")]])
+              [:span (t "Log in with your Garmin account once.") " " [:a {:href "#/settings"} (t "Connect")]])
         (step "sync" synced (t "First sync")
               (if garmin
                 [:span (t "Loads the last 4 weeks (a few minutes).") " " (status/sync-button sync)]

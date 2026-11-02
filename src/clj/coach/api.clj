@@ -20,6 +20,7 @@
             [coach.sync :as sync]
             [coach.translate :as translate]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [reitit.ring :as ring]
             [ring.adapter.jetty :as jetty]
             [ring.middleware.params :refer [wrap-params]])
@@ -291,6 +292,25 @@
     (plan-routes ds)
     (athlete-routes ds)
     ["/auth"        {:get (fn [_] (ok (auth-status ds)))}]
+    ;; logging in to Garmin from the page: email and password, then the
+    ;; two-step code if Garmin sends one. A new login starts a sync.
+    ["/garmin/login" {:post   (fn [req]
+                                (let [{:keys [email password]} (body req)
+                                      r (auth/start-login! ds email password)]
+                                  (when (= "ok" (:status r)) (run-sync! ds))
+                                  (ok r)))
+                      :delete (fn [_] (auth/cancel-login!) (ok {:status "cancelled"}))}]
+    ["/garmin/code"  {:post (fn [req]
+                              (let [r (auth/submit-code! ds (:code (body req)))]
+                                (when (= "ok" (:status r)) (run-sync! ds))
+                                (ok r)))}]
+    ;; the app runs in the background; Settings can stop it
+    ["/quit"         {:post (fn [_]
+                              (future (Thread/sleep 300)
+                                      (println "Stopped from the dashboard.")
+                                      (shutdown-agents)
+                                      (System/exit 0))
+                              (ok {:ok true}))}]
     ["/activities"  {:get (fn [{:keys [query-params]}]
                             (let [{:strs [sport from to limit]} query-params]
                               (ok (analysis/activities ds {:sport sport :from from :to to
@@ -448,8 +468,59 @@
   (when-let [ex @batch-poller] (.shutdownNow ex) (reset! batch-poller nil))
   (when-let [s @server] (.stop s) (reset! server nil)))
 
+(defn- windows? []
+  (str/starts-with? (str/lower-case (System/getProperty "os.name")) "windows"))
+
+(defn- open-browser!
+  "Opens `url` in the default browser."
+  [url]
+  (try
+    (.start (ProcessBuilder. ^java.util.List
+                             (cond (windows?) ["rundll32" "url.dll,FileProtocolHandler" url]
+                                   (str/includes? (str/lower-case (System/getProperty "os.name")) "mac") ["open" url]
+                                   :else ["xdg-open" url])))
+    (catch Exception e (println "Couldn't open the browser:" (ex-message e) "- open" url))))
+
+(defn- running?
+  "Whether the dashboard already answers on `port`."
+  [port]
+  (try
+    (let [c (doto ^java.net.HttpURLConnection (.openConnection (java.net.URL. (str "http://127.0.0.1:" port "/api/lang")))
+              (.setConnectTimeout 1000) (.setReadTimeout 3000))]
+      (= 200 (.getResponseCode c)))
+    (catch Exception _ false)))
+
+(defn- log-to-file!
+  "Started from a shortcut there is no terminal: output goes to data/app.log."
+  []
+  (.mkdirs (io/file "data"))
+  (let [ps (java.io.PrintStream. (java.io.FileOutputStream. "data/app.log" true) true "UTF-8")
+        w  (java.io.PrintWriter. (java.io.OutputStreamWriter. ps java.nio.charset.StandardCharsets/UTF_8) true)]
+    (System/setOut ps)
+    (System/setErr ps)
+    (alter-var-root #'*out* (constantly w))
+    (alter-var-root #'*err* (constantly w))
+    (println (str "\n--- " (java.time.LocalDateTime/now) " ---"))))
+
 (defn -main
-  "clojure -M -m coach.api [port] [--no-sync]"
+  "clojure -M -m coach.api [port] [--no-sync] [--open]
+
+  --open is what the app shortcut runs: it starts the dashboard unless it is
+  already running, logs to data/app.log and opens it in the browser."
   [& args]
-  (start! {:port  (or (some parse-long args) 8080)
-           :sync? (not (some #{"--no-sync"} args))}))
+  (let [port (or (some parse-long args) 8080)
+        url  (str "http://127.0.0.1:" port "/")
+        opts {:port port :sync? (not (some #{"--no-sync"} args))}]
+    (if-not (some #{"--open"} args)
+      (start! opts)
+      (if (running? port)
+        (do (open-browser! url) (System/exit 0))
+        (do (log-to-file!)
+            (try (start! opts)
+                 (catch Throwable e
+                   ;; e.g. a second click while the first is still starting
+                   (println "Couldn't start:" (ex-message e))
+                   (if (some (fn [_] (Thread/sleep 1000) (running? port)) (range 60))
+                     (do (open-browser! url) (System/exit 0))
+                     (System/exit 1))))
+            (open-browser! url))))))

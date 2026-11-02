@@ -1,5 +1,5 @@
 (ns coach.auth-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [coach.auth :as auth]))
 
 (deftest countdown-test
@@ -31,3 +31,13 @@
 
 (deftest not-connected-status-test
   (is (= :not_connected (:level (auth/status nil false))) "before the first login, never \"expired\""))
+
+(deftest failure-message-test
+  (testing "the lines from garmin-mcp-auth's ✗ on"
+    (is (= "Authentication failed Invalid email or password. Please check your Garmin Connect credentials."
+           (auth/failure-message (str "Authenticating with Garmin Connect...\nEmail: a@b.c\n\n"
+                                      "✗ Authentication failed\n  Invalid email or password.\n"
+                                      "  Please check your Garmin Connect credentials.\n")))))
+  (testing "without a ✗, its last line"
+    (is (= "error: Failed to fetch" (auth/failure-message "Resolving…\nerror: Failed to fetch\n"))))
+  (is (= "" (auth/failure-message ""))))

@@ -8,8 +8,9 @@
   (:import (java.time LocalDate LocalDateTime ZoneOffset)))
 
 (def server-ref
-  "Pinned so a server update can't silently change tool names or shapes."
-  "git+https://github.com/Taxuspt/garmin_mcp@a2ca5fcac34524b83814fe2fcf3d479f8a75983f")
+  "Pinned so a server update can't silently change tool names or shapes. A
+  source archive rather than git+https, so it installs without git (Windows)."
+  "garmin-mcp @ https://github.com/Taxuspt/garmin_mcp/archive/a2ca5fcac34524b83814fe2fcf3d479f8a75983f.zip")
 
 (def read-tools
   #{"count_activities" "get_activities" "get_activities_by_date" "get_activity"
@@ -23,9 +24,20 @@
     ;; the dashboard's coach overview (coach.overview)
     "get_training_load_balance" "get_race_predictions" "get_endurance_score"})
 
-(defn- uvx-path []
-  (let [local (str (System/getProperty "user.home") "/.local/bin/uvx")]
-    (if (.exists (java.io.File. local)) local "uvx")))
+(defn- uvx-path
+  "The uvx the installer put next to the app (runtime/uv), else the one uv's
+  own installer puts in ~/.local/bin, else whatever is on the PATH."
+  []
+  (let [exe (if (str/starts-with? (str/lower-case (System/getProperty "os.name")) "windows") "uvx.exe" "uvx")]
+    (or (some #(let [f (java.io.File. ^String %)] (when (.isFile f) (.getAbsolutePath f)))
+              [(str "runtime/uv/" exe)
+               (str (System/getProperty "user.home") "/.local/bin/" exe)])
+        "uvx")))
+
+(def python-env
+  "Python's console encoding on Windows can't print garmin_mcp's ✓ and ✗
+  into a pipe; UTF-8 everywhere. Unbuffered, so prompts arrive at once."
+  {"PYTHONUTF8" "1" "PYTHONIOENCODING" "utf-8" "PYTHONUNBUFFERED" "1"})
 
 (defn server-cmd
   "Command line for one of the pinned server's executables
@@ -407,9 +419,26 @@
    (.mkdirs (.getParentFile (.getAbsoluteFile (java.io.File. ^String stderr-file))))
    (->GarminMcpSource
     (mcp/start! {:cmd (server-cmd "garmin-mcp")
-                 :env {"GARMIN_ENABLED_TOOLS" (str/join "," (sort read-tools))}
+                 :env (assoc python-env "GARMIN_ENABLED_TOOLS" (str/join "," (sort read-tools)))
                  :stderr-file stderr-file})
     delay-ms)))
 
 (defn stop! [{:keys [client]}]
   (mcp/stop! client))
+
+(defn -main
+  "clojure -M -m coach.garmin-mcp prepare
+
+  Downloads Python and the pinned Garmin server ahead of time (the installer
+  runs this), so the first login doesn't wait for them."
+  [& [cmd]]
+  (when-not (= "prepare" cmd)
+    (println "Usage: clojure -M -m coach.garmin-mcp prepare")
+    (System/exit 2))
+  (let [pb (doto (ProcessBuilder. ^java.util.List (server-cmd "garmin-mcp-auth" "--help"))
+             (.redirectError java.lang.ProcessBuilder$Redirect/INHERIT)
+             (.redirectOutput java.lang.ProcessBuilder$Redirect/DISCARD))
+        _  (.putAll (.environment pb) ^java.util.Map python-env)
+        exit (.waitFor (.start pb))]
+    (println (if (zero? exit) "Garmin connector ready." (str "Preparing the Garmin connector failed (exit " exit ").")))
+    (System/exit exit)))

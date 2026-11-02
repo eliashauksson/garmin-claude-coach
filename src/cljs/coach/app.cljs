@@ -133,7 +133,7 @@
       (.then (fn [body]
                (when (:server-down @state)
                  ;; back after a restart: reload what failed while it was down
-                 (swap! state assoc :server-down false :errors {} :data {})
+                 (swap! state assoc :server-down false :quit false :errors {} :data {})
                  (load-route!)
                  (fetch! status/backup-url))
                (sync-state! (js->clj body :keywordize-keys true))))
@@ -327,6 +327,29 @@
                                                                  (if (.-ok res) r {:ok false :error (:error r)})))))
                           (.then done)
                           (.catch #(done {:ok false :error (.-message %)}))))
+      ;; Garmin login from Settings: email + password, then the code if Garmin sends one
+      :garmin-login (let [op   (first args)
+                          path [:ui :garmin-login]
+                          {:keys [email password code]} (get-in @state path)
+                          done (fn [{:keys [status error]}]
+                                 (swap! state update-in path
+                                        #(case status
+                                           "ok"  {:done true}
+                                           "mfa" (assoc % :busy false :step :mfa :code "" :error error)
+                                           (assoc % :busy false :step nil :password "" :error error)))
+                                 (poll-sync!))]
+                      (case op
+                        :cancel (do (swap! state assoc-in path {})
+                                    (js/fetch "/api/garmin/login" #js {:method "DELETE"}))
+                        (do (swap! state update-in path assoc :busy true :error nil :done nil)
+                            (-> (if (= op :code)
+                                  (post-json "/api/garmin/code" {:code code})
+                                  (post-json "/api/garmin/login" {:email email :password password}))
+                                (.then done)
+                                (.catch #(done {:status "error" :error (.-message %)}))))))
+      :garmin-login-key (let [[op ev] args] (when (= "Enter" (.-key ev)) (handle [:garmin-login op])))
+      :quit         (-> (js/fetch "/api/quit" #js {:method "POST"})
+                        (.then #(swap! state assoc :quit true :server-down true)))
       :load-history (-> (js/fetch "/api/history" #js {:method "POST"})
                         (.then (fn [_] (poll-sync!))))
       :backup-started (doseq [ms [3000 10000 30000]] ; the download starts once the zip is written
@@ -346,6 +369,7 @@
       (handle (cond
                 (= :event/target-value (last action)) (conj (vec (butlast action)) (.. ev -target -value))
                 (= :athlete-chat-key (first action))  [:athlete-chat-key ev]
+                (= :garmin-login-key (first action))  [:garmin-login-key (second action) ev]
                 (= :athlete-upload (first action))    [:athlete-upload ev]
                 :else action)))))
 

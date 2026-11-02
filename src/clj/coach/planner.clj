@@ -33,6 +33,14 @@
 
 (def general-file "training-principles.md")
 
+(defn- general-text
+  "training-principles.md from the project folder, else the copy inside the
+  installed app's jar."
+  []
+  (let [f (io/file general-file)]
+    (slurp (if (.exists f) f (or (io/resource general-file)
+                                 (throw (ex-info "training-principles.md is missing" {})))))))
+
 (defn knowledge
   "The first system block of every Claude request: the general principles and
   athlete.md, the same text for every task. Task instructions come after it.
@@ -41,7 +49,7 @@
   output schema (measured: a different schema misses, a different effort
   hits), and an unread cache write costs 25% more than plain input."
   [doc]
-  (str "# General training principles (read-only)\n\n" (slurp general-file)
+  (str "# General training principles (read-only)\n\n" (general-text)
        "\n\n# Current athlete.md\n\n" (or doc "(no athlete.md yet)")))
 
 (defn principles
@@ -78,6 +86,9 @@
 (defn valid-key-format? [k]
   (boolean (and (string? k) (re-matches #"sk-ant-[A-Za-z0-9_\-]{20,}" k))))
 
+(defn- posix? []
+  (contains? (.supportedFileAttributeViews (java.nio.file.FileSystems/getDefault)) "posix"))
+
 (defn save-key!
   "Stores the API key in *key-file*, readable only by this user."
   [k]
@@ -89,10 +100,13 @@
           path (.toPath f)
           perms #(java.nio.file.attribute.PosixFilePermissions/fromString %)]
       (java.nio.file.Files/createDirectories dir (make-array java.nio.file.attribute.FileAttribute 0))
-      (java.nio.file.Files/setPosixFilePermissions dir (perms "rwx------"))
-      (when-not (.exists f)
-        (java.nio.file.Files/createFile path (into-array [(java.nio.file.attribute.PosixFilePermissions/asFileAttribute (perms "rw-------"))])))
-      (java.nio.file.Files/setPosixFilePermissions path (perms "rw-------"))
+      (if (posix?)
+        (do (java.nio.file.Files/setPosixFilePermissions dir (perms "rwx------"))
+            (when-not (.exists f)
+              (java.nio.file.Files/createFile path (into-array [(java.nio.file.attribute.PosixFilePermissions/asFileAttribute (perms "rw-------"))])))
+            (java.nio.file.Files/setPosixFilePermissions path (perms "rw-------")))
+        ;; Windows: the user's profile folder is already private to them
+        nil)
       (spit f k)
       (key-status))))
 

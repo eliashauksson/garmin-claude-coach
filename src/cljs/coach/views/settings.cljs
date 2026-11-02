@@ -80,32 +80,75 @@
           [:div {:replicant/key "b"}
            [:button.btn-ink {:disabled running :on {:click [[:load-history]]}} (t "Load full history")]]))])))
 
-(defn- garmin-card [{:keys [auth last_ok setup] :as sync}]
-  (let [cmd (or (:renew_command auth) "clojure -M -m coach.auth login")]
-    (ui/card {:flex "1 1 360px" :class "connect"}
-             [:div.lab "Garmin" [:span.sp] (connected-pill (not (false? (:garmin setup))))]
-             (if (false? (:garmin setup))
-               (list
-                [:div {:replicant/key "t"} (t "The app reads your Garmin data through Garmin Connect. Log in once, in a terminal:")]
-                [:ol.steps {:replicant/key "s"}
-                 [:li (t "Open a terminal in the app folder.")]
-                 [:li (t "Run this command:") " " [:code cmd] " " (t "It asks for your Garmin email, password and, if you use two-step verification, the code.")]
-                 [:li (t "Come back here and press Sync now. The first sync loads the last 4 weeks and takes a few minutes.")]]
-                [:div.sub {:replicant/key "n"} (t "The login stays on this computer and lasts about 6 months; the app reminds you before it runs out. Nothing is ever written to Garmin.")]
-                [:div {:replicant/key "b"} (status/sync-button sync)])
-               (list
-                [:div {:replicant/key "t"}
-                 (case (:level auth)
-                   "expired" (t "Garmin login expired")
-                   "unknown" (t "Garmin login not recorded")
-                   (if (:days_left auth)
-                     (t "Garmin login: about {0} days left (until about {1})" (:days_left auth) (ui/date-short (:expires_on auth)))
-                     "—"))]
-                (when-let [w (status/when-str last_ok)]
-                  [:div.sub {:replicant/key "l"} (t "Last successful sync: {0}" w)])
-                [:div.sub {:replicant/key "r"} (t "Renew in a terminal:") " " [:code cmd]]
-                [:div {:replicant/key "b"} (status/sync-button sync)]
-                (history-section sync))))))
+(defn- garmin-login
+  "Email and password, then the two-step code if Garmin sends one. Nothing is
+  stored but the login Garmin hands back."
+  [{:keys [email password code step busy error done]}]
+  (if done
+    [:div.ok-line {:replicant/key "gl"} (t "Logged in. The first sync is running; it takes a few minutes.")]
+    [:div.garmin-login {:replicant/key "gl"}
+     (if (= step :mfa)
+       (list
+        [:div {:replicant/key "m"} (t "Garmin sent you a code by email or in the Garmin Connect app. Enter it here:")]
+        [:div.connect-row {:replicant/key "c"}
+         [:input.note {:type "text" :inputmode "numeric" :autocomplete "one-time-code" :value (or code "")
+                       :aria-label (t "Code") :placeholder "123456"
+                       :on {:input   [[:set-in-ui :garmin-login :code :event/target-value]]
+                            :keydown [[:garmin-login-key :code]]}}]
+         [:button.btn-ink {:disabled (or busy (empty? code)) :on {:click [[:garmin-login :code]]}}
+          (if busy (t "Checking…") (t "Confirm"))]
+         [:button.pill {:disabled busy :on {:click [[:garmin-login :cancel]]}} (t "Cancel")]])
+       (list
+        [:div.connect-row {:replicant/key "e"}
+         [:input.note {:type "email" :autocomplete "username" :value (or email "")
+                       :aria-label (t "Garmin email") :placeholder (t "Garmin email")
+                       :on {:input [[:set-in-ui :garmin-login :email :event/target-value]]}}]]
+        [:div.connect-row {:replicant/key "p"}
+         [:input.note {:type "password" :autocomplete "current-password" :value (or password "")
+                       :aria-label (t "Garmin password") :placeholder (t "Garmin password")
+                       :on {:input   [[:set-in-ui :garmin-login :password :event/target-value]]
+                            :keydown [[:garmin-login-key :login]]}}]
+         [:button.btn-ink {:disabled (or busy (empty? email) (empty? password)) :on {:click [[:garmin-login :login]]}}
+          (if busy (t "Logging in…") (t "Log in"))]]
+        (when busy
+          [:div.sub {:replicant/key "w"} [:span.spinner-inline {:aria-hidden "true"}]
+           (t "This can take a minute; the very first time a bit longer.")])))
+     (when error [:div.error {:replicant/key "x"} error])]))
+
+(defn- garmin-card [{:keys [auth last_ok setup] :as sync} login]
+  (ui/card {:flex "1 1 360px" :class "connect"}
+           [:div.lab "Garmin" [:span.sp] (connected-pill (not (false? (:garmin setup))))]
+           (if (false? (:garmin setup))
+             (list
+              [:div {:replicant/key "t"} (t "The app reads your Garmin data through Garmin Connect. Log in once with your Garmin account:")]
+              (garmin-login login)
+              [:div.sub {:replicant/key "n"} (t "Your password is passed to Garmin and not stored. The login stays on this computer and lasts about 6 months; the app reminds you before it runs out. Nothing is ever written to Garmin.")])
+             (list
+              [:div {:replicant/key "t"}
+               (case (:level auth)
+                 "expired" (t "Garmin login expired")
+                 "unknown" (t "Garmin login not recorded")
+                 (if (:days_left auth)
+                   (t "Garmin login: about {0} days left (until about {1})" (:days_left auth) (ui/date-short (:expires_on auth)))
+                   "—"))]
+              (when-let [w (status/when-str last_ok)]
+                [:div.sub {:replicant/key "l"} (t "Last successful sync: {0}" w)])
+              [:div {:replicant/key "b"} (status/sync-button sync)]
+              (cond
+                (:done login) (garmin-login login)
+                (or (#{"expired" "urgent" "unknown"} (:level auth)) (seq login))
+                (list [:div.lab {:replicant/key "rl"} (t "Log in again")] (garmin-login login))
+                :else
+                [:details.connect-replace {:replicant/key "r"}
+                 [:summary (t "Log in again")]
+                 (garmin-login login)])
+              (history-section sync)))))
+
+(defn- app-card []
+  (ui/card {:flex "1 1 320px"}
+           [:div.lab (t "App")]
+           [:div.sub (t "The app keeps running in the background, syncing every 2 hours, until you quit it or shut down the computer. Its shortcut opens it again.")]
+           [:div [:button.pill {:on {:click [[:quit]]}} (t "Quit the app")]]))
 
 (defn- claude-card [{:keys [connected source hint file]} {:keys [input busy result]}]
   (let [save [:button.btn-ink {:disabled (or busy (empty? input)) :on {:click [[:claude-key :save]]}}
@@ -151,6 +194,6 @@
      (if (= "claude" tb)
        (costs/view s (first (urls route)))
        (list
-        [:div.row {:replicant/key "r0"} (garmin-card sync) (claude-card (get data key-url) (get-in s [:ui :claude-key]))]
+        [:div.row {:replicant/key "r0"} (garmin-card sync (get-in s [:ui :garmin-login])) (claude-card (get data key-url) (get-in s [:ui :claude-key]))]
         [:div.row {:replicant/key "r1"} (language-card) (appearance-card theme-choice)]
-        [:div.row {:replicant/key "r2"} (backup-card (get data status/backup-url))]))]))
+        [:div.row {:replicant/key "r2"} (backup-card (get data status/backup-url)) (app-card)]))]))

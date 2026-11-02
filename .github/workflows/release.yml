@@ -1,0 +1,51 @@
+# Builds the installable app and publishes it as a GitHub release.
+# Start one by pushing a version tag:  git tag v1.0.0 && git push origin v1.0.0
+# The installers (installer/) download the newest release's files.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: DeLaGuardo/setup-clojure@13.7.0
+        with:
+          cli: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Tests
+        run: clojure -M:test
+
+      - name: Frontend
+        run: |
+          npm ci
+          npm run release
+
+      - name: App jar
+        run: clojure -T:build uber
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp installer/install.sh install-linux.sh
+          cp installer/install-windows.cmd install-windows.cmd
+          gh release create "$GITHUB_REF_NAME" --title "Garmin Coach $GITHUB_REF_NAME" --generate-notes \
+            target/garmin-coach.jar installer/icon.png installer/icon.ico install-linux.sh install-windows.cmd

@@ -143,7 +143,10 @@
                       tmp    (io/file (str (.getPath target) ".restoring"))]
                   (io/make-parents target)
                   (io/copy zin tmp)
-                  (.renameTo tmp target)
+                  ;; File.renameTo won't replace an existing file on Windows
+                  (java.nio.file.Files/move (.toPath tmp) (.toPath target)
+                                            (into-array java.nio.file.CopyOption
+                                                        [java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
                   (println "  restored" n))))
             (recur))))
       ;; a restored backup without these files means they didn't exist then

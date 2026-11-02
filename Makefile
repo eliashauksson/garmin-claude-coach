@@ -1,4 +1,4 @@
-.PHONY: run start offline watch build sync status test backup backups restore
+.PHONY: run start offline watch build app sync status test backup backups restore
 
 # Dashboard on http://127.0.0.1:8080/, syncs on start and every 2 h
 run:
@@ -16,6 +16,10 @@ watch:
 
 build:
 	npm run release
+
+# The installable app: target/garmin-coach.jar (see installer/)
+app: build
+	clojure -T:build uber
 
 sync:
 	clojure -M -m coach.sync sync
