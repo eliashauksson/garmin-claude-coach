@@ -152,15 +152,19 @@
            [:div.banner.warn [:span.icon "!"]
             [:div (for [[i w] (map-indexed vector all)] [:div {:replicant/key i} w])]]))
        [:div.plan-list (for [item items] (item-row p item existing ui-state monday))]
-       (when (and pending? (not= "adjust" (:kind p)))
-         [:div.plan-footer
-          [:button.btn-ink {:on {:click [[:api "POST" (str "/api/plan/proposals/" id "/accept-all")
-                                          {:replace (get-in ui-state [:replace id] true)}]]}}
-           (t "Accept all remaining")]
-          [:label.sub
-           [:input {:type "checkbox" :checked (get-in ui-state [:replace id] true)
-                    :on {:change [[:set-in-ui :replace id (not (get-in ui-state [:replace id] true))]]}}]
-           " " (t "replace sessions already planned this week")]])
+       (when pending?
+         (if (= "adjust" (:kind p))
+           [:div.plan-footer
+            [:button.btn-ink {:on {:click [[:api "POST" (str "/api/plan/proposals/" id "/accept-all") {:replace false}]]}}
+             (t "Accept all remaining")]]
+           [:div.plan-footer
+            [:button.btn-ink {:on {:click [[:api "POST" (str "/api/plan/proposals/" id "/accept-all")
+                                            {:replace (get-in ui-state [:replace id] true)}]]}}
+             (t "Accept all remaining")]
+            [:label.sub
+             [:input {:type "checkbox" :checked (get-in ui-state [:replace id] true)
+                      :on {:change [[:set-in-ui :replace id (not (get-in ui-state [:replace id] true))]]}}]
+             " " (t "replace sessions already planned this week")]]))
        (when usage
          [:div.sub (str/join " · " (remove nil? [(t "Model {0}" (:model p))
                                                  (when (:cost_chf usage) (t "cost ≈ CHF {0}" (.toFixed (:cost_chf usage) 2)))

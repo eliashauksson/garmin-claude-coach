@@ -81,6 +81,23 @@
       (is (= [["2027-01-15" "THR"] ["2027-01-16" "LONG"]]
              (map (juxt :date :session_id) (plan/workouts ds "2027-01-11" "2027-01-24")))))))
 
+(deftest accept-all-adjustment-test
+  (let [ds  (temp-ds)
+        w1  (plan/add-workout! ds (assoc base-w :date "2027-01-15" :session_id "THR"))
+        w2  (plan/add-workout! ds (assoc base-w :date "2027-01-16" :session_id "LONG" :distance_km 24))
+        _   (plan/add-workout! ds (assoc base-w :date "2027-01-12" :session_id "EASY"))
+        pid (plan/create-proposal! ds "2027-01-11" "test" {:kind "adjust" :scope-end "2027-01-24" :signals [{:id "x"}]})]
+    (plan/finish-proposal! ds pid {:context {} :warnings [] :usage {}
+                                   :response {:summary "s" :warnings []
+                                              :changes [(assoc base-w :op "change" :workout_id w1 :date "2027-01-15" :session_id "EASY")
+                                                        (assoc base-w :op "remove" :workout_id w2 :date "2027-01-16" :session_id "LONG")
+                                                        (assoc base-w :op "add" :workout_id 0 :date "2027-01-17" :session_id "REC")]}})
+    (plan/accept-all! ds pid true)
+    (is (= [["2027-01-12" "EASY"] ["2027-01-15" "EASY"] ["2027-01-17" "REC"]]
+           (map (juxt :date :session_id) (plan/workouts ds "2027-01-11" "2027-01-24")))
+        "every change applied; replace is ignored, so untouched sessions stay")
+    (is (every? #{"accepted"} (map :decision (:items (plan/proposal ds pid)))))))
+
 (deftest missed-and-done-test
   (let [past [{:id 1 :date "2020-01-01" :slot "AM" :session_id "EASY" :status "planned"}
               {:id 2 :date "2020-01-01" :slot "PM" :session_id "GYM_UPPER" :status "done"}

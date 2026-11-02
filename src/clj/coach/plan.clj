@@ -210,10 +210,12 @@
 
 (defn accept-all!
   "Accepts every pending item. With `replace?`, planned (not done or skipped)
-  workouts already in that week that didn't come from this proposal are removed."
+  workouts already in that week that didn't come from this proposal are removed.
+  `replace?` is ignored for adjustments: their items change or remove the
+  planned sessions themselves, so clearing the week first would lose them."
   [ds proposal-id replace?]
-  (let [{:keys [monday items]} (proposal ds proposal-id)]
-    (when replace?
+  (let [{:keys [monday items kind]} (proposal ds proposal-id)]
+    (when (and replace? (not= "adjust" kind))
       (jdbc/execute! ds ["DELETE FROM planned_workouts WHERE date BETWEEN ? AND ? AND status = 'planned'
                           AND (proposal_id IS NULL OR proposal_id <> ?)"
                          monday (season/add-days monday 6) proposal-id]))
