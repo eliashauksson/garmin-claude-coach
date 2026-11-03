@@ -82,8 +82,10 @@
   history (valid from `epoch`); afterwards a changed value starts a new
   period from the day it was measured. Returns true if anything changed."
   [src ds]
-  (let [{:keys [thresholds sex]} (source/fetch-thresholds src)
-        existing (db/thresholds ds)
+  (let [{:keys [thresholds sex weight_kg]} (source/fetch-thresholds src)
+        ;; only Garmin's own rows: an estimated FTP (coach.analysis/sync-eftp!)
+        ;; mustn't make Garmin's unchanged value look new
+        existing (filter #(= "garmin" (:source %)) (db/thresholds ds))
         current  (fn [sport kind]
                    (:value (last (filter #(and (= sport (:sport %)) (= kind (:kind %))) existing))))
         changed  (doall
@@ -93,6 +95,7 @@
                     (db/add-threshold! ds {:sport sport :kind kind :value value :source "garmin"
                                            :valid_from (if (nil? cur) epoch (or measured_on (today)))})))]
     (when sex (db/set-state! ds :sex sex))
+    (when weight_kg (db/set-state! ds :weight_kg weight_kg))
     (boolean (seq changed))))
 
 ;; ---------------------------------------------------------------------------
@@ -293,7 +296,8 @@
       ;; new thresholds change every score; otherwise only score what's new
       (if changed?
         (analysis/compute-metrics! ds)
-        (analysis/compute-metrics! ds (distinct (concat new-ids missing)))))
+        (analysis/compute-metrics! ds (distinct (concat new-ids missing))))
+      (analysis/update-eftp! ds))
     :ok))
 
 (defn history-complete?
@@ -458,7 +462,9 @@
                                                    (source/fetch-full-activity src summary))))
       (db/set-state! ds state-key t)
       (finally
-        (when (seq @stored) (analysis/compute-metrics! ds (distinct @stored)))))
+        (when (seq @stored)
+          (analysis/compute-metrics! ds (distinct @stored))
+          (analysis/update-eftp! ds))))
     (vec (distinct @stored))))
 
 (defn coros!
@@ -484,6 +490,7 @@
     (sync-vo2max! src ds from (today)))
   (sync-streams! src ds)
   (analysis/compute-metrics! ds)
+  (analysis/update-eftp! ds)
   :complete)
 
 (defn history-status
@@ -543,7 +550,8 @@
   (let [ds (doto (db/datasource) db/migrate!)]
     (case cmd
       "status"  (prn (status ds))
-      "metrics" (println "Scored" (analysis/compute-metrics! ds) "activities")
+      "metrics" (do (println "Scored" (analysis/compute-metrics! ds) "activities")
+                    (analysis/update-eftp! ds))
       (let [_ (when-not (#{"sync" "backfill" "history" "streams" "intraday" "vo2max" "thresholds" "overview"} (or cmd "sync"))
                 (println "Unknown command:" cmd) (System/exit 2))
             {:keys [ok]}
@@ -554,7 +562,8 @@
                     "backfill"   (backfill! src ds (when n {:max-chunks (parse-long n)}))
                     "history"    (load-history! src ds)
                     "streams"    (do (sync-streams! src ds (when n {:max-activities (parse-long n)}))
-                                     (analysis/compute-metrics! ds))
+                                     (analysis/compute-metrics! ds)
+                                     (analysis/update-eftp! ds))
                     "intraday"   (let [days (if n (parse-long n) 7)]
                                    (sync-intraday! src ds (str (.minusDays (d (today)) (dec days))) (today)))
                     "vo2max"     (sync-vo2max! src ds epoch (today))

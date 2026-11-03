@@ -23,14 +23,17 @@
   "Thresholds valid on `date`: per (sport, kind) the latest row with
   valid_from <= date, or the earliest one if all are later."
   [rows date]
-  (let [pick (fn [rs]
+  (let [row  (fn [rs]
                (let [rs (sort-by :valid_from rs)]
-                 (:value (or (last (filter #(<= (compare (:valid_from %) date) 0) rs))
-                             (first rs)))))
+                 (or (last (filter #(<= (compare (:valid_from %) date) 0) rs))
+                     (first rs))))
+        pick (comp :value row)
         by   (group-by (juxt :sport :kind) rows)
-        zones (keep #(pick (by ["all" (str "hr_z" %)])) (range 1 6))]
+        zones (keep #(pick (by ["all" (str "hr_z" %)])) (range 1 6))
+        ftp  (row (by ["bike" "ftp"]))]
     (cond-> (into {} (for [[k rs] by :let [key (threshold-keys k)] :when key] [key (pick rs)]))
-      (= 5 (count zones)) (assoc :hr_zones (vec zones)))))
+      (= 5 (count zones)) (assoc :hr_zones (vec zones))
+      ftp                 (assoc :ftp_source (:source ftp)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Route thumbnail
@@ -86,6 +89,88 @@
                    :inputs th
                    :route (route-thumb stream))))))
      (count acts))))
+
+;; ---------------------------------------------------------------------------
+;; Cycling power: eFTP and the power curve
+
+(defn- bike-power-rides
+  "[{:id :date :power {duration watts}}] for the bike activities with power
+  (ids as stored; durations as numbers), oldest first."
+  [ds]
+  (->> (db/query ds ["SELECT a.id, a.date, a.sport, json_extract(m.peaks, '$.power') AS power
+                      FROM activities a JOIN activity_metrics m ON m.activity_id = a.id
+                      WHERE json_extract(m.peaks, '$.power') IS NOT NULL ORDER BY a.date"])
+       (filter #(= :bike (m/sport-family (:sport %))))
+       (keep (fn [r]
+               (let [p (json/read-str (:power r))]
+                 (when (seq p)
+                   {:id (:id r) :date (:date r)
+                    :power (into {} (map (fn [[k v]] [(parse-long (str k)) v])) p)}))))
+       vec))
+
+(defn sync-eftp!
+  "Stores the eFTP history (coach.metrics/eftp-history) as bike FTP rows with
+  source \"estimate\": new and changed values are written, ones no longer
+  in the history removed. Returns the earliest date that changed, or nil."
+  [ds]
+  (let [hist  (m/eftp-history (bike-power-rides ds))
+        want  (into {} (map (juxt :date :value)) hist)
+        have  (into {} (map (juxt :valid_from :value))
+                    (filter #(and (= "bike" (:sport %)) (= "ftp" (:kind %)) (= "estimate" (:source %)))
+                            (db/thresholds ds)))
+        stale (remove want (keys have))
+        fresh (remove #(= (want %) (have %)) (keys want))]
+    (doseq [d stale]
+      (next.jdbc/execute! ds ["DELETE FROM thresholds WHERE sport = 'bike' AND kind = 'ftp'
+                               AND source = 'estimate' AND valid_from = ?" d]))
+    (doseq [d fresh]
+      (db/add-threshold! ds {:sport "bike" :kind "ftp" :valid_from d :value (want d) :source "estimate"}))
+    (first (sort (concat stale fresh)))))
+
+(defn rescore-bikes-from!
+  "Scores the bike activities from `date` on again (after the FTP changed)."
+  [ds date]
+  (let [ids (->> (db/query ds ["SELECT id, sport FROM activities WHERE date >= ?" date])
+                 (filter #(= :bike (m/sport-family (:sport %))))
+                 (map :id))]
+    (when (seq ids) (compute-metrics! ds ids))))
+
+(defn update-eftp!
+  "sync-eftp!, then rescoring of the rides it affects. For the sync jobs,
+  after new activities are scored."
+  [ds]
+  (when-let [from (sync-eftp! ds)]
+    (rescore-bikes-from! ds from)))
+
+(defn- curve-of [rides]
+  (vec (for [[d {:keys [watts date]}] (m/best-curve rides)]
+         {:s d :watts watts :date date})))
+
+(defn cycling-power
+  "The Cycling power section: power curves (90 days, the 90 before, all
+  time), the bike FTP now and where it comes from, W/kg and the VO2 max
+  estimate from the best 5 minutes of the last 90 days. nil when no ride has power."
+  [ds today]
+  (let [rides (bike-power-rides ds)]
+    (when (seq rides)
+      (let [day    (fn [n] (str (.minusDays (LocalDate/parse today) n)))
+            within (fn [from to] (filter #(<= (compare from (:date %)) 0 (compare to (:date %))) rides))
+            recent (within (day (dec m/eftp-window-days)) today)
+            th     (thresholds-at (db/thresholds ds) today)
+            ftp    (:ftp th)
+            weight (some-> (db/get-state ds :weight_kg) parse-double)
+            p5     (get (update-vals (m/best-curve recent) :watts) 300)]
+        {:curve_90d      (curve-of recent)
+         :curve_prev_90d (curve-of (within (day (dec (* 2 m/eftp-window-days))) (day m/eftp-window-days)))
+         :curve_all      (curve-of rides)
+         :ftp            ftp
+         :ftp_source     (when ftp (:ftp_source th))
+         :weight_kg      weight
+         :wkg            (when (and ftp weight) (/ (Math/round (* 100.0 (/ ftp weight))) 100.0))
+         :vo2max_est     (m/cycling-vo2max p5 weight)
+         :eftp_history   (vec (for [r (db/thresholds ds)
+                                    :when (and (= "bike" (:sport r)) (= "ftp" (:kind r)) (= "estimate" (:source r)))]
+                                {:date (:valid_from r) :value (:value r)}))}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Athlete feedback

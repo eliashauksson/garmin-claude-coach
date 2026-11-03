@@ -81,3 +81,38 @@
              (last (analysis/pmc ds "2015-06-04" "2015-06-05")))))
     (testing "volume from the start"
       (is (seq (analysis/volume ds "all" "2015-06-05"))))))
+
+(deftest eftp-test
+  (let [ds    (temp-ds)
+        today (str (java.time.LocalDate/now))
+        ride  {:id 7 :date today :start_time_local (str today "T09:00:00") :sport "road_biking"
+               :name "Ride" :raw {}}
+        ;; 30 min: 5 easy, 20 at 250 W, 5 easy
+        n     1800
+        power (mapv #(if (<= 300 % 1499) 250.0 120.0) (range n))]
+    (db/upsert-activities! ds [ride])
+    (db/save-stream! ds 7 {:t (vec (range n)) :hr (vec (repeat n 140)) :power power} nil)
+    (db/set-state! ds :weight_kg 75.0)
+    (analysis/compute-metrics! ds)
+    (testing "without an FTP the ride is scored by heart rate"
+      (is (not= "TSS" (:tss_method (analysis/activity ds 7)))))
+    (analysis/update-eftp! ds)
+    (testing "the eFTP is stored as an estimated bike FTP from the ride's day"
+      (is (= [{:sport "bike" :kind "ftp" :valid_from today :value 238.0 :source "estimate"}]
+             (filter #(= "bike" (:sport %)) (db/thresholds ds)))))
+    (testing "and the ride is scored again with power"
+      (let [a (analysis/activity ds 7)]
+        (is (= "TSS" (:tss_method a)))
+        (is (= "estimate" (get-in a [:thresholds :ftp_source])))))
+    (testing "running it again changes nothing"
+      (is (nil? (analysis/sync-eftp! ds))))
+    (testing "the Cycling power section"
+      (let [p (analysis/cycling-power ds today)]
+        (is (= 238.0 (:ftp p)))
+        (is (= "estimate" (:ftp_source p)))
+        (is (= 3.17 (:wkg p)))
+        (is (number? (:vo2max_est p)))
+        (is (= 250.0 (:watts (some #(when (= 1200 (:s %)) %) (:curve_90d p)))))
+        (is (empty? (:curve_prev_90d p)))))
+    (testing "nothing without rides with power"
+      (is (nil? (analysis/cycling-power (temp-ds) today))))))

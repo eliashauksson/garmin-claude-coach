@@ -168,5 +168,6 @@
           [:div.sub {:replicant/key "th"}
            (str (t "Scored with LTHR {0} bpm" (some-> (:lthr th) js/Math.round))
                 (some->> (:threshold_speed th) ui/pace (t ", threshold pace {0} /km"))
-                (some->> (:ftp th) js/Math.round (t ", FTP {0}"))
+                (when-let [ftp (some-> (:ftp th) js/Math.round)]
+                  (if (= "estimate" (:ftp_source th)) (t ", estimated FTP {0}" ftp) (t ", FTP {0}" ftp)))
                 (t ", resting HR {0}." (:rest_hr th)))])))]))

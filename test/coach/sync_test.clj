@@ -228,3 +228,15 @@
     (is (true? (sync/history-complete? ds)) "an install that reached the old fixed start is complete")
     (db/set-state! ds :history_complete "false")
     (is (false? (sync/history-complete? ds)) "unless a backfill says it is still going")))
+
+(deftest thresholds-ignore-estimates-test
+  (let [ds  (temp-ds)
+        src (reify source/DataSource
+              (fetch-thresholds [_]
+                {:thresholds [{:sport "bike" :kind "ftp" :value 240.0}] :sex "MALE" :weight_kg 75.0}))]
+    (is (true? (sync/sync-thresholds! src ds)) "the first time it is new")
+    (db/add-threshold! ds {:sport "bike" :kind "ftp" :valid_from "2030-01-01" :value 260.0 :source "estimate"})
+    (testing "a newer estimate doesn't make Garmin's unchanged value look new"
+      (is (false? (sync/sync-thresholds! src ds)))
+      (is (= 2 (count (db/thresholds ds)))))
+    (is (= "75.0" (db/get-state ds :weight_kg)))))

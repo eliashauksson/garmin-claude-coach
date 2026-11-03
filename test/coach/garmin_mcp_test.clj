@@ -134,3 +134,9 @@
   (is (gm/error-text? "Error retrieving stats: boom"))
   (is (not (gm/error-text? "No stats found for 2026-10-30")) "a day without data is not an error")
   (is (not (gm/error-text? {:date "2026-10-30"}))))
+
+(deftest profile-weight-test
+  (is (= 75.0 (gm/profile-weight-kg {:userData {:gender "MALE" :weight 75000.0}})))
+  (is (= 72.5 (gm/profile-weight-kg {:userData {:weight 72480.0}})))
+  (is (nil? (gm/profile-weight-kg {:userData {:weight nil}})))
+  (is (nil? (gm/profile-weight-kg "Error: no profile"))))

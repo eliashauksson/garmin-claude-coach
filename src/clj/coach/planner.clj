@@ -187,6 +187,10 @@
                                    (select-keys w [:date :hrv_avg :hrv_status :rhr :sleep_s :sleep_score
                                                    :readiness :body_battery_high])))
      :load_today       (select-keys pmc [:ctl :atl :tsb])
+     :cycling_power    (when-let [p (analysis/cycling-power ds today)]
+                         (not-empty (into {} (remove (comp nil? val))
+                                          {:ftp_w (some-> (:ftp p) Math/round) :ftp_source (:ftp_source p)
+                                           :w_per_kg (:wkg p) :vo2max_estimate (:vo2max_est p)})))
      :season_plan_target (plan/season-target ds monday)
      :proposed_previous_week (proposed-week ds (season/add-days monday -7))
      :planned_previous_and_target_weeks
@@ -219,6 +223,8 @@ and weekly TSS. Aim the week at it; when readiness or recent training say otherw
 and readiness win - say so in `warnings`.
 `proposed_previous_week`, when present, lists sessions proposed for the week before that the
 athlete hasn't reviewed yet; treat them as planned.
+`cycling_power`, when present, is from rides with a power meter (FTP estimated or from Garmin):
+give ride intensities in watts as well.
 
 Plan load in time per zone: give every session its duration; `targets.run_min` is the week's
 total running time in minutes. Hikes and rides count as endurance time, not running volume

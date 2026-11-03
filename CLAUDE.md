@@ -19,7 +19,7 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - coros-mcp: ActivitySource over COROS's official remote MCP server (rides from FIT files) · coros-auth: Coros OAuth (PKCE, token in ~/.config/coach/coros.json) · fit: FIT file decoding (Garmin FIT SDK)
 - sync: incremental + backfill from a DataSource into the DB (upserts); `activities-only!`/`coros!` for Coros
 - db: SQLite schema/queries; raw source JSON kept on every row
-- metrics: pure TSS/NP/IF/CTL/ATL/TSB etc. · analysis: glue between db and metrics, API queries
+- metrics: pure TSS/NP/IF/CTL/ATL/TSB, power curve/eFTP/cycling VO2 max etc. · analysis: glue between db and metrics, API queries, eFTP stored as bike FTP (source "estimate")
 - overview: everything behind the dashboard start page (/api/overview)
 - readiness: pure morning readiness check · adapt: signals that the plan should adapt
 - plan-rules: pure checks of a week against training-principles.md (warnings only)

@@ -427,6 +427,8 @@
     ["/volume"      {:get (fn [{:keys [query-params]}]
                             (let [[from to] (date-range query-params 180)]
                               (ok (analysis/volume ds from to))))}]
+    ;; wrapped, so "no ride with power" (nil) isn't mistaken for "not loaded yet"
+    ["/cycling-power" {:get (fn [_] (ok {:power (analysis/cycling-power ds (today))}))}]
     ["/thresholds"  {:get (fn [_] (ok (db/thresholds ds)))}]
     ["/ai-settings"
      ["" {:get    (fn [_] (ok (ai/overview ds)))

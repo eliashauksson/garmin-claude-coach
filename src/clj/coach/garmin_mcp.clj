@@ -98,6 +98,13 @@
 
 (defn- m [x] (when (map? x) x))
 
+(defn profile-weight-kg
+  "Body weight in kg from get_user_profile (Garmin gives grams). nil if unset."
+  [profile]
+  (let [g (get-in (m profile) [:userData :weight])]
+    (when (and (number? g) (pos? g))
+      (/ (Math/round (/ (double g) 100.0)) 10.0))))
+
 (defn- trim-ts
   "\"2026-10-19T04:37:08.0\" -> \"2026-10-19T04:37:08\""
   [s]
@@ -375,7 +382,8 @@
           ftp     (call client "get_cycling_ftp" {})
           profile (call client "get_user_profile" {})]
       {:thresholds (thresholds-from lt zones ftp)
-       :sex        (get-in profile [:userData :gender])}))
+       :sex        (get-in profile [:userData :gender])
+       :weight_kg  (profile-weight-kg profile)}))
 
   (fetch-intraday [_ date]
     (let [day (fn [tool]

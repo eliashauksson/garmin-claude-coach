@@ -135,3 +135,42 @@
     (is (nil? (:value (t 2))))
     (is (= 50.5 (:avg7 (t 2))))
     (is (some? (:base_low (t 9))))))
+
+(deftest power-curve-test
+  (let [;; 10 min at 150 W, 20 min at 250 W, 10 min at 150 W
+        p  (fn [i] (if (<= 600 i 1799) 250.0 150.0))
+        r  (m/activity-metrics {:sport "road_biking"} (stream 2400 (fn [i] {:hr 140 :power (p i)})) thresholds)
+        pc (get-in r [:peaks :power])]
+    (testing "power gets the dense curve, only durations that fit"
+      (is (= (set (filter #(<= % 2400) m/power-curve-durations)) (set (keys pc))))
+      (is (= 250.0 (pc 1) (pc 1200)))
+      (is (< 150.0 (pc 1800) 250.0)))
+    (testing "heart rate keeps the short list"
+      (is (= #{5 60 300 1200} (set (keys (get-in r [:peaks :hr]))))))))
+
+(deftest best-curve-test
+  (let [c (m/best-curve [{:date "2026-01-02" :power {5 500.0 1200 240.0}}
+                         {:date "2026-01-01" :power {:5 600.0 :1200 230.0}}])]
+    (is (= {:watts 600.0 :date "2026-01-01"} (c 5)) "keyword keys (from JSON) work too")
+    (is (= {:watts 240.0 :date "2026-01-02"} (c 1200)))))
+
+(deftest eftp-test
+  (is (= 238.0 (m/eftp {1200 250.0})) "95 % of 20 min, rounded")
+  (is (= 245.0 (m/eftp {1200 250.0 3600 245.0})) "the best hour when it is higher")
+  (is (nil? (m/eftp {300 400.0})) "no 20-minute effort, no eFTP"))
+
+(deftest eftp-history-test
+  (let [ride (fn [date p20] {:date date :power {1200 p20}})]
+    (testing "a new value only when it moves by 2 % or more"
+      (is (= [{:date "2026-01-01" :value 238.0} {:date "2026-01-20" :value 247.0}]
+             (m/eftp-history [(ride "2026-01-01" 250.0) (ride "2026-01-10" 252.0) (ride "2026-01-20" 260.0)]))))
+    (testing "the best effort drops out after 90 days"
+      (is (= [{:date "2026-01-01" :value 285.0} {:date "2026-04-01" :value 238.0}]
+             (m/eftp-history [(ride "2026-01-01" 300.0) (ride "2026-04-01" 250.0)]))))
+    (testing "rides without a 20-minute effort keep the value"
+      (is (= [{:date "2026-01-01" :value 238.0}]
+             (m/eftp-history [(ride "2026-01-01" 250.0) {:date "2026-06-01" :power {300 300.0}}]))))))
+
+(deftest cycling-vo2max-test
+  (is (= 50.2 (m/cycling-vo2max 300.0 75.0)) "10.8 × 4 W/kg + 7")
+  (is (nil? (m/cycling-vo2max 300.0 nil))))

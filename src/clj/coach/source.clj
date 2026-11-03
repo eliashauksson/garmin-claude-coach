@@ -17,7 +17,7 @@
     "Per-sample data as a columnar map {:t [...] :hr [...] :speed [...] ...},
     :t in seconds from the start. nil if there is none.")
   (fetch-thresholds [this]
-    "Current thresholds {:thresholds [{:sport :kind :value :measured_on}] :sex}.")
+    "Current thresholds {:thresholds [{:sport :kind :value :measured_on}] :sex :weight_kg}.")
   (fetch-intraday [this date]
     "Intraday series for one local day:
     {:date :hr [[minute bpm]] :stress [[minute level]] :body_battery [[minute level]]

@@ -4,6 +4,7 @@
   Per activity (from per-second streams + thresholds):
     NP, NGP, IF, VI, TSS (power) / rTSS (run pace) / sTSS (swim) / hrTSS,
     EF, aerobic decoupling, kJ, time in HR zones, peak curves.
+  Cycling power: power curve, eFTP, VO2 max estimate.
   Over time:
     CTL (fitness), ATL (fatigue), TSB (form), ramp rate, weekly volume,
     wellness trends.
@@ -180,13 +181,19 @@
 
 (def peak-durations [5 60 300 1200 3600])
 
+(def power-curve-durations
+  "Durations (seconds) of a ride's power curve: denser than peak-durations,
+  for the eFTP, the VO2 max estimate and the power-curve chart."
+  [1 5 15 30 60 120 300 600 1200 1800 3600])
+
 (defn peaks
   "Best rolling average for each duration (seconds) that fits in the series."
-  [xs]
-  (let [xs (vec (keep identity xs))]
-    (into {}
-          (for [d peak-durations :when (<= d (count xs))]
-            [d (apply max (rolling-mean xs d))]))))
+  ([xs] (peaks xs peak-durations))
+  ([xs durations]
+   (let [xs (vec (keep identity xs))]
+     (into {}
+           (for [d durations :when (<= d (count xs))]
+             [d (apply max (rolling-mean xs d))])))))
 
 (defn- ef [output hr] (when (and output hr (pos? hr)) (/ output hr)))
 
@@ -263,7 +270,70 @@
                      (cond-> {}
                        (seq (keep identity hr)) (assoc :hr (update-vals (peaks hr) #(round % 1)))
                        speed                    (assoc :speed (update-vals (peaks speed) #(round % 3)))
-                       power                    (assoc :power (update-vals (peaks power) #(round % 1)))))}))
+                       power                    (assoc :power (update-vals (peaks power power-curve-durations)
+                                                                           #(round % 1)))))}))
+
+;; ---------------------------------------------------------------------------
+;; Cycling power: power curve, eFTP, VO2 max estimate
+
+(defn- peak-at
+  "A curve's value for duration `d` (keys may be numbers or keywords, as
+  they come back from JSON)."
+  [curve d]
+  (or (get curve d) (get curve (keyword (str d)))))
+
+(defn best-curve
+  "The best value per duration over `rides` [{:date :power {duration watts}}],
+  as {duration {:watts :date}} (the date the best was set; the later one on a tie)."
+  [rides]
+  (reduce (fn [acc {:keys [date power]}]
+            (reduce (fn [acc d]
+                      (let [w (peak-at power d)]
+                        (if (and (number? w) (pos? w)
+                                 (or (nil? (get acc d)) (>= w (:watts (get acc d)))))
+                          (assoc acc d {:watts w :date date})
+                          acc)))
+                    acc power-curve-durations))
+          (sorted-map) (sort-by :date rides)))
+
+(def eftp-20min-factor "FTP ≈ 95 % of the best 20 minutes (Coggan)." 0.95)
+
+(defn eftp
+  "Estimated FTP from a power curve {duration watts}: the higher of 95 % of
+  the best 20 minutes and the best hour. nil without a 20-minute effort."
+  [curve]
+  (let [p20 (peak-at curve 1200) p60 (peak-at curve 3600)]
+    (when (and (number? p20) (pos? p20))
+      (round (max (* eftp-20min-factor p20) (or p60 0)) 0))))
+
+(def eftp-window-days "The eFTP looks at the best efforts of this many days." 90)
+(def eftp-min-change "A new eFTP is kept when it differs by at least this share." 0.02)
+
+(defn eftp-history
+  "The eFTP over time from `rides` [{:date :power {duration watts}}]: for each
+  ride date, the eFTP from the best efforts of the `window-days` up to it.
+  Returns [{:date :value}], one entry each time it moves by at least
+  `eftp-min-change` (the first one always). An eFTP doesn't drop to nothing
+  when the window has no 20-minute effort: it stays until a new one is set."
+  ([rides] (eftp-history rides eftp-window-days))
+  ([rides window-days]
+   (let [rides (vec (sort-by :date (filter #(seq (:power %)) rides)))]
+     (reduce (fn [acc date]
+               (let [from (str (.minusDays (LocalDate/parse date) (dec window-days)))
+                     in   (filter #(<= (compare from (:date %)) 0 (compare date (:date %))) rides)
+                     v    (eftp (update-vals (best-curve in) :watts))
+                     cur  (:value (peek acc))]
+                 (if (and v (or (nil? cur) (>= (Math/abs (- v cur)) (* eftp-min-change cur))))
+                   (conj acc {:date date :value v})
+                   acc)))
+             [] (distinct (map :date rides))))))
+
+(defn cycling-vo2max
+  "VO2 max (ml/kg/min) estimated from the best 5 minutes of power and body
+  weight: 10.8 × W/kg + 7 (ACSM cycling equation, Storer et al. 1990)."
+  [p5min weight-kg]
+  (when (and (number? p5min) (pos? p5min) (number? weight-kg) (pos? weight-kg))
+    (round (+ 7.0 (* 10.8 (/ p5min weight-kg))) 1)))
 
 ;; ---------------------------------------------------------------------------
 ;; Performance management (CTL / ATL / TSB)

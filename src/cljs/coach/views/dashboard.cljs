@@ -16,10 +16,10 @@
 (def url "/api/overview")
 
 (defn urls
-  "The overview, the training load's (load/urls), then the activities
-  waiting for \"How did it go?\"."
+  "The overview, the training load's (load/urls), the activities
+  waiting for \"How did it go?\", then the cycling power."
   [route]
-  (conj (into [url] (load/urls route)) feedback/due-url))
+  (conj (into [url] (load/urls route)) feedback/due-url load/power-url))
 
 ;; Garmin's enums as shown (ui/enum); listed so each has a translation.
 (def enum-texts
@@ -915,7 +915,7 @@
    [:div.skel {:style {:height "320px"}}]])
 
 (defn view [{:keys [data errors sync route] ui-state :ui :as s}]
-  (let [[ov-url load-url volume-url due-url] (urls route)
+  (let [[ov-url load-url volume-url due-url power-url] (urls route)
         d     (get data ov-url)
         today (or (:date d) (ui/iso-today))]
     [:div {:style {:display "contents"}}
@@ -942,4 +942,5 @@
         (recovery d)
         (training d)))
      (load/section s [load-url volume-url])
+     (load/power-section s power-url)
      (when d (fitness d))]))

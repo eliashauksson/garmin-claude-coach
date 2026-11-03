@@ -1012,4 +1012,21 @@
    "The last Coros sync failed: {0}" "La dernière synchronisation Coros a échoué : {0}"
    "Connect again" "Reconnecter"
    "Disconnect" "Déconnecter"
-   "Disconnect Coros? The rides already loaded stay." "Déconnecter Coros ? Les sorties déjà chargées restent."})
+   "Disconnect Coros? The rides already loaded stay." "Déconnecter Coros ? Les sorties déjà chargées restent."
+
+   ;; --- cycling power -----------------------------------------------------------
+   ", estimated FTP {0}" ", FTP estimée {0}"
+   "Last 90 days" "90 derniers jours"
+   "90 days before" "Les 90 jours d'avant"
+   "All time" "Depuis le début"
+   "Cycling power" "Puissance à vélo"
+   "FTP" "FTP"
+   "estimated from your best 20–60 min, last 90 days" "estimée à partir de tes meilleures 20–60 min, 90 derniers jours"
+   "from Garmin" "de Garmin"
+   "Watts per kg" "Watts par kg"
+   "at {0} kg" "à {0} kg"
+   "no weight in your Garmin profile" "pas de poids dans ton profil Garmin"
+   "VO2 max · cycling" "VO2max · vélo"
+   "estimate from your best 5 minutes, last 90 days" "estimation à partir de tes meilleures 5 minutes, 90 derniers jours"
+   "Power curve" "Courbe de puissance"
+   "Best average power for each duration. FTP ≈ 95 % of the best 20 minutes." "Meilleure puissance moyenne pour chaque durée. FTP ≈ 95 % des meilleures 20 minutes."})

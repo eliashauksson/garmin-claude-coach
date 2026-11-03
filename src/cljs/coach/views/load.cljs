@@ -115,3 +115,72 @@
                                                            (vec (for [[wk m] weeks] [wk (get m (:id f))]))
                                                            :stack "vol" :barMaxWidth 28
                                                            :itemStyle {:color (c/css-var (:color f))})))}))})})]))]))
+
+;; ---------------------------------------------------------------------------
+;; Cycling power (coach.analysis/cycling-power): shown once a ride has power
+
+(def power-url "/api/cycling-power")
+
+(defn- dur-label
+  "Seconds -> \"5 s\", \"1 min\", \"1 h\"."
+  [s]
+  (cond (< s 60)       (str s " s")
+        (< s 3600)     (str (js/Math.round (/ s 60)) " min")
+        :else          (str (js/Math.round (/ s 3600)) " h")))
+
+(def ^:private curves
+  [[:curve_90d      (tk "Last 90 days")   "--amber"]
+   [:curve_prev_90d (tk "90 days before") "--purple-2"]
+   [:curve_all      (tk "All time")       "--text-3"]])
+
+(defn- power-tooltip [p]
+  (fn [params]
+    (let [s (js/parseInt (.-name (first params)))]
+      (c/tooltip-rows (dur-label s)
+                      (for [[k label color] curves
+                            :let [pt (some #(when (= s (:s %)) %) (get p k))]
+                            :when pt]
+                        {:label (str (t label) " · " (ui/date-short (:date pt)))
+                         :value (str (js/Math.round (:watts pt)) " W")
+                         :color (c/css-var color)})))))
+
+(defn power-section
+  "Power curve, FTP, W/kg and a VO2 max estimate from rides with a power meter.
+  Nothing until there is one."
+  [{:keys [data errors]} url]
+  (when-let [p (:power (get data url))]
+    (let [{:keys [ftp ftp_source wkg vo2max_est weight_kg]} p]
+      [:div {:style {:display "contents"}}
+       [:div.section-head {:replicant/key "power-head"}
+        [:h2.section-title (t "Cycling power")]]
+       (when-let [e (get errors url)] [:div.error (t "Could not load: {0}" e)])
+       [:div.row {:replicant/key "power-kpi"}
+        (ui/tile {:label (t "FTP") :tint "amber" :size "md" :value (some-> ftp js/Math.round) :unit "W"
+                  :sub (case ftp_source
+                         "estimate" (t "estimated from your best 20–60 min, last 90 days")
+                         "garmin"   (t "from Garmin")
+                         nil)})
+        (ui/tile {:label (t "Watts per kg") :tint "blue" :size "md" :value (some-> wkg (ui/fixed 2)) :unit "W/kg"
+                  :sub (if weight_kg (t "at {0} kg" weight_kg) (t "no weight in your Garmin profile"))})
+        (ui/tile {:label (t "VO2 max · cycling") :tint "green" :size "md" :value vo2max_est
+                  :sub (t "estimate from your best 5 minutes, last 90 days")})]
+       [:div {:replicant/key "power-curve"}
+        (ui/chart-card
+         {:title (t "Power curve") :tint "amber"
+          :legend-items (for [[k label color] curves :when (seq (get p k))] {:label (t label) :color color})
+          :chart (c/echart
+                  {:key "power-curve" :class "h240"
+                   :option-fn
+                   (fn []
+                     ;; the durations are about evenly spaced on a log scale: one category each
+                     (let [ds (sort (distinct (mapcat #(map :s (get p %)) (map first curves))))]
+                       (-> (c/base {:x-type "category" :y-min 0 :tooltip-fmt (power-tooltip p)
+                                    :x-fmt #(dur-label (js/parseInt %))})
+                           (assoc-in [:xAxis :data] (mapv str ds))
+                           (assoc-in [:xAxis :boundaryGap] false)
+                           (assoc-in [:grid :right] 24) ; room for the last label
+                           (assoc :series (vec (for [[k label color] curves :when (seq (get p k))
+                                                     :let [by (into {} (map (juxt :s :watts)) (get p k))]]
+                                                 (c/line (t label) color (mapv by ds)
+                                                         :lineStyle {:width (if (= k :curve_90d) 3 2)})))))))})
+          :footer [:div.sub (t "Best average power for each duration. FTP ≈ 95 % of the best 20 minutes.")]})]])))
