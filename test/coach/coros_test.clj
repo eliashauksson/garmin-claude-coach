@@ -37,6 +37,13 @@
     (is (= [] (c/parse-records "No sport records found from 2026-10-01 to 2026-11-03.")))
     (is (thrown? clojure.lang.ExceptionInfo (c/parse-records "Something else entirely")))))
 
+(deftest newest-first
+  (is (= [3 2 4 1]
+         (map :id (c/newest-first [{:id 1 :date "2025-03-05" :start_ts 100}
+                                   {:id 2 :date "2026-09-26" :start_ts 300}
+                                   {:id 3 :date "2026-09-26" :start_ts 400}
+                                   {:id 4 :date "2025-11-22" :start_ts nil}])))))
+
 (deftest fit-url-only-from-coros
   (is (= "https://s3eu.coros.com/fit/1/2.fit"
          (c/fit-url "Activity FIT file download URL(s):\n1. 2.fit\n   https://s3eu.coros.com/fit/1/2.fit")))

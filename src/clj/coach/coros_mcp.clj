@@ -214,6 +214,12 @@
       (throw (ex-info (t "Coros answered HTTP {0} ({1})." (.statusCode resp) "FIT file") {:kind :coros})))
     (.body resp)))
 
+(defn newest-first
+  "Pure: activity summaries, newest first (by date, then start time), so that
+  with a long backlog and Coros's daily FIT limit the recent rides come first."
+  [summaries]
+  (vec (sort-by (juxt :date :start_ts) #(compare %2 %1) summaries)))
+
 (defn- dates-between [start end]
   (let [s (LocalDate/parse start) e (LocalDate/parse end)]
     (loop [from s acc []]
@@ -239,8 +245,7 @@
            (mapcat (fn [[s e]] (fetch s e)))
            (reduce (fn [acc r] (assoc acc (:id r) r)) {})
            vals
-           (sort-by :start_ts)
-           vec)))
+           newest-first)))
 
   (fetch-full-activity [_ summary]
     (Thread/sleep (long delay-ms))
