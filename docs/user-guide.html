@@ -153,6 +153,7 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
       <li><a href="#need">What you need</a></li>
       <li><a href="#install">Install</a></li>
       <li><a href="#setup">First start</a></li>
+      <li><a href="#coros">Coros bike computer</a></li>
       <li><a href="#costs">What Claude costs</a></li>
       <li><a href="#daily">Every day</a></li>
       <li><a href="#data">Your data</a></li>
@@ -245,6 +246,22 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
       </ol>
     </section>
 
+    <section id="coros">
+      <h2>Coros bike computer</h2>
+      <p>If you record rides on a Coros bike computer, such as the Coros Dura, the app can read those too. This is optional; skip it if everything you do is on Garmin.</p>
+      <ol>
+        <li>Go to <span class="ui">Settings › General</span> and click <span class="ui">Connect Coros</span> in the Coros card.</li>
+        <li>The Coros sign-in page opens. Sign in with your Coros account and allow access.</li>
+        <li>Coros sends you back to the app's Settings, and a sync starts.</li>
+      </ol>
+      <p>From then on, every sync also fetches your new Coros rides, with heart rate, speed, power, cadence and the GPS track. Training stress, heart-rate zones and the map work just like for Garmin activities. Sleep, HRV and readiness still come from Garmin.</p>
+      <ul>
+        <li>A ride is <b>counted once</b>. If a ride is on both Coros and Garmin, for example because you imported it into Garmin Connect, the app keeps one entry and uses the Coros ride's detailed data.</li>
+        <li>Coros lets the app download <b>50 rides a day</b>. With a long history, the first sync brings your newest rides, and the rest come over the next days by themselves.</li>
+        <li>The Coros login renews itself; you don't need to sign in again. <span class="ui">Disconnect</span> in the Coros card removes it. The rides already loaded stay.</li>
+      </ul>
+    </section>
+
     <section id="costs">
       <h2>What Claude costs</h2>
       <p>You pay Anthropic directly, per request, from the credit you added. There is no subscription and Garmin Coach takes nothing. What it costs depends on how often plans are drafted and adjusted and which Claude model each task uses.</p>
@@ -276,6 +293,7 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
           <tbody>
             <tr><td>Training and health data</td><td>The data folder on your laptop. Read from Garmin, never sent back.</td></tr>
             <tr><td>Garmin password</td><td>Passed to Garmin once to log in, and not stored. Garmin returns a login that lasts about 6 months; it's kept in the <code>.garminconnect</code> folder in your user folder.</td></tr>
+            <tr><td>Coros login</td><td>Your Coros password goes only to Coros's own sign-in page. The app keeps the login Coros hands back in <code>.config/coach/coros.json</code> in your user folder, readable only by you. Nothing is ever written to Coros.</td></tr>
             <tr><td>Claude API key</td><td>In <code>.config/coach/anthropic-key</code> in your user folder, readable only by you.</td></tr>
             <tr><td>What Claude sees</td><td>To plan, Claude receives your athlete description, your recent training, recovery data such as sleep, HRV and resting heart rate, and your workout feedback. They go to Anthropic through your own API key.</td></tr>
           </tbody>
@@ -293,6 +311,10 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
         <dd>This happens about every 6 months; the app warns you a week before. Go to <span class="ui">Settings › General</span>, log in again, and press <span class="ui">Sync now</span>.</dd>
         <dt>“The last sync failed”</dt>
         <dd>Usually Garmin is busy or the internet dropped. The next automatic sync tries again; nothing you have is lost.</dd>
+        <dt>“You have reached the daily limit of 50 activity FIT files” (Coros card)</dt>
+        <dd>Coros allows 50 ride downloads a day. The rides not loaded yet come with the next syncs, after Coros resets the limit. Nothing to do.</dd>
+        <dt>“The last Coros sync failed” with <span class="ui">Connect again</span></dt>
+        <dd>The Coros login no longer works. Click <span class="ui">Connect again</span> and sign in on the Coros page.</dd>
         <dt>“Your Claude API credits have run out”</dt>
         <dd>Add credit on the <a href="https://platform.claude.com/settings/billing">billing page</a>, then click <span class="ui">I've added funds, check again</span>.</dd>
         <dt>“Can't reach the coach server”</dt>
