@@ -21,6 +21,7 @@
             [coach.season :as season]
             [coach.season-plan :as season-plan]
             [coach.sync :as sync]
+            [coach.token :as token]
             [coach.translate :as translate]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -192,6 +193,31 @@
 (defn- body [req]
   (some-> (:body req) slurp not-empty (json/read-str :key-fn keyword)))
 
+;; ---------------------------------------------------------------------------
+;; A loopback token for the two routes a mere local process must not reach:
+;; the bulk data export and the self-update. wrap-local-only already stops
+;; other *websites*; the token additionally stops header-less local clients
+;; (curl, a sandboxed process) that can't read this user's files. The page
+;; gets the token from GET /api/token, which answers only a same-origin fetch.
+
+(defn- request-token [req]
+  (or (get-in req [:headers "x-coach-token"])
+      (get (:query-params req) "token")))
+
+(defn- same-origin-fetch?
+  "A fetch the dashboard page itself made. Browsers set Sec-Fetch-Site on
+  every request; curl and other scripts don't, so they can't read the token."
+  [req]
+  (= "same-origin" (get-in req [:headers "sec-fetch-site"])))
+
+(defn- token-guard
+  "Wraps a handler so it answers only when the request carries the token."
+  [handler]
+  (fn [req]
+    (if (token/valid? (request-token req))
+      (handler req)
+      (json-response 403 {:error (i18n/t "This action needs the dashboard token. Reload the page and try again.")}))))
+
 (defn- guarded
   "Turns bad input (ex-info) into a 400 instead of a 500."
   [handler]
@@ -324,7 +350,7 @@
    ["/autostart" {:put (guarded (fn [req]
                                   (coach-app/set-autostart! (boolean (:on (body req))) @current-port)
                                   (ok (app-status))))}]
-   ["/update" {:post (guarded (fn [_] (ok (coach-app/start-update! @current-port))))}]
+   ["/update" {:post (guarded (token-guard (fn [_] (ok (coach-app/start-update! @current-port)))))}]
    ;; {:path "…"} moves the data there; {:path "…" :use_existing true} switches
    ;; to the coach data already in that folder. Both restart the app.
    ["/data-dir" {:post (fn [req]
@@ -365,6 +391,10 @@
     (athlete-routes ds)
     (app-routes ds)
     ["/auth"        {:get (fn [_] (ok (auth-status ds)))}]
+    ;; the loopback token, handed only to a same-origin fetch from the page
+    ["/token"       {:get (fn [req] (if (same-origin-fetch? req)
+                                      (ok {:token (token/ensure!)})
+                                      (json-response 403 {:error "forbidden"})))}]
     ;; logging in to Garmin from the page: email and password, then the
     ;; two-step code if Garmin sends one. A new login starts a sync.
     ["/garmin/login" {:post   (fn [req]
@@ -487,13 +517,14 @@
                                              (ok {:restarting true}))
                                          (do (.delete f)
                                              (json-response 400 {:error (i18n/t "That file isn't a Garmin Coach backup.")}))))))}]
-     ["/download" {:get (fn [_]
+     ["/download" {:get (token-guard
+                         (fn [_]
                           ;; a fresh backup, kept in data/backups like the others
                           (let [{:keys [name path]} (backup/create! ds)]
                             {:status  200
                              :headers {"Content-Type" "application/zip"
                                        "Content-Disposition" (str "attachment; filename=\"" name "\"")}
-                             :body    (io/file path)}))}]]]])
+                             :body    (io/file path)})))}]]]])
 
 (defn- index [_]
   (if-let [r (io/resource "public/index.html")]
@@ -620,6 +651,7 @@
    (reset! current-port port)
    (reset! syncing? sync?)
    (let [ds (doto (db/datasource) db/migrate!)]
+     (token/ensure!) ; the loopback token exists before the first page load
      (reset! server (jetty/run-jetty (app ds) {:port port :host "127.0.0.1" :join? false}))
      (println (str "Dashboard on http://127.0.0.1:" port "/"))
      (println (auth/describe (auth/status ds)))

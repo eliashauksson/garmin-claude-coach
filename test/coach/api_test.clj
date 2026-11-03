@@ -3,7 +3,9 @@
             [clojure.test :refer [deftest is testing]]
             [coach.api :as api]
             [coach.auth :as auth]
+            [coach.backup :as backup]
             [coach.db :as db]
+            [coach.token :as token]
             [coach.plan]))
 
 (defn- temp-ds []
@@ -85,6 +87,34 @@
       (db/upsert-activities! ds [{:id 9 :date "2026-11-02" :start_time_local "2026-11-02T06:00:00"
                                   :sport "running" :name "Run" :raw {}}])
       (is (= ["done"] (map :status (:workouts (second (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08"))))))))))
+
+(deftest token-guard-test
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory
+                      "coach-tok" (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (binding [token/*token-file* (str dir "/coach/dashboard-token")]
+      (token/reset-cache!)
+      (let [ds   (temp-ds)
+            app  (api/app ds)
+            send (fn [uri headers & [qs]]
+                   (app {:request-method :get :uri uri :headers headers :query-string qs}))]
+        (testing "the token is handed only to a same-origin fetch from the page"
+          (let [r (send "/api/token" {"host" "127.0.0.1:8080" "sec-fetch-site" "same-origin"})]
+            (is (= 200 (:status r)))
+            (is (= (token/ensure!) (:token (json/read-str (:body r) :key-fn keyword)))))
+          (is (= 403 (:status (send "/api/token" {"host" "127.0.0.1:8080"})))
+              "a header-less local client (curl) can't read the token"))
+        (testing "the backup download needs the token"
+          (is (= 403 (:status (send "/api/backup/download" {"host" "127.0.0.1:8080"})))
+              "no token: refused before any backup is made")
+          (with-redefs [backup/create! (fn [_] {:name "b.zip" :path (str dir "/b.zip")})]
+            (spit (str dir "/b.zip") "zip")
+            (let [r (send "/api/backup/download"
+                          {"host" "127.0.0.1:8080"} (str "token=" (token/ensure!)))]
+              (is (= 200 (:status r)))
+              (is (= "application/zip" (get-in r [:headers "Content-Type"]))))
+            (is (= 403 (:status (send "/api/backup/download"
+                                      {"host" "127.0.0.1:8080"} "token=wrong")))))))
+      (token/reset-cache!))))
 
 (deftest foreign-request-test
   (let [req (fn [method headers] {:request-method method :uri "/api/quit" :headers headers})

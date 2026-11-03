@@ -159,9 +159,10 @@
   "A request that may restart the app. Errors land in [:ui k :error]."
   [k method url body]
   (swap! state update-in [:ui k] assoc :busy true :error nil)
-  (-> (js/fetch url (clj->js (cond-> {:method method}
-                               (some? body) (assoc :headers {"Content-Type" "application/json"}
-                                                   :body (js/JSON.stringify (clj->js body))))))
+  (-> (js/fetch url (clj->js (cond-> {:method method
+                                      :headers (cond-> {} @ui/token (assoc "X-Coach-Token" @ui/token))}
+                               (some? body) (-> (assoc-in [:headers "Content-Type"] "application/json")
+                                                (assoc :body (js/JSON.stringify (clj->js body)))))))
       (.then (fn [res] (.then (.json res) #(let [r (js->clj % :keywordize-keys true)]
                                              (if (.-ok res) r (throw (js/Error. (:error r))))))))
       (.then (fn [r]
@@ -477,6 +478,11 @@
   (load-lang!)
   (.addEventListener system-dark "change" #(do (apply-theme!) (render!)))
   (on-hash!)
+  ;; the loopback token, for the download link and the self-update request
+  (-> (js/fetch "/api/token")
+      (.then (fn [res] (when (.-ok res) (.json res))))
+      (.then (fn [body] (when body (reset! ui/token (:token (js->clj body :keywordize-keys true))))))
+      (.catch (fn [_] nil)))
   (fetch! status/backup-url)
   (poll-sync!)
   (render!))

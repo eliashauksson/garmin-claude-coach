@@ -87,29 +87,14 @@
 (defn valid-key-format? [k]
   (boolean (and (string? k) (re-matches #"sk-ant-[A-Za-z0-9_\-]{20,}" k))))
 
-(defn- posix? []
-  (contains? (.supportedFileAttributeViews (java.nio.file.FileSystems/getDefault)) "posix"))
-
 (defn save-key!
   "Stores the API key in *key-file*, readable only by this user."
   [k]
   (let [k (str/trim (str k))]
     (when-not (valid-key-format? k)
       (throw (ex-info (t "That doesn't look like a Claude API key. It starts with sk-ant- (Claude Console → API keys).") {})))
-    (let [f    (io/file *key-file*)
-          dir  (.toPath (.getParentFile (.getAbsoluteFile f)))
-          path (.toPath f)
-          perms #(java.nio.file.attribute.PosixFilePermissions/fromString %)]
-      (java.nio.file.Files/createDirectories dir (make-array java.nio.file.attribute.FileAttribute 0))
-      (if (posix?)
-        (do (java.nio.file.Files/setPosixFilePermissions dir (perms "rwx------"))
-            (when-not (.exists f)
-              (java.nio.file.Files/createFile path (into-array [(java.nio.file.attribute.PosixFilePermissions/asFileAttribute (perms "rw-------"))])))
-            (java.nio.file.Files/setPosixFilePermissions path (perms "rw-------")))
-        ;; Windows: the user's profile folder is already private to them
-        nil)
-      (spit f k)
-      (key-status))))
+    (paths/secure-spit! *key-file* k)
+    (key-status)))
 
 (defn remove-key!
   "Deletes the saved key (a key from ANTHROPIC_API_KEY stays)."

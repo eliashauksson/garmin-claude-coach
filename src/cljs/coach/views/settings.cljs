@@ -52,7 +52,7 @@
                    (t "No backup yet"))]
            [:div.sub (t "A backup (database and athlete document) is made before the first sync of each day; the newest {0} are kept ({1} now)."
                         (or keep 14) (or count 0))]
-           [:div [:a.btn-ink.inline {:href (str status/backup-url "/download") :download true
+           [:div [:a.btn-ink.inline {:href (str status/backup-url "/download" (ui/token-qs)) :download true
                                      :on {:click [[:backup-started]]}}
                   (t "Download backup")]]
            [:details.connect-replace

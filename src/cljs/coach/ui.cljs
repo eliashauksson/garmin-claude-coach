@@ -3,6 +3,15 @@
   (:require [clojure.string :as str]
             [coach.i18n :as i18n :refer [t tk]]))
 
+;; The loopback token the server hands this page (coach.app fetches it). Sent
+;; on the download link and the self-update request; nil until it arrives.
+(defonce token (atom nil))
+
+(defn token-qs
+  "\"?token=…\" for a link the browser can't add a header to, else \"\"."
+  []
+  (if-let [t @token] (str "?token=" (js/encodeURIComponent t)) ""))
+
 ;; ---------------------------------------------------------------------------
 ;; Formatting
 

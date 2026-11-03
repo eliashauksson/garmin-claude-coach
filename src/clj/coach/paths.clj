@@ -56,6 +56,55 @@
 (defn update-config! [f & args] (write-config! (apply f (read-config) args)))
 
 ;; ---------------------------------------------------------------------------
+;; Owner-only files, for the secrets in ~/.config/coach (API key, Coros
+;; tokens, the dashboard token). POSIX: 0600 file / 0700 dir. Non-POSIX
+;; (Windows): an ACL that allows only the file's owner.
+
+(defn- posix-fs? []
+  (contains? (.supportedFileAttributeViews (java.nio.file.FileSystems/getDefault)) "posix"))
+
+(defn- restrict-acl!
+  "Replaces `path`'s ACL with a single entry allowing only its owner. A no-op
+  on file systems without ACL support (plain POSIX handles those via perms)."
+  [^java.nio.file.Path path]
+  (when-let [view (java.nio.file.Files/getFileAttributeView
+                   path java.nio.file.attribute.AclFileAttributeView
+                   (make-array java.nio.file.LinkOption 0))]
+    (let [entry (-> (java.nio.file.attribute.AclEntry/newBuilder)
+                    (.setType java.nio.file.attribute.AclEntryType/ALLOW)
+                    (.setPrincipal (.getOwner view))
+                    (.setPermissions (java.util.EnumSet/allOf java.nio.file.attribute.AclEntryPermission))
+                    (.build))]
+      (.setAcl view (java.util.Collections/singletonList entry)))))
+
+(defn- lock-owner-only! [^java.nio.file.Path path dir?]
+  (if (posix-fs?)
+    (java.nio.file.Files/setPosixFilePermissions
+     path (java.nio.file.attribute.PosixFilePermissions/fromString (if dir? "rwx------" "rw-------")))
+    (restrict-acl! path)))
+
+(defn secure-spit!
+  "Writes `content` to `f`, making both the file and its parent folder
+  readable only by this user. Perms are set before the write (so the content
+  is never briefly world-readable) and again after. Returns the File."
+  [f content]
+  (let [f    (io/file f)
+        dir  (.getAbsoluteFile (.getParentFile (.getAbsoluteFile f)))
+        path (.toPath f)]
+    (java.nio.file.Files/createDirectories (.toPath dir) (make-array java.nio.file.attribute.FileAttribute 0))
+    (lock-owner-only! (.toPath dir) true)
+    (when-not (.exists f)
+      (if (posix-fs?)
+        (java.nio.file.Files/createFile
+         path (into-array [(java.nio.file.attribute.PosixFilePermissions/asFileAttribute
+                            (java.nio.file.attribute.PosixFilePermissions/fromString "rw-------"))]))
+        (.createNewFile f)))
+    (lock-owner-only! path false)
+    (spit f content)
+    (lock-owner-only! path false)
+    f))
+
+;; ---------------------------------------------------------------------------
 
 (defn default-data-dir ^File [] (app-file "data"))
 

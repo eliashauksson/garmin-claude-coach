@@ -155,7 +155,7 @@
   [{:keys [data]}]
   (let [{:keys [latest]} (get data backup-url)]
     [:div.backup
-     [:a.backup-link {:href (str backup-url "/download") :download true
+     [:a.backup-link {:href (str backup-url "/download" (ui/token-qs)) :download true
                       :title (t "Makes a backup now (database and athlete document) and downloads it")
                       :on {:click [[:backup-started]]}}
       (t "Download backup")]

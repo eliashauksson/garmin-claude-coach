@@ -973,6 +973,7 @@
    "Starts the app in the background when you log in, so it keeps syncing: Garmin keeps some data (training status, race predictions) only for the day itself." "Démarre l'app en arrière-plan à l'ouverture de session, pour qu'elle continue de se synchroniser : Garmin ne garde certaines données (statut d'entraînement, prévisions de course) que pour le jour même."
    "That backup doesn't exist any more." "Cette sauvegarde n'existe plus."
    "That file isn't a Garmin Coach backup." "Ce fichier n'est pas une sauvegarde Garmin Coach."
+   "This action needs the dashboard token. Reload the page and try again." "Cette action nécessite le jeton du tableau de bord. Recharge la page et réessaie."
    "That folder already has Garmin Coach data. Use it instead? The current data stays where it is." "Ce dossier contient déjà des données Garmin Coach. Les utiliser à la place ? Les données actuelles restent où elles sont."
    "That folder isn't empty. Choose an empty or new folder." "Ce dossier n'est pas vide. Choisis un dossier vide ou nouveau."
    "That is a file, not a folder." "C'est un fichier, pas un dossier."

@@ -10,6 +10,7 @@
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [coach.paths :as paths]
             [coach.i18n :refer [t]])
   (:import (java.net URI URLEncoder)
            (java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers)
@@ -90,9 +91,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Token file
 
-(defn- posix? []
-  (contains? (.supportedFileAttributeViews (java.nio.file.FileSystems/getDefault)) "posix"))
-
 (defn read-tokens []
   (let [f (io/file *token-file*)]
     (when (.isFile f)
@@ -101,16 +99,8 @@
 (defn- write-tokens!
   "Writes the token file, readable only by this user."
   [m]
-  (let [f     (io/file *token-file*)
-        dir   (.toPath (.getParentFile (.getAbsoluteFile f)))
-        path  (.toPath f)
-        perms #(java.nio.file.attribute.PosixFilePermissions/fromString %)]
-    (java.nio.file.Files/createDirectories dir (make-array java.nio.file.attribute.FileAttribute 0))
-    (when (and (posix?) (not (.exists f)))
-      (java.nio.file.Files/createFile path (into-array [(java.nio.file.attribute.PosixFilePermissions/asFileAttribute (perms "rw-------"))])))
-    (spit f (json/write-str m))
-    (when (posix?) (java.nio.file.Files/setPosixFilePermissions path (perms "rw-------")))
-    m))
+  (paths/secure-spit! *token-file* (json/write-str m))
+  m)
 
 (defn connected?
   "Whether Coros is connected: a login is stored. (Whether it still works
