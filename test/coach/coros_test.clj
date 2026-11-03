@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [coach.coros-auth :as auth]
             [coach.coros-mcp :as c]
+            [coach.analysis :as analysis]
             [coach.db :as db]
             [coach.fit :as fit]
             [coach.mcp :as mcp]
@@ -156,32 +157,91 @@
 (defn- fake-source [summaries fetched fail-on]
   (reify source/ActivitySource
     (list-activities [_ _ _] summaries)
-    (fetch-full-activity [_ {:keys [id date]}]
+    (fetch-full-activity [_ {:keys [id date time]}]
       (when (= id fail-on) (throw (ex-info "Daily FIT file limit reached" {:kind :rate-limit})))
       (swap! fetched conj id)
-      {:activity {:id id :date date :start_time_local (str date "T10:00:00") :sport "road_biking"
-                  :name "Ride" :moving_s 3600.0 :duration_s 3700.0 :raw {:source "coros"}}
-       :stream   {:t [0 1 2] :hr [120 121 122]}})))
+      (let [time (or time "10:00:00")]
+        {:activity {:id id :date date :start_time_local (str date "T" time) :start_time_gmt (str date "T" time)
+                    :sport "road_biking" :name "Ride" :moving_s 3600.0 :duration_s 3700.0 :raw {:source "coros"}}
+         :stream   {:t [0 1 2] :hr [120 121 122]}}))))
+
+(defn- ids [ds] (map :id (db/query ds ["SELECT id FROM activities ORDER BY id"])))
+
+(def big 470392722419646469) ; a real Coros id: too big for JavaScript
+
+(deftest local-ids
+  (is (= (+ sync/local-id-base 1790419085) (sync/local-id "2026-09-26T10:38:05")))
+  (is (< (sync/local-id "2099-12-31T23:59:59") 9007199254740991) "the browser can still count it"))
 
 (deftest activities-only-sync
   (let [ds      (temp-ds)
         fetched (atom [])
-        rides   [{:id 1 :date "2026-10-01"} {:id 2 :date "2026-10-02"}]]
-    (testing "new rides are stored with their stream and scored"
-      (is (= [1 2] (sync/activities-only! (fake-source rides fetched nil) ds :coros_synced_through "2026-01-01")))
-      (is (= [1 2] (map :id (db/query ds ["SELECT id FROM activities ORDER BY id"]))))
-      (is (= [120 121 122] (:hr (db/load-stream ds 2))))
+        rides   [{:id (+ big 1) :date "2026-10-01"} {:id (+ big 2) :date "2026-10-02"}]
+        id1     (sync/local-id "2026-10-01T10:00:00")
+        id2     (sync/local-id "2026-10-02T10:00:00")
+        id3     (sync/local-id "2026-10-03T10:00:00")]
+    (testing "new rides are stored under a browser-safe id, with their stream, and scored"
+      (is (= [id1 id2] (sync/activities-only! (fake-source rides fetched nil) ds "coros" :coros_synced_through "2026-01-01")))
+      (is (= [id1 id2] (ids ds)))
+      (is (= [120 121 122] (:hr (db/load-stream ds id2))))
+      (is (some? (first (db/query ds ["SELECT * FROM activity_metrics WHERE activity_id = ?" id2]))))
       (is (some? (db/get-state ds :coros_synced_through))))
     (testing "rides already stored aren't fetched again"
       (reset! fetched [])
-      (is (= [3] (sync/activities-only! (fake-source (conj rides {:id 3 :date "2026-10-03"}) fetched nil)
-                                        ds :coros_synced_through "2026-01-01")))
-      (is (= [3] @fetched)))
+      (is (= [id3] (sync/activities-only! (fake-source (conj rides {:id (+ big 3) :date "2026-10-03"}) fetched nil)
+                                          ds "coros" :coros_synced_through "2026-01-01")))
+      (is (= [(+ big 3)] @fetched)))
     (testing "a failure halfway keeps what came before and doesn't move the sync date"
       (db/set-state! ds :coros_synced_through "2026-10-01")
       (is (thrown? clojure.lang.ExceptionInfo
-                   (sync/activities-only! (fake-source (into rides [{:id 4 :date "2026-10-04"} {:id 5 :date "2026-10-05"}])
-                                                       fetched 5)
-                                          ds :coros_synced_through "2026-01-01")))
-      (is (= [1 2 3 4] (map :id (db/query ds ["SELECT id FROM activities ORDER BY id"]))))
+                   (sync/activities-only! (fake-source (into rides [{:id (+ big 4) :date "2026-10-04"} {:id (+ big 5) :date "2026-10-05"}])
+                                                       fetched (+ big 5))
+                                          ds "coros" :coros_synced_through "2026-01-01")))
+      (is (= 4 (count (ids ds))))
       (is (= "2026-10-01" (db/get-state ds :coros_synced_through))))))
+
+(def garmin-copy
+  {:id 19429741372 :date "2025-03-05" :start_time_local "2025-03-05T11:09:09" :start_time_gmt "2025-03-05T10:09:09"
+   :sport "road_biking" :name "Renens Road Cycling" :moving_s 4163.0 :duration_s 4200.0 :avg_hr 136.0 :raw {}})
+
+(deftest same-ride-counts-once
+  (testing "a Coros ride that Garmin also has: the Garmin entry stays and gets the per-second data"
+    (let [ds (temp-ds) fetched (atom [])]
+      (db/upsert-activities! ds [garmin-copy])
+      (db/save-stream! ds (:id garmin-copy) nil "no FIT file")
+      (is (= [(:id garmin-copy)]
+             (sync/activities-only! (fake-source [{:id big :date "2025-03-05" :time "10:10:30"}] fetched nil)
+                                    ds "coros" :coros_synced_through "2025-01-01")))
+      (is (= [(:id garmin-copy)] (ids ds)))
+      (is (= [120 121 122] (:hr (db/load-stream ds (:id garmin-copy)))))
+      (testing "and isn't downloaded again"
+        (reset! fetched [])
+        (sync/activities-only! (fake-source [{:id big :date "2025-03-05" :time "10:10:30"}] fetched nil)
+                               ds "coros" :coros_synced_through "2025-01-01")
+        (is (= [] @fetched)))))
+  (testing "a Garmin activity that is a ride already stored from Coros isn't stored again"
+    (let [ds (temp-ds)]
+      (sync/activities-only! (fake-source [{:id big :date "2025-03-05" :time "10:10:30"}] (atom []) nil)
+                             ds "coros" :coros_synced_through "2025-01-01")
+      (is (sync/garmin-duplicate? ds garmin-copy))
+      (is (not (sync/garmin-duplicate? ds (assoc garmin-copy :start_time_gmt "2025-03-05T16:00:00")))))))
+
+(deftest relink-rides-stored-under-coros-ids
+  (let [ds    (temp-ds)
+        coros (fn [id start] {:id id :date (subs start 0 10) :start_time_local start :start_time_gmt start
+                              :sport "road_biking" :name "Road Bike" :raw {:source "coros"}})]
+    (db/upsert-activities! ds [garmin-copy
+                               (coros big "2025-03-05T10:09:09")
+                               (coros (inc big) "2025-06-14T17:12:24")])
+    (db/save-stream! ds (:id garmin-copy) nil "no FIT file")
+    (db/save-stream! ds big {:t [0 1] :hr [130 131]} nil)
+    (db/save-stream! ds (inc big) {:t [0 1] :hr [140 141]} nil)
+    (analysis/save-feedback! ds (inc big) {:rpe 6})
+    (let [new-id (sync/local-id "2025-06-14T17:12:24")]
+      (is (= #{(:id garmin-copy) new-id} (set (sync/relink-stored! ds))))
+      (is (= [(:id garmin-copy) new-id] (ids ds)) "the double is gone, the other renumbered")
+      (is (= [130 131] (:hr (db/load-stream ds (:id garmin-copy)))))
+      (is (= [140 141] (:hr (db/load-stream ds new-id))))
+      (is (= 6 (:rpe (first (db/query ds ["SELECT rpe FROM activity_feedback WHERE activity_id = ?" new-id])))))
+      (is (empty? (db/query ds ["SELECT * FROM activity_streams WHERE activity_id > ?" 9007199254740991])))
+      (is (= 2 (count (db/query ds ["SELECT * FROM source_activities WHERE source = 'coros'"])))))))

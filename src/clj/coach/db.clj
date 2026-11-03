@@ -236,7 +236,15 @@
       lang       TEXT NOT NULL,
       text       TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      PRIMARY KEY (hash, lang))"])
+      PRIMARY KEY (hash, lang))"
+   ;; activities from an activity-only source (Coros): which stored activity
+   ;; each one became, merged = 1 when it was the same ride as one from Garmin
+   "CREATE TABLE IF NOT EXISTS source_activities (
+      source      TEXT NOT NULL,
+      source_id   TEXT NOT NULL,
+      activity_id INTEGER NOT NULL,
+      merged      INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (source, source_id))"])
 
 (def ^:private data-fixes
   ;; Garmin reports -1/-2 stress for "not enough data"; rows stored before
