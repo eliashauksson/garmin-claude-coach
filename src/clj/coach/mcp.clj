@@ -1,11 +1,15 @@
 (ns coach.mcp
-  "Minimal MCP client over stdio (JSON-RPC 2.0, newline-delimited).
+  "Minimal MCP client (JSON-RPC 2.0) over stdio (newline-delimited, a local
+  server process) or Streamable HTTP (a remote server, with a bearer token).
   Only what we need: initialize, tools/list, tools/call."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:import (java.io BufferedReader BufferedWriter File)
            (java.lang ProcessBuilder ProcessBuilder$Redirect)
+           (java.net URI)
+           (java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers)
+           (java.time Duration)
            (java.util.concurrent TimeUnit)))
 
 (def protocol-version "2025-06-18")
@@ -36,29 +40,95 @@
     (.write writer "\n")
     (.flush writer)))
 
+(defn- stdio-request [{:keys [pending next-id] :as client} method params timeout-ms]
+  (let [id (swap! next-id inc)
+        p  (promise)]
+    (swap! pending assoc id p)
+    (send! client {"jsonrpc" "2.0" "id" id "method" method "params" params})
+    (let [resp (deref p timeout-ms ::timeout)]
+      (if (= resp ::timeout)
+        (do (swap! pending dissoc id)
+            (throw (ex-info "MCP request timed out" {:method method :params params})))
+        resp))))
+
+;; ---------------------------------------------------------------------------
+;; Streamable HTTP: every message is a POST; the answer comes back as JSON or
+;; as a short server-sent-event stream. The server may hand out a session id
+;; on initialize, which every later request repeats.
+
+(defn sse-messages
+  "Pure: the JSON-RPC messages in a text/event-stream body (each event's
+  data: lines joined)."
+  [body]
+  (->> (str/split (str/replace (str body) "\r\n" "\n") #"\n\n+")
+       (keep (fn [event]
+               (let [data (->> (str/split-lines event)
+                               (keep #(when (str/starts-with? % "data:") (str/triml (subs % 5)))))]
+                 (when (seq data)
+                   (try (json/read-str (str/join "\n" data)) (catch Exception _ nil))))))
+       vec))
+
+(defn http-status-kind
+  "Pure: the error :kind of an HTTP status from a remote MCP server."
+  [status]
+  (cond (#{401 403} status) :auth
+        (= 429 status)      :rate-limit
+        (>= status 500)     :server-error
+        :else               :other))
+
+(defn- http-post [{:keys [^HttpClient http url token-fn session protocol]} msg timeout-ms]
+  (let [b (-> (HttpRequest/newBuilder (URI/create url))
+              (.timeout (Duration/ofMillis timeout-ms))
+              (.header "Content-Type" "application/json")
+              (.header "Accept" "application/json, text/event-stream")
+              (.header "Authorization" (str "Bearer " (token-fn)))
+              (.POST (HttpRequest$BodyPublishers/ofString (json/write-str msg))))
+        b (cond-> b
+            @session  (.header "Mcp-Session-Id" @session)
+            @protocol (.header "MCP-Protocol-Version" @protocol))
+        resp (try (.send http (.build b) (HttpResponse$BodyHandlers/ofString))
+                  (catch java.net.http.HttpTimeoutException _
+                    (throw (ex-info "MCP request timed out" {:method (get msg "method") :kind :timeout})))
+                  (catch java.io.IOException e
+                    (throw (ex-info (str "MCP server unreachable: " (ex-message e))
+                                    {:method (get msg "method") :kind :unreachable} e))))
+        status (.statusCode resp)]
+    (when-let [sid (.orElse (.firstValue (.headers resp) "mcp-session-id") nil)]
+      (reset! session sid))
+    (when (>= status 300)
+      (throw (ex-info (str "MCP server answered HTTP " status)
+                      {:method (get msg "method") :status status :kind (http-status-kind status)})))
+    {:content-type (.orElse (.firstValue (.headers resp) "content-type") "")
+     :body (.body resp)}))
+
+(defn- http-request [{:keys [next-id] :as client} method params timeout-ms]
+  (let [id (swap! next-id inc)
+        {:keys [content-type body]}
+        (http-post client {"jsonrpc" "2.0" "id" id "method" method "params" params} timeout-ms)
+        msgs (if (str/includes? content-type "event-stream")
+               (sse-messages body)
+               [(json/read-str body)])]
+    (or (first (filter #(= id (get % "id")) msgs))
+        (throw (ex-info "MCP server sent no answer" {:method method :kind :server-error})))))
+
 (defn request
   "Sends a JSON-RPC request and blocks for the result. Throws on error/timeout."
   ([client method params] (request client method params 120000))
-  ([{:keys [pending next-id] :as client} method params timeout-ms]
-   (let [id (swap! next-id inc)
-         p  (promise)]
-     (swap! pending assoc id p)
-     (send! client {"jsonrpc" "2.0" "id" id "method" method "params" params})
-     (let [resp (deref p timeout-ms ::timeout)]
-       (cond
-         (= resp ::timeout)
-         (do (swap! pending dissoc id)
-             (throw (ex-info "MCP request timed out" {:method method :params params})))
-
-         (get resp "error")
-         (throw (ex-info (str "MCP error: " (get-in resp ["error" "message"]))
-                         {:method method :params params :error (get resp "error")}))
-
-         :else (get resp "result"))))))
+  ([client method params timeout-ms]
+   (let [resp (if (:url client)
+                (http-request client method params timeout-ms)
+                (stdio-request client method params timeout-ms))]
+     (if (get resp "error")
+       (throw (ex-info (str "MCP error: " (get-in resp ["error" "message"]))
+                       {:method method :params params :error (get resp "error")}))
+       (get resp "result")))))
 
 (defn notify! [client method params]
-  (send! client (cond-> {"jsonrpc" "2.0" "method" method}
-                  params (assoc "params" params))))
+  (let [msg (cond-> {"jsonrpc" "2.0" "method" method}
+              params (assoc "params" params))]
+    (if (:url client)
+      (http-post client msg 30000)
+      (send! client msg))))
 
 (defn start!
   "Spawns the MCP server `cmd` (vector of strings) with extra `env` (map),
@@ -86,10 +156,33 @@
       (notify! client "notifications/initialized" nil)
       (assoc client :server-info init))))
 
-(defn stop! [{:keys [^Process process ^BufferedWriter writer]}]
-  (try (.close writer) (catch Exception _))
-  (when-not (.waitFor process 5 TimeUnit/SECONDS)
-    (.destroy process)))
+(defn start-http!
+  "Connects to the Streamable HTTP MCP server at `url`, performs the
+  initialize handshake and returns a client map. `token-fn` is called for
+  each request and returns the bearer token (so it can renew it)."
+  [{:keys [url token-fn]}]
+  (let [client {:url      url
+                :token-fn token-fn
+                :http     (-> (HttpClient/newBuilder)
+                              (.connectTimeout (Duration/ofSeconds 20))
+                              (.build))
+                :session  (atom nil)
+                :protocol (atom nil)
+                :next-id  (atom 0)}
+        init (request client "initialize"
+                      {"protocolVersion" protocol-version
+                       "capabilities"    {}
+                       "clientInfo"      {"name" "coach" "version" "0.1.0"}}
+                      60000)]
+    (reset! (:protocol client) (get init "protocolVersion" protocol-version))
+    (notify! client "notifications/initialized" nil)
+    (assoc client :server-info init)))
+
+(defn stop! [{:keys [^Process process ^BufferedWriter writer url]}]
+  (when-not url
+    (try (.close writer) (catch Exception _))
+    (when-not (.waitFor process 5 TimeUnit/SECONDS)
+      (.destroy process))))
 
 (defn list-tools [client]
   (loop [cursor nil acc []]

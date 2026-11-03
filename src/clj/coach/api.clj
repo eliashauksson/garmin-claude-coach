@@ -10,6 +10,7 @@
             [coach.athlete :as athlete]
             [coach.athlete-chat :as athlete-chat]
             [coach.backup :as backup]
+            [coach.coros-auth :as coros-auth]
             [coach.costs :as costs]
             [coach.db :as db]
             [coach.i18n :as i18n]
@@ -32,6 +33,23 @@
 ;; Sync runs in the background; one at a time.
 
 (defonce sync-state (atom {:running false}))
+
+(defn- run-coros!
+  "Syncs the Coros rides. {:ok true :new n} or {:ok false :kind :message}."
+  [ds]
+  (let [r (try (merge {:ok true} (sync/coros! ds))
+               (catch Throwable e
+                 (println "Coros sync failed:" (ex-message e))
+                 (merge {:ok false} (sync/failure e))))
+        r (assoc r :finished_at (str (java.time.Instant/now)))]
+    (try (db/set-state! ds :coros_last_sync (json/write-str r)) (catch Throwable _))
+    r))
+
+(defn- coros-status
+  "For Settings: the login and the last Coros sync."
+  [ds]
+  (assoc (coros-auth/status)
+         :last_sync (some-> (db/get-state ds :coros_last_sync) (json/read-str :key-fn keyword))))
 
 (defn- run-job!
   "Runs `f` with a Garmin source in the background unless a sync or history
@@ -57,6 +75,9 @@
                          (catch Throwable e
                            (println (str job " failed:") (ex-message e))
                            (merge {:ok false} (sync/failure e))))
+                ;; rides from a Coros bike computer: on their own, so a Coros
+                ;; problem never fails the Garmin sync (and the other way round)
+                result (cond-> result (coros-auth/connected?) (assoc :coros (run-coros! ds)))
                 result (if (and (:ok result) after) (after result) result)
                 done   (str (java.time.Instant/now))
                 result (assoc result :finished_at done)]
@@ -356,6 +377,23 @@
                               (let [r (auth/submit-code! ds (:code (body req)))]
                                 (when (= "ok" (:status r)) (run-sync! ds))
                                 (ok r)))}]
+    ;; Coros: sign in on Coros's own page, which sends the browser back to
+    ;; /coros/callback; a new login starts a sync
+    ["/coros/login"    {:post   (fn [req]
+                                  (ok (coros-auth/start-login!
+                                       (str "http://127.0.0.1:" (:server-port req) "/api/coros/callback"))))
+                        :delete (fn [_] (ok (coros-auth/disconnect!)))}]
+    ["/coros/callback" {:get (fn [{:keys [query-params]}]
+                               (try (coros-auth/finish-login! (update-keys query-params keyword))
+                                    (when @syncing? (run-sync! ds))
+                                    (catch clojure.lang.ExceptionInfo e
+                                      (println "Coros login failed:" (ex-message e))))
+                               ;; not a redirect: the browser would still count the next page as
+                               ;; coming from Coros (wrap-local-only); a page of our own moving on is ours
+                               {:status 200 :headers {"Content-Type" "text/html; charset=utf-8"}
+                                :body (str "<!DOCTYPE html><meta charset=\"utf-8\">"
+                                           "<meta http-equiv=\"refresh\" content=\"0;url=/#/settings\">"
+                                           "<a href=\"/#/settings\">Settings</a>")})}]
     ;; the app runs in the background; Settings can stop it
     ["/quit"         {:post (fn [_]
                               (future (Thread/sleep 300)
@@ -418,6 +456,7 @@
                                        (planner/translate-soon!)
                                        (ok {:lang lang}))))}]
     ["/sync"        {:get  (fn [_] (ok (assoc @sync-state :auth (auth-status ds) :claude (claude-status ds)
+                                          :coros (coros-status ds)
                                           :started_at started-at ; the page notices a restart by this
                                           :update (coach-app/update-status)
                                           :translating (translate/running?)
@@ -487,14 +526,19 @@
   - the Host must be this computer (a rebound site still sends its own name);
   - the browser's Sec-Fetch-Site must not say another site sent it;
   - a changing request with an Origin must come from this computer.
-  Requests without those headers (curl, the installer) are fine."
-  [{:keys [headers request-method]}]
+  Requests without those headers (curl, the installer) are fine.
+  One exception to the second rule: Coros's sign-in page sending the browser
+  back to /api/coros/callback. That GET only completes a login this app
+  started, with the one-time state it made up (coach.coros-auth), and
+  answers with nothing but a redirect."
+  [{:keys [headers request-method uri]}]
   (let [host   (get headers "host")
         site   (get headers "sec-fetch-site")
         origin (get headers "origin")]
     (boolean
      (or (and host (not (local-hosts (some-> (host-name host) str/lower-case))))
-         (#{"cross-site" "same-site"} site)
+         (and (#{"cross-site" "same-site"} site)
+              (not (and (= :get request-method) (= "/api/coros/callback" uri))))
          (and origin (not (#{:get :head} request-method)) (not (local-origin? origin)))))))
 
 (defn- wrap-local-only

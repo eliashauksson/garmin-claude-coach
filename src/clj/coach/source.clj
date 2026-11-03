@@ -33,3 +33,13 @@
     "Endurance score on `date` {:date :score :raw}, nil when none.")
   (fetch-sleep-need [this date]
     "Sleep need for the night ending `date` {:date :need_min :raw}, nil when none."))
+
+(defprotocol ActivitySource
+  "A source of activities only, such as a bike computer (no health data).
+  Read-only like DataSource."
+  (list-activities [this start-date end-date]
+    "Activity summaries in [start-date, end-date] (ISO dates, inclusive):
+    [{:id :date …}], enough to tell which ones are new.")
+  (fetch-full-activity [this summary]
+    "One activity in full: {:activity row (coach.db columns, with :raw)
+    :stream columnar stream or nil}."))

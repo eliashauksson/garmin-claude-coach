@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Personal Garmin dashboard + AI training planner: syncs Garmin data into local SQLite, computes TrainingPeaks-style metrics, and asks Claude to propose training the athlete accepts or rejects. Nothing is ever written to Garmin.
+Personal Garmin dashboard + AI training planner: syncs Garmin data (plus rides from a Coros bike computer) into local SQLite, computes TrainingPeaks-style metrics, and asks Claude to propose training the athlete accepts or rejects. Nothing is ever written to Garmin or Coros.
 Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthropic-java), ClojureScript via shadow-cljs + Replicant (ECharts, Leaflet), shared `.cljc` for i18n.
 
 ## Commands
@@ -15,8 +15,9 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - api: JSON API under /api + static files, 127.0.0.1 only; runs sync/backup jobs; `-main` entry point
 - app: installed app: version/updates, autostart, restart, :pending actions in config.edn
 - paths: app/data folder resolution, lock file
-- source: `DataSource` protocol (read-only) · garmin-mcp: DataSource over a local garmin_mcp server · mcp: minimal stdio MCP client
-- sync: incremental + backfill from a DataSource into the DB (upserts)
+- source: `DataSource` protocol (read-only), `ActivitySource` for activity-only sources · garmin-mcp: DataSource over a local garmin_mcp server · mcp: minimal MCP client (stdio, Streamable HTTP)
+- coros-mcp: ActivitySource over COROS's official remote MCP server (rides from FIT files) · coros-auth: Coros OAuth (PKCE, token in ~/.config/coach/coros.json) · fit: FIT file decoding (Garmin FIT SDK)
+- sync: incremental + backfill from a DataSource into the DB (upserts); `activities-only!`/`coros!` for Coros
 - db: SQLite schema/queries; raw source JSON kept on every row
 - metrics: pure TSS/NP/IF/CTL/ATL/TSB etc. · analysis: glue between db and metrics, API queries
 - overview: everything behind the dashboard start page (/api/overview)
@@ -37,6 +38,7 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 ## Data flow
 garmin-mcp (via mcp, implements source/DataSource) → sync → db → analysis/metrics → overview, readiness, adapt, plan-rules
 → planner / season-plan (Claude; costs, ai-settings, translate) → plan → api → frontend (`js/fetch` in coach.app).
+coros-mcp (HTTP, coros-auth) → sync/coros! → db: new rides only, each fetched once; runs after the Garmin sync in `run-job!`, failures kept apart.
 api starts garmin-mcp via `requiring-resolve` in `run-job!`; the frontend requires only coach.i18n from cljc.
 
 ## Where to look
@@ -44,7 +46,7 @@ api starts garmin-mcp via `requiring-resolve` in `run-job!`; the frontend requir
 - UI: src/cljs/coach/views/*.cljs; shared bits in ui.cljs, charts.cljs
 - i18n: wrap text in `t` (or `tk` in data), then add the de/fr entries; i18n_test checks they exist
 - AI/cost settings: ai_settings.clj (`tasks`), costs.clj (`prices`), views/costs.cljs, views/settings.cljs
-- Auth: auth.clj (Garmin login), `/api/garmin/login|code`, `/api/claude/key`
+- Auth: auth.clj (Garmin login), `/api/garmin/login|code`, coros_auth.clj + `/api/coros/login|callback`, `/api/claude/key`
 - Metrics: metrics.clj (pure) + analysis.clj
 
 ## Don't read unless needed

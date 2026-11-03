@@ -1,5 +1,5 @@
 (ns coach.views.settings
-  "Settings: General (language, appearance, backup, Garmin) and Claude & API
+  "Settings: General (language, appearance, backup, Garmin, Coros) and Claude & API
   costs (model, effort and delivery per task, and what the requests cost)."
   (:require [coach.i18n :as i18n :refer [t tk]]
             [coach.ui :as ui]
@@ -162,6 +162,37 @@
                  (garmin-login login)])
               (history-section sync)))))
 
+(defn- coros-card
+  "Rides from a Coros bike computer: signing in happens on Coros's own page,
+  which sends the browser back here."
+  [{:keys [coros running]} {:keys [busy error]}]
+  (let [{:keys [connected connected_at login_error last_sync]} coros]
+    (ui/card {:flex "1 1 360px" :class "connect"}
+             [:div.lab "Coros" [:span.sp] (connected-pill connected)]
+             (if-not connected
+               (list
+                [:div {:replicant/key "t"} (t "For rides recorded on a Coros bike computer. Sign in once on the Coros page; every sync then fetches your new rides, with their per-second data. Nothing is ever written to Coros.")]
+                [:div.connect-row {:replicant/key "b"}
+                 [:button.btn-ink {:disabled busy :on {:click [[:coros-login]]}}
+                  (if busy (t "Opening Coros…") (t "Connect Coros"))]])
+               (list
+                (when-let [w (status/when-str connected_at)]
+                  [:div {:replicant/key "t"} (t "Connected since {0}" w)])
+                (cond
+                  running
+                  [:div.sub {:replicant/key "s"} [:span.spinner-inline {:aria-hidden "true"}] (t "Syncing…")]
+                  (:ok last_sync)
+                  [:div.sub {:replicant/key "s"}
+                   (t "Last Coros sync: {0}, {1} new activities" (status/when-str (:finished_at last_sync)) (:new last_sync))]
+                  last_sync
+                  [:div.error {:replicant/key "s"} (t "The last Coros sync failed: {0}" (:message last_sync))])
+                [:div.connect-row {:replicant/key "b"}
+                 (when (= "auth" (some-> (:kind last_sync) name))
+                   [:button.btn-ink {:disabled busy :on {:click [[:coros-login]]}} (t "Connect again")])
+                 [:button.pill {:on {:click [[:coros-disconnect]]}} (t "Disconnect")]]))
+             (when-let [e (or error login_error)]
+               [:div.error {:replicant/key "x"} e]))))
+
 (defn- notice-line [{:keys [ok message]}]
   (when message
     [:div {:replicant/key "notice" :class (if ok "ok-line" "error")}
@@ -263,6 +294,7 @@
        (costs/view s (first (urls route)))
        (list
         [:div.row {:replicant/key "r0"} (garmin-card sync (get-in s [:ui :garmin-login])) (claude-card (get data key-url) (get-in s [:ui :claude-key]))]
+        [:div.row {:replicant/key "rc"} (coros-card sync (get-in s [:ui :coros]))]
         [:div.row {:replicant/key "r1"} (language-card) (appearance-card theme-choice)]
         [:div.row {:replicant/key "r2"} (app-card (get data app-url) (:ui s)) (data-card (get data app-url) (get-in s [:ui :data-dir]))]
         [:div.row {:replicant/key "r3"} (backup-card (get data status/backup-url) (get-in s [:ui :restore]))]))]))

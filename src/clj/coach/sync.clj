@@ -335,6 +335,50 @@
            (db/set-state! ds :backfill_before (str start))
            (recur (inc n) (if (pos? with_data) 0 (inc empty-run)))))))))
 
+;; ---------------------------------------------------------------------------
+;; Activity-only sources (a Coros bike computer): rides recorded there and
+;; nowhere else. Each new activity is fetched once, in full, and stored right
+;; away, so a failure halfway (a daily download limit, the connection) keeps
+;; what came before and the next sync picks up the rest.
+
+(defn activities-only!
+  "Stores the activities of `src` (a coach.source/ActivitySource) since a
+  little before `state-key`'s date (from `epoch` the first time), skipping
+  ones already stored. Scores the new ones. Returns their ids."
+  [src ds state-key epoch]
+  (let [t      (today)
+        last   (db/get-state ds state-key)
+        from   (if last (str (.minusDays (d last) refresh-days)) epoch)
+        listed (source/list-activities src from t)
+        known  (into #{} (comp (partition-all 500)
+                               (mapcat #(db/query ds (into [(str "SELECT id FROM activities WHERE id IN ("
+                                                                 (str/join "," (repeat (count %) "?")) ")")]
+                                                           (map :id %))))
+                               (map :id))
+                     listed)
+        fresh  (remove #(known (:id %)) listed)
+        stored (atom [])]
+    (println (format "  %s → %s  %d listed, %d new" from t (count listed) (count fresh)))
+    (try
+      (doseq [summary fresh]
+        (let [{:keys [activity stream]} (source/fetch-full-activity src summary)]
+          (db/upsert-activities! ds [activity])
+          (db/save-stream! ds (:id activity) stream (when-not stream "no per-second data"))
+          (swap! stored conj (:id activity))))
+      (db/set-state! ds state-key t)
+      (finally
+        (when (seq @stored) (analysis/compute-metrics! ds @stored))))
+    @stored))
+
+(defn coros!
+  "Syncs the rides on Coros (coach.coros-mcp). Returns {:new n}."
+  [ds]
+  (println "Coros")
+  (let [src ((requiring-resolve 'coach.coros-mcp/start!))]
+    (try {:new (count (activities-only! src ds :coros_synced_through
+                                        @(requiring-resolve 'coach.coros-mcp/epoch)))}
+         (finally ((requiring-resolve 'coach.coros-mcp/stop!) src)))))
+
 (defn earliest-date [ds]
   (:d (first (db/query ds [(str "SELECT min(d) AS d FROM (SELECT min(date) AS d FROM activities
                                  UNION SELECT min(date) FROM daily_wellness WHERE NOT ("

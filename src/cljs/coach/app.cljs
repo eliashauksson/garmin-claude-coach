@@ -374,6 +374,14 @@
                                   (post-json "/api/garmin/login" {:email email :password password}))
                                 (.then done)
                                 (.catch #(done {:status "error" :error (.-message %)}))))))
+      ;; Coros: off to the Coros sign-in page, which sends the browser back to Settings
+      :coros-login  (do (swap! state assoc-in [:ui :coros] {:busy true})
+                        (-> (post-json "/api/coros/login" {})
+                            (.then #(set! (.-location js/window) (:url %)))
+                            (.catch #(swap! state assoc-in [:ui :coros] {:error (.-message %)}))))
+      :coros-disconnect (when (js/confirm (t "Disconnect Coros? The rides already loaded stay."))
+                          (-> (js/fetch "/api/coros/login" #js {:method "DELETE"})
+                              (.then #(do (swap! state assoc-in [:ui :coros] {}) (poll-sync!)))))
       :garmin-login-key (let [[op ev] args] (when (= "Enter" (.-key ev)) (handle [:garmin-login op])))
       ;; the installed app: update, data folder, restore, start with the computer
       :app-update   (app-request! :app-update "POST" "/api/app/update" nil)

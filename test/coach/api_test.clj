@@ -99,4 +99,9 @@
       (is (foreign? :get {"host" "127.0.0.1:8080" "sec-fetch-site" "cross-site"}) "e.g. an <img> of /api/backup/download")
       (is (foreign? :post {"host" "127.0.0.1:8080" "origin" "http://127.0.0.1.evil.example"}))
       (is (foreign? :get {"host" "evil.example:8080"}) "DNS rebinding: the Host gives it away")
-      (is (foreign? :get {"host" "127.0.0.1.evil.example"})))))
+      (is (foreign? :get {"host" "127.0.0.1.evil.example"})))
+    (testing "Coros's sign-in page sending the browser back, and only that"
+      (let [cb (fn [method headers] (api/foreign-request? {:request-method method :uri "/api/coros/callback" :headers headers}))]
+        (is (not (cb :get {"host" "127.0.0.1:8090" "sec-fetch-site" "cross-site"})))
+        (is (cb :post {"host" "127.0.0.1:8090" "sec-fetch-site" "cross-site"}))
+        (is (cb :get {"host" "evil.example:8090" "sec-fetch-site" "cross-site"}) "still only on this computer")))))
