@@ -52,6 +52,8 @@
     [(:status r) (json/read-str (:body r) :key-fn keyword)]))
 
 (deftest plan-flow-test
+  ;; the week of 2026-11-02, seen from the day before it starts: nothing missed yet
+  (with-redefs [coach.plan/today (constantly "2026-11-01")]
   (let [ds  (temp-ds)
         app (api/app ds)
         pid (coach.plan/create-proposal! ds "2026-11-02" "test")]
@@ -82,7 +84,7 @@
     (testing "a run on that day marks the planned run done"
       (db/upsert-activities! ds [{:id 9 :date "2026-11-02" :start_time_local "2026-11-02T06:00:00"
                                   :sport "running" :name "Run" :raw {}}])
-      (is (= ["done"] (map :status (:workouts (second (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08")))))))))
+      (is (= ["done"] (map :status (:workouts (second (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08"))))))))))
 
 (deftest foreign-request-test
   (let [req (fn [method headers] {:request-method method :uri "/api/quit" :headers headers})

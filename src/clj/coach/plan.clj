@@ -47,6 +47,12 @@
         (re-find #"hiking|walking" (str sport)) :hike
         (re-find #"cycling|biking" (str sport)) :ride))
 
+(defn today
+  "Today's date (ISO): what has passed shows as missed. A function so tests
+  can pin it."
+  []
+  (str (LocalDate/now)))
+
 (defn with-done
   "Status as seen by the athlete: a planned workout is done when an activity
   of the same kind exists that day (each activity matches one workout), and
@@ -75,7 +81,7 @@
   (with-done (db/query ds ["SELECT * FROM planned_workouts WHERE date BETWEEN ? AND ? AND status <> 'cancelled'
                             ORDER BY date, slot" from to])
     (db/query ds ["SELECT id, date, sport FROM activities WHERE date BETWEEN ? AND ?" from to])
-    (str (LocalDate/now))))
+    (today)))
 
 (def statuses #{"planned" "skipped" "done" "cancelled"})
 
