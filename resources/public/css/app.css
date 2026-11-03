@@ -641,3 +641,24 @@ td.name-wrap { font-weight: 700; white-space: normal; min-width: 160px; }
 .file-pick input { display: none; }
 .file-pick.disabled { opacity: .5; pointer-events: none; }
 code.path { word-break: break-all; }
+
+/* Metrics page (views/metrics.cljs) */
+.metric-group { scroll-margin-top: 16px; }
+.metric-group > .sub { margin: 4px 0 8px; }
+.metric { padding: 14px 0; border-top: 1px solid var(--line); }
+.metric-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.metric-head h3 { margin: 0; font-size: 15px; font-weight: 650; }
+.metric p { margin: 6px 0; max-width: 72ch; }
+.metric dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 6px 0 0; max-width: 90ch; }
+.metric dt { color: var(--text-3); font-size: 13px; }
+.metric dd { margin: 0; font-size: 14px; }
+@media (max-width: 640px) { .metric dl { grid-template-columns: 1fr; } .metric dd { margin-bottom: 6px; } }
+.metric.target { background: var(--tint-amber); margin: 0 -12px; padding: 14px 12px; border-radius: 14px; border-top-color: transparent; }
+
+/* "?" link from a card title to its Metrics entry (ui/info) */
+a.info { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: none;
+  border-radius: 50%; font-size: 10.5px; font-weight: 700; line-height: 1; text-decoration: none;
+  color: var(--text-3); background: var(--surface-2); margin-left: 2px; vertical-align: middle; }
+[class*="tint-"] a.info { background: var(--pill-on-tint); }
+a.info:hover, a.info:focus-visible { color: var(--text); }
+.card-title a.info, .sub a.info { margin-left: 6px; }

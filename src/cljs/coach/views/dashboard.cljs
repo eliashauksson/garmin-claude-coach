@@ -71,9 +71,9 @@
 
 (defn- chart-card
   "A recovery/training chart card: title, one-line note, then the body."
-  [{:keys [key title text wide? body]}]
+  [{:keys [key title text wide? body info]}]
   [:section.card.chart-card {:replicant/key key :class (when wide? "wide")}
-   [:div.card-title title]
+   [:div.card-title title (ui/info info)]
    (when text (note text))
    body])
 
@@ -159,16 +159,16 @@
   [:section.card.readiness {:replicant/key "readiness"}
    (ui/label-row {:icon :bolt :accent (tone-var (tone (:level r)) "--text-3")
                   :tint (case (tone (:level r)) :good "--tint-green" :warn "--tint-amber" :bad "--tint-red" "--surface-2")
-                  :soft? true :label (t "Training readiness")
+                  :soft? true :label (t "Training readiness") :info "readiness"
                   :right (when feedback (ui/pill (ui/enum feedback)))})
    [:div.readiness-body
     (ring r)
     (factors (:factors r))]
    (note (t "Garmin's score from 0 to 100, built from last night's sleep, recovery time, load balance, stress and HRV. The bars show how much each one helps today."))])
 
-(defn- vital [{:keys [key tint tint-var icon accent label value unit sub visual]}]
+(defn- vital [{:keys [key tint tint-var icon accent label value unit sub visual info]}]
   [:section.card.vital {:replicant/key key :class (str "tint-" tint)}
-   (ui/label-row {:icon icon :accent accent :tint tint-var :label label})
+   (ui/label-row {:icon icon :accent accent :tint tint-var :label label :info info})
    [:div.big (dash value) (when (and value unit) [:small unit])]
    [:div.sub sub]
    [:div.vital-visual {:aria-hidden "true"} visual]])
@@ -195,17 +195,17 @@
         n14 (take-last 14 nights)
         d14 (take-last 14 days)]
     [:div.vitals
-     (vital {:key "sleep" :tint "purple" :tint-var "--tint-purple" :icon :moon :accent "--purple"
+     (vital {:key "sleep" :info "sleep" :tint "purple" :tint-var "--tint-purple" :icon :moon :accent "--purple"
              :label (t "Sleep score") :value sleep_score
              :sub (str/join " · " (remove nil? [(ui/hm sleep_s) (ui/enum sleep_quality)]))
              :visual (stage-bar vitals)})
-     (vital {:key "hrv" :tint "teal" :tint-var "--chip-swim-bg" :icon :pulse :accent "--fam-swim"
+     (vital {:key "hrv" :info "hrv" :tint "teal" :tint-var "--chip-swim-bg" :icon :pulse :accent "--fam-swim"
              :label (t "Overnight HRV") :value hrv_night :unit "ms"
              :sub (str/join " · " (remove nil? [(ui/enum hrv_status) (some->> hrv_weekly (t "7-day {0} ms"))]))
              :visual (when (some :hrv_night n14)
                        (c/spark "spark-hrv" "h44" {:color "--fam-swim" :values (mapv :hrv_night n14)
                                                    :band (mapv (juxt :hrv_balanced_low :hrv_balanced_up) n14)}))})
-     (vital {:key "rhr" :tint "red" :tint-var "--tint-red" :icon :heart :accent "--red"
+     (vital {:key "rhr" :info "rhr" :tint "red" :tint-var "--tint-red" :icon :heart :accent "--red"
              :label (t "Resting heart rate") :value rhr :unit "bpm"
              :sub (when rhr_delta
                     [:span [:b {:style {:color (cond (pos? rhr_delta) "var(--red)" (neg? rhr_delta) "var(--green-ink)")}}
@@ -213,7 +213,7 @@
                      " " (t "vs the 7 days before ({0})" rhr_7d)])
              :visual (when (some :rhr d14)
                        (c/spark "spark-rhr" "h44" {:color "--red" :values (mapv :rhr d14)}))})
-     (vital {:key "bb" :tint "blue" :tint-var "--tint-blue" :icon :battery :accent "--blue"
+     (vital {:key "bb" :info "body-battery" :tint "blue" :tint-var "--tint-blue" :icon :battery :accent "--blue"
              :label (t "Body Battery now") :value bb_now
              :sub (when (and bb_low bb_high) (t "today {0} to {1}" bb_low bb_high))
              :visual (bb-bars days)})]))
@@ -330,7 +330,7 @@
    (for [[leg k label] [["10k" :t10k (tk "10K")] ["half" :thalf (tk "Half marathon")] ["marathon" :tmar (tk "Marathon")]]
          :let [values (mapv k trend)]]
      [:section.card.prediction {:replicant/key leg}
-      [:div.lab (t label)]
+      [:div.lab (t label) (ui/info "race-predictions")]
       [:div.pred-time (dash (ui/hms (get now k)))]
       (if (some some? values)
         (c/spark (str "pred-" leg) "h54" {:color "--pink" :values values :inverse? true})
@@ -562,19 +562,19 @@
    [:div.section-head {:replicant/key "rec-head"}
     [:h2.section-title (t "Recovery") [:span.section-note (t "Last 30 days")]]]
    [:div.chart-grid {:replicant/key "rec"}
-    (chart-card {:key "hrv" :wide? true :title (t "Overnight HRV against your baseline")
+    (chart-card {:key "hrv" :info "hrv" :wide? true :title (t "Overnight HRV against your baseline")
                  :text (t "Nightly average in ms. The shaded band is Garmin's balanced range for you; the dashed line is the 7-day average.")
                  :body (hrv-chart nights)})
-    (chart-card {:key "sleep" :title (t "Sleep stages per night")
+    (chart-card {:key "sleep" :info "sleep" :title (t "Sleep stages per night")
                  :text (t "Hours asleep in each stage; the dark tick is the sleep Garmin says you needed.")
                  :body (sleep-chart nights)})
-    (chart-card {:key "bb" :title (t "Body Battery range per day")
+    (chart-card {:key "bb" :info "body-battery" :title (t "Body Battery range per day")
                  :text (t "From the day's low to its high; the ring is where the day ended.")
                  :body (bb-chart days)})
-    (chart-card {:key "rhr" :title (t "Resting heart rate")
+    (chart-card {:key "rhr" :info "rhr" :title (t "Resting heart rate")
                  :text (t "Beats per minute at rest, each day.")
                  :body (rhr-chart days)})
-    (chart-card {:key "stress" :title (t "Average stress per day")
+    (chart-card {:key "stress" :info "stress" :title (t "Average stress per day")
                  :text (t "Garmin's stress score from 0 to 100; below the dashed line at 25 is rest.")
                  :body (stress-chart days)})]))
 
@@ -585,21 +585,21 @@
   [:div.delta {:class (cond (nil? d) nil (pos? d) "up" (neg? d) "down" :else "flat")}
    (if (nil? d) "—" (str (ui/signed d) (when unit (str " " unit))))])
 
-(defn- kpi [key label value unit delta]
+(defn- kpi [key label value unit delta & [info]]
   [:section.card.kpi {:replicant/key key}
-   [:div.lab label]
+   [:div.lab label (ui/info info)]
    [:div.big.md (dash value) (when (and value unit) [:small unit])]
    (delta-el delta unit)])
 
 (defn- kpis [{:keys [period status]}]
   (let [{:keys [hours km load sessions hours_delta km_delta load_delta sessions_delta]} period]
     [:div.kpis {:replicant/key "kpis"}
-     (kpi "hours" (t "Time") hours "h" hours_delta)
-     (kpi "km" (t "Distance") km "km" km_delta)
-     (kpi "load" (t "Training load") load nil load_delta)
-     (kpi "sessions" (t "Sessions") sessions nil sessions_delta)
+     (kpi "hours" (t "Time") hours "h" hours_delta "period")
+     (kpi "km" (t "Distance") km "km" km_delta "period")
+     (kpi "load" (t "Training load") load nil load_delta "garmin-load")
+     (kpi "sessions" (t "Sessions") sessions nil sessions_delta "period")
      [:section.card.kpi {:replicant/key "status"}
-      [:div.lab (t "Training status")]
+      [:div.lab (t "Training status") (ui/info "training-status")]
       [:div.status-phrase (dash (ui/enum (:status status)))]
       (when (:device status) [:div.sub (t "on your {0}" (:device status))])]]))
 
@@ -677,7 +677,7 @@
 
 (defn- heatmap-card [{:keys [heatmap date]}]
   (let [fams (filter (set (map :family heatmap)) fam-order)]
-    (chart-card {:key "heat" :wide? true :title (t "Every day of the last 26 weeks")
+    (chart-card {:key "heat" :info "garmin-load" :wide? true :title (t "Every day of the last 26 weeks")
                  :text (t "One square a day, Monday at the top. Colour is the sport with the most load that day, and the stronger the colour, the bigger the load.")
                  :body (list
                         (ui/legend (for [f fams :let [x (fam f)]] {:label (t (:label x)) :color (:color x)}))
@@ -689,7 +689,7 @@
         by    (group-by :week weekly)
         fams  (filter (set (map :family weekly)) fam-order)]
     (chart-card
-     {:key "weekly" :wide? true :title (t "Weekly training load by sport")
+     {:key "weekly" :info "garmin-load" :wide? true :title (t "Weekly training load by sport")
       :text (t "Garmin's training load per week, stacked by sport.")
       :body (if (empty? weekly)
               (empty-line)
@@ -727,7 +727,7 @@
         scale (* 1.08 (apply max 1 (keep identity [aer_low aer_low_max aer_high aer_high_max anaer anaer_max])))
         pct   #(str (* 100 (/ % scale)) "%")]
     (chart-card
-     {:key "focus" :title (t "Load focus, last 4 weeks")
+     {:key "focus" :info "load-focus" :title (t "Load focus, last 4 weeks")
       :text (t "Your load in each intensity band against the range Garmin targets for you (shaded).")
       :body (if (every? nil? [aer_low aer_high anaer])
               (empty-line)
@@ -752,7 +752,7 @@
         pct   #(str (* 100 (/ % scale)) "%")
         edge  #(let [f (/ % scale)] (cond (< f 0.1) "start" (> f 0.9) "end"))]
     (chart-card
-     {:key "acwr" :title (t "Acute vs chronic load")
+     {:key "acwr" :info "acwr" :title (t "Acute vs chronic load")
       :text (t "The last 7 days' load (acute) against the 4-week load you are used to (chronic). The shaded band is the optimal range.")
       :body (if (nil? chronic)
               (empty-line)
@@ -779,7 +779,7 @@
 (defn- zones-card [{:keys [zones]}]
   (let [total (reduce + 0 (keep :minutes zones))]
     (chart-card
-     {:key "zones" :title (t "Time in heart-rate zones")
+     {:key "zones" :info "zones-28d" :title (t "Time in heart-rate zones")
       :text (t "Minutes in each zone over all activities of the last 28 days.")
       :body (if (zero? total)
               (empty-line)
@@ -857,11 +857,11 @@
    [:div.section-head {:replicant/key "fit-head"}
     [:h2.section-title (t "Fitness") [:span.section-note (t "Last 6 months")]]]
    [:div.chart-grid {:replicant/key "fit"}
-    (chart-card {:key "vo2" :title (t "VO₂ max (running)")
+    (chart-card {:key "vo2" :info "vo2max" :title (t "VO₂ max (running)")
                  :text (t "Garmin's estimate in ml/kg/min, each day it changed.")
                  :body (end-line {:key "vo2" :class "h220" :color "--green" :rows vo2 :k :vo2
                                   :fmt #(.toFixed % 1)})})
-    (chart-card {:key "endurance" :title (t "Endurance score")
+    (chart-card {:key "endurance" :info "endurance-score" :title (t "Endurance score")
                  :text (t "How long you can keep going, from all your training. The marker is your score on Garmin's classes.")
                  :body (if-not (:score endurance)
                          (empty-line)

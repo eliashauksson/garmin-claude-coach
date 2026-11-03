@@ -191,12 +191,22 @@
 
 (defn pills [& items] (into [:div.pills] (remove nil? items)))
 
+(defn info
+  "A small \"?\" link to the Metrics page's entry `id` (views/metrics.cljs)."
+  [id]
+  (when id
+    [:a.info {:href (str "#/metrics?m=" id) :title (t "What does this mean?")
+              :aria-label (t "What does this mean?")}
+     "?"]))
+
 (defn label-row
-  "Icon chip, label, spacer, then optional right-hand controls."
-  [{:keys [icon accent tint soft? label right]}]
+  "Icon chip, label (with an optional Metrics link), spacer, then optional
+  right-hand controls."
+  [{:keys [icon accent tint soft? label right] :as opts}]
   [:div.lab
    (when icon (icon-chip icon accent tint {:soft? soft?}))
    label
+   (info (:info opts))
    [:span.sp]
    right])
 
@@ -209,9 +219,9 @@
 
 (defn tile
   "KPI card: label, big number (with optional unit) and a sub line."
-  [{:keys [label value unit sub tint flex size]}]
+  [{:keys [label value unit sub tint flex size] :as opts}]
   (card {:tint tint :flex (or flex "1 1 200px")}
-        [:div.lab label]
+        [:div.lab label (info (:info opts))]
         [:div.big {:class size} (or value "—") (when (and value unit) [:small unit])]
         (when sub [:div.sub sub])))
 
@@ -251,10 +261,10 @@
 (defn chart-card
   "A bento card with a label row (icon, title, optional controls), optional
   legend pills, the chart and a footer."
-  [{:keys [title icon accent tint soft? flex legend-items controls header chart footer]}]
+  [{:keys [title icon accent tint soft? flex legend-items controls header chart footer info]}]
   (card {:tint tint :flex flex}
         (label-row {:icon icon :accent accent :tint (str "--tint-" (or tint "blue")) :soft? soft?
-                    :label title :right controls})
+                    :label title :info info :right controls})
         header
         (when legend-items (legend legend-items))
         chart

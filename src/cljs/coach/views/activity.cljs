@@ -80,29 +80,31 @@
 
 (def tints (cycle ["blue" "purple" "green" "amber" "red"]))
 
-(defn- tile [label value unit sub]
-  {:label label :value value :unit unit :sub sub})
+(defn- tile [label value unit sub & [info]]
+  {:label label :value value :unit unit :sub sub :info info})
 
 (defn- tile-row [a run?]
   (let [secs (or (:moving_s a) (:duration_s a))
         mps  (when (and (:distance_m a) secs (pos? secs)) (/ (:distance_m a) secs))
         tiles (remove nil?
      [(tile (t "Distance") (ui/km (:distance_m a)) "km" nil)
-     (tile (t "Moving time") (ui/hms secs) nil (t "elapsed {0}" (ui/hms (:duration_s a))))
+     (tile (t "Moving time") (ui/hms secs) nil (t "elapsed {0}" (ui/hms (:duration_s a))) "moving-time")
      (if run?
-       (tile (t "Avg pace") (ui/pace mps) "/km" (some->> (:ngp_mps a) ui/pace (str "NGP ")))
+       (tile (t "Avg pace") (ui/pace mps) "/km" (some->> (:ngp_mps a) ui/pace (str "NGP ")) (when (:ngp_mps a) "ngp"))
        (tile (t "Avg speed") (ui/kmh mps) "km/h" nil))
      (tile (t "Elevation gain") (some-> (:elev_gain_m a) js/Math.round) "m" nil)
      (tile (t "Heart rate") (some-> (:avg_hr a) js/Math.round) "bpm" (some->> (:max_hr a) js/Math.round (t "max {0}")))
      (tile (t "Training stress") (some-> (:tss a) js/Math.round) (:tss_method a)
               (str/join " · " (remove nil? [(some->> (ui/fixed (:intensity a) 2) (str "IF "))
-                                            (some-> (:tss_per_hour a) js/Math.round (str " TSS/h"))])))
+                                            (some-> (:tss_per_hour a) js/Math.round (str " TSS/h"))]))
+              "tss")
      (when (:np a) (tile (t "Normalized power") (js/Math.round (:np a)) "W"
-                            (str/join " · " (remove nil? [(some->> (:vi a) (str "VI ")) (some->> (:kj a) (str "kJ "))]))))
+                            (str/join " · " (remove nil? [(some->> (:vi a) (str "VI ")) (some->> (:kj a) (str "kJ "))]))
+                            "np"))
      (tile (t "Efficiency factor") (ui/fixed (:ef a) 2) nil
-              (some->> (:decoupling a) (t "decoupling {0}%")))
+              (some->> (:decoupling a) (t "decoupling {0}%")) "ef")
      (tile (t "Garmin load") (some-> (:garmin_load a) js/Math.round) nil
-              (some->> (ui/fixed (:aerobic_te a) 1) (t "aerobic TE {0}")))])]
+              (some->> (ui/fixed (:aerobic_te a) 1) (t "aerobic TE {0}")) "garmin-load")])]
     (into [:div.row]
           (map (fn [tl tint] (ui/tile (assoc tl :tint tint :size "sm" :flex "1 1 160px"))) tiles tints))))
 
@@ -152,11 +154,11 @@
                             :tip #(str (js/Math.round %)) :data (series-data ts (:power s))}))])
         [:div.row {:replicant/key "zones"}
          (when (seq (:hr_zones_s a))
-           (ui/card {:flex "1 1 420px"} [:div.lab (t "Time in heart-rate zones")] (zones-chart (:hr_zones_s a))))
+           (ui/card {:flex "1 1 420px"} [:div.lab (t "Time in heart-rate zones") (ui/info "zones-28d")] (zones-chart (:hr_zones_s a))))
          (when (seq (:peaks a))
            (let [pk (:peaks a)]
              (ui/card {:flex "1 1 420px"}
-              [:div.lab (t "Peak values")]
+              [:div.lab (t "Peak values") (ui/info "peaks")]
               (ui/table [{:label (t "Duration") :value #(peak-labels %)}
                          {:label (t "Heart rate") :value #(some-> (get-in pk [:hr %]) js/Math.round) :align :r}
                          {:label (if run? (t "Pace") (t "Speed")) :value #(when-let [v (get-in pk [:speed %])]
@@ -170,4 +172,5 @@
                 (some->> (:threshold_speed th) ui/pace (t ", threshold pace {0} /km"))
                 (when-let [ftp (some-> (:ftp th) js/Math.round)]
                   (if (= "estimate" (:ftp_source th)) (t ", estimated FTP {0}" ftp) (t ", FTP {0}" ftp)))
-                (t ", resting HR {0}." (:rest_hr th)))])))]))
+                (t ", resting HR {0}." (:rest_hr th)))
+           " " (ui/info "lthr")])))]))

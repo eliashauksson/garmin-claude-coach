@@ -56,13 +56,13 @@
      (when (and pmc any?)
        (list
         [:div.row {:replicant/key "kpi"}
-         (ui/tile {:label (t "Fitness · CTL") :tint "blue" :size "md" :value (:ctl latest) :sub (t "42-day load")})
-         (ui/tile {:label (t "Fatigue · ATL") :tint "red" :size "md" :value (:atl latest) :sub (t "7-day load")})
-         (ui/tile {:label (t "Form · TSB") :tint "green" :size "md" :value (:tsb latest) :sub (t "fitness − fatigue")})
-         (ui/tile {:label (t "Ramp rate") :tint "amber" :size "md" :value (:ramp latest) :sub (t "CTL change / 7 days")})]
+         (ui/tile {:info "ctl" :label (t "Fitness · CTL") :tint "blue" :size "md" :value (:ctl latest) :sub (t "42-day load")})
+         (ui/tile {:info "atl" :label (t "Fatigue · ATL") :tint "red" :size "md" :value (:atl latest) :sub (t "7-day load")})
+         (ui/tile {:info "tsb" :label (t "Form · TSB") :tint "green" :size "md" :value (:tsb latest) :sub (t "fitness − fatigue")})
+         (ui/tile {:info "ramp" :label (t "Ramp rate") :tint "amber" :size "md" :value (:ramp latest) :sub (t "CTL change / 7 days")})]
         [:div {:replicant/key "pmc"}
          (ui/chart-card
-          {:title (t "Fitness, fatigue and form")
+          {:title (t "Fitness, fatigue and form") :info "tsb"
            :legend-items [{:label (t "Fitness (CTL)") :color "--blue"} {:label (t "Fatigue (ATL)") :color "--red"}
                           {:label (t "Form (TSB)") :color "--green-ink"}]
            :chart (c/echart
@@ -84,7 +84,7 @@
            :footer [:div.sub (t "Above 0: fresh. −10 to −30: building fitness. Below −30: high strain.")]})]
         [:div.row {:replicant/key "r2"}
          (ui/chart-card
-          {:title (t "Daily stress · TSS") :tint "amber" :flex "1 1 100%"
+          {:title (t "Daily stress · TSS") :info "tss" :tint "amber" :flex "1 1 100%"
            :chart (c/echart
                    {:key "tss-bars" :class "h150" :group "load"
                     :option-fn (fn []
@@ -94,7 +94,7 @@
                                                           :itemStyle {:color (c/css-var "--amber") :borderRadius 5})]}))})})]
         [:div {:replicant/key "vol"}
          (ui/chart-card
-          {:title (t "Weekly volume")
+          {:title (t "Weekly volume") :info "volume"
            :controls (ui/seg vm-key (for [[k v] volume-metrics] [k (:label v)]) [:set-ui :volume-metric] {:soft? true})
            :legend-items (for [f fams] {:label (t (:label f)) :color (:color f)})
            :chart (c/echart
@@ -155,18 +155,18 @@
         [:h2.section-title (t "Cycling power")]]
        (when-let [e (get errors url)] [:div.error (t "Could not load: {0}" e)])
        [:div.row {:replicant/key "power-kpi"}
-        (ui/tile {:label (t "FTP") :tint "amber" :size "md" :value (some-> ftp js/Math.round) :unit "W"
+        (ui/tile {:info "ftp" :label (t "FTP") :tint "amber" :size "md" :value (some-> ftp js/Math.round) :unit "W"
                   :sub (case ftp_source
                          "estimate" (t "estimated from your best 20–60 min, last 90 days")
                          "garmin"   (t "from Garmin")
                          nil)})
-        (ui/tile {:label (t "Watts per kg") :tint "blue" :size "md" :value (some-> wkg (ui/fixed 2)) :unit "W/kg"
+        (ui/tile {:info "wkg" :label (t "Watts per kg") :tint "blue" :size "md" :value (some-> wkg (ui/fixed 2)) :unit "W/kg"
                   :sub (if weight_kg (t "at {0} kg" weight_kg) (t "no weight in your Garmin profile"))})
-        (ui/tile {:label (t "VO2 max · cycling") :tint "green" :size "md" :value vo2max_est
+        (ui/tile {:info "vo2max-cycling" :label (t "VO2 max · cycling") :tint "green" :size "md" :value vo2max_est
                   :sub (t "estimate from your best 5 minutes, last 90 days")})]
        [:div {:replicant/key "power-curve"}
         (ui/chart-card
-         {:title (t "Power curve") :tint "amber"
+         {:title (t "Power curve") :info "power-curve" :tint "amber"
           :legend-items (for [[k label color] curves :when (seq (get p k))] {:label (t label) :color color})
           :chart (c/echart
                   {:key "power-curve" :class "h240"

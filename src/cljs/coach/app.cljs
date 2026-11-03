@@ -11,6 +11,7 @@
             [coach.views.plan :as plan]
             [coach.views.status :as status]
             [coach.views.day :as day]
+            [coach.views.metrics :as metrics]
             [replicant.dom :as r]))
 
 (defonce state (atom {:route {:page :dashboard} :data {} :loading #{} :errors {} :ui {}}))
@@ -35,6 +36,7 @@
       "plan"       {:page :plan :params params}
       "day"        {:page :day :date (second segs)}
       "settings"   {:page :settings :params params}
+      "metrics"    {:page :metrics :params params}
       ;; old links: the costs now live in Settings
       "costs"      {:page :settings :params (assoc params :tab "claude")}
       ;; the dashboard is the start page
@@ -409,6 +411,8 @@
       :backup-started (doseq [ms [3000 10000 30000]] ; the download starts once the zip is written
                         (js/setTimeout #(fetch! status/backup-url {:force true}) ms))
       :set-theme    (set-theme! (first args))
+      :scroll-to    (some-> (js/document.getElementById (first args))
+                            (.scrollIntoView #js {:behavior "smooth" :block "start"}))
       :back         (if (> (.-length js/history) 1) (.back js/history) (set! (.-hash js/location) "#/"))
       :set-lang     (set-lang! (first args))
       :athlete-chat-send (send-athlete-chat!)
@@ -433,6 +437,7 @@
 
 (def nav-items [[:dashboard "#/" (i18n/tk "Dashboard")] [:calendar "#/calendar" (i18n/tk "Calendar")]
                 [:plan "#/plan" (i18n/tk "Plan")]
+                [:metrics "#/metrics" (i18n/tk "Metrics")]
                 [:settings "#/settings" (i18n/tk "Settings")]])
 
 (defn view [{:keys [route loading] :as s}]
@@ -451,7 +456,8 @@
         :calendar   (calendar/view s (urls route))
         :plan       (plan/view s (urls route))
         :dashboard  (dashboard/view s)
-        :settings   (settings/view s (theme-choice)))]]))
+        :settings   (settings/view s (theme-choice))
+        :metrics    (metrics/view s))]]))
 
 (defn render! []
   (r/render (js/document.getElementById "app") (view @state)))

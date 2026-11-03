@@ -32,7 +32,7 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 
 ## Namespaces (src/cljs, src/cljc)
 - app: state, routing, `fetch!` of /api URLs · ui: formatters + shared components · charts: ECharts/Leaflet mount
-- views/: dashboard (start page), calendar, day, activity, feedback, load, plan, season, athlete, settings, costs, status (error banner)
+- views/: dashboard (start page), calendar, day, activity, feedback, load, plan, season, athlete, settings, costs, metrics (explains every metric), status (error banner)
 - cljc i18n: `t`/`tk`, language from server · i18n-de / i18n-fr: dictionaries keyed by English text
 
 ## Data flow
@@ -48,6 +48,7 @@ api starts garmin-mcp via `requiring-resolve` in `run-job!`; the frontend requir
 - AI/cost settings: ai_settings.clj (`tasks`), costs.clj (`prices`), views/costs.cljs, views/settings.cljs
 - Auth: auth.clj (Garmin login), `/api/garmin/login|code`, coros_auth.clj + `/api/coros/login|callback`, `/api/claude/key`
 - Metrics: metrics.clj (pure) + analysis.clj
+- Metrics docs: views/metrics.cljs explains every shown metric (entries by :id); cards and tiles link there with `:info "<id>"` / `ui/info`. A new metric shown in the UI gets an entry and a link
 
 ## Don't read unless needed
 i18n_de.cljc, i18n_fr.cljc (~1000 lines each), resources/public/css/app.css, docs/style.md, package-lock.json.
