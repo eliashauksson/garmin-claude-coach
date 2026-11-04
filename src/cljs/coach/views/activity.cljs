@@ -106,7 +106,7 @@
      (tile (t "Garmin load") (some-> (:garmin_load a) js/Math.round) nil
               (some->> (ui/fixed (:aerobic_te a) 1) (t "aerobic TE {0}")) "garmin-load")])]
     (into [:div.row]
-          (map (fn [tl tint] (ui/tile (assoc tl :tint tint :size "sm" :flex "1 1 160px"))) tiles tints))))
+          (map (fn [tl tint] (ui/tile (assoc tl :tint tint :size "sm" :flex "1 1 140px"))) tiles tints))))
 
 (defn view [{:keys [data errors] ui-state :ui} url]
   (let [a    (get data url)

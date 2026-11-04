@@ -273,15 +273,15 @@
                     [:div.sub.muted (str (t "Recommended: {0} · {1}." (short-model (get-in defaults [(keyword id) :model]))
                                             (t (get-in defaults [(keyword id) :effort])))
                                          " " why)]]
-                   [:td [:select {:aria-label (str label " · " (t "Model"))
+                   [:td {:data-label (t "Model")} [:select {:aria-label (str label " · " (t "Model"))
                                   :on {:change [[:ai-setting id :model :event/target-value]]}}
                          (for [m models]
                            [:option {:replicant/key (:id m) :value (:id m) :selected (= model (:id m))} (:label m)])]]
-                   [:td [:select {:aria-label (str label " · " (t "Effort"))
+                   [:td {:data-label (t "Effort")} [:select {:aria-label (str label " · " (t "Effort"))
                                   :on {:change [[:ai-setting id :effort :event/target-value]]}}
                          (for [e efforts]
                            [:option {:replicant/key e :value e :selected (= effort e)} (t e)])]]
-                   [:td (cond
+                   [:td {:data-label (t "Delivery")} (cond
                           delivery
                           [:div
                            [:select {:aria-label (str label " · " (t "Delivery"))
@@ -299,7 +299,7 @@
                            [:div.sub (:about (some #(when (= scope (:id %)) %) scopes))]]
                           :else
                           [:div.sub (t "Always instant: you're waiting for the answer.")])]
-                   [:td.r (let [{:keys [tokens source from]} (output-estimate hist effort)
+                   [:td.r {:data-label (t "Est. per request")} (let [{:keys [tokens source from]} (output-estimate hist effort)
                                 cost (when (and avg tokens) (est-cost prices model (assoc avg :output_tokens tokens)))]
                             (if cost
                               [:div {:title (str (t "Input: this task's average so far.") " "
@@ -315,7 +315,7 @@
                                (when (#{"auto" "batch"} delivery)
                                  [:div.sub (t "batch: {0}" (usd (* 0.5 cost)))])]
                               [:span.muted (t "no history")]))]
-                   [:td (if (seq hist)
+                   [:td {:data-label (t "Cost so far per request")} (if (seq hist)
                           [:div.pills
                            (for [{m :model e :effort b :batch :keys [requests avg_cost_usd]} hist]
                              [:span.pill {:replicant/key (str m e b)

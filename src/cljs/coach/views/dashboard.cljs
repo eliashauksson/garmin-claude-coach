@@ -656,7 +656,9 @@
                        (if-not monday
                          acc
                          (let [d (ui/parse-date monday) x (+ left (* col (+ cell gap)))]
-                           (if (and (<= (.getDate d) 7) (>= (- x last-x) 30))
+                           ;; and room for the label before the right edge (else "Nov" is cut)
+                           (if (and (<= (.getDate d) 7) (>= (- x last-x) 30)
+                                    (<= (+ x 24) (+ left (* 26 (+ cell gap)))))
                              (recur more x (conj acc (c/el :svg/text {:x x :y 11 :class "hm-lab"} (ui/months (.getMonth d)))))
                              (recur more last-x acc)))))
         day-labels (for [[row i] [[0 1] [2 3] [4 5] [6 0]]]

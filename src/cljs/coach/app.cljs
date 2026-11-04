@@ -464,8 +464,20 @@
 (defn render! []
   (r/render (js/document.getElementById "app") (view @state)))
 
+(defn- show-active-tab!
+  "On a phone the tabs are one scrolling row: bring the current one into view."
+  []
+  (js/requestAnimationFrame
+   (fn []
+     (when-let [a (.querySelector js/document "nav.side a.active")]
+       (let [nav (.-parentElement a)]
+         (when (> (.-scrollWidth nav) (.-clientWidth nav))
+           (set! (.-scrollLeft nav) (- (.-offsetLeft a) (.-offsetLeft nav)
+                                       (/ (- (.-clientWidth nav) (.-offsetWidth a)) 2)))))))))
+
 (defn on-hash! []
   (swap! state assoc :route (parse-route (.-hash js/location)))
+  (show-active-tab!)
   (load-route!))
 
 (defn ^:dev/after-load reload! [] (render!))

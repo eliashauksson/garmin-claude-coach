@@ -662,3 +662,69 @@ a.info { display: inline-flex; align-items: center; justify-content: center; wid
 [class*="tint-"] a.info { background: var(--pill-on-tint); }
 a.info:hover, a.info:focus-visible { color: var(--text); }
 .card-title a.info, .sub a.info { margin-left: 6px; }
+
+/* --- Phone (≤ 760 px wide; most rules ≤ 480 px) ------------------------- */
+@media (max-width: 760px) {
+  /* one scrolling row of tabs instead of a wrapped list; the page title names the app */
+  nav.side { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 2px; padding: 12px 12px 0; }
+  nav.side::-webkit-scrollbar { display: none; }
+  nav.side .brand { display: none; }
+  nav.side a { flex: none; padding: 9px 11px; font-size: 13.5px; white-space: nowrap; }
+}
+@media (max-width: 480px) {
+  main { padding: 12px 12px 32px; gap: 12px; }
+  .row, .chart-grid, .morning, .race, .kpis, .predictions, .vitals { gap: 10px; }
+  .card { padding: 16px 16px; border-radius: 18px; }
+  h1 { font-size: 26px; }
+  .page-head { gap: 8px 12px; }
+  .lab:has(.seg, button) { flex-wrap: wrap; row-gap: 6px; }
+  .big { font-size: 38px; }
+  .big.md { font-size: 30px; }
+  .big.sm { font-size: 28px; }
+  .big.xl { font-size: 60px; }
+  .big small { font-size: 15px; }
+  .section-title { font-size: 18px; }
+  .banner { padding: 14px 16px; border-radius: 18px; }
+
+  /* KPI tiles two per row; an odd last one takes the whole row */
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpis > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .predictions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .predictions > .prediction:nth-child(3) { grid-column: 1 / -1; }
+  .pred-time { font-size: 28px; }
+  .card.vital { min-height: 0; }
+
+  /* tables: tighter cells, so less sideways scrolling */
+  th, td { padding: 9px 7px; }
+  td.name-wrap { min-width: 120px; }
+
+  /* Model and effort per task: one block per task, the column name above each value */
+  table.settings thead { display: none; }
+  table.settings, table.settings tbody { display: block; }
+  table.settings tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px;
+    padding: 14px 0; border-bottom: 1px solid var(--row-line); }
+  table.settings tbody tr:hover td { background: none; }
+  table.settings td { display: block; padding: 0; border: 0; min-width: 0 !important; max-width: none !important; text-align: left; }
+  table.settings td:first-child { grid-column: 1 / -1; }
+  table.settings td:nth-child(4), table.settings td:nth-child(5), table.settings td:last-child { grid-column: 1 / -1; }
+  table.settings td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 4px;
+    font-size: 12px; font-weight: 600; color: var(--text-3); }
+  table.settings select { width: 100%; padding: 9px 10px; }
+
+  /* calendar: a day's date (and health block) on one line, its sessions below */
+  .cal-item { flex: 1 1 100%; }
+
+  /* effort 1–10 in one row of equal buttons */
+  .fb-rpe { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); width: 100%; }
+  .fb-n { width: auto; height: 36px; }
+
+  .athlete-chat .msg { max-width: 92%; }
+  .plan-edit input { width: 64px; }
+  .map { height: 280px; }
+}
+/* fingers, not a mouse pointer: bigger targets for the small pill buttons */
+@media (pointer: coarse) {
+  button.pill, a.pill, label.pill.upload { padding: 8px 12px; font-size: 13px; }
+  .seg button { padding: 9px 12px; }
+  a.info { width: 22px; height: 22px; font-size: 12px; }
+}

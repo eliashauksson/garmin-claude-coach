@@ -229,7 +229,7 @@
 (defn tile
   "KPI card: label, big number (with optional unit) and a sub line."
   [{:keys [label value unit sub tint flex size] :as opts}]
-  (card {:tint tint :flex (or flex "1 1 200px")}
+  (card {:tint tint :flex (or flex "1 1 150px")}
         [:div.lab label (info (:info opts))]
         [:div.big {:class size} (or value "—") (when (and value unit) [:small unit])]
         (when sub [:div.sub sub])))
