@@ -112,7 +112,9 @@ click **Add Server**:
 - **Networking:** keep **public IPv4** on (IPv6 too). The setup downloads from GitHub, which has
   no IPv6.
 - **SSH keys:** **Add SSH key**, paste the line from above.
-- **Name:** e.g. `coach`.
+- **Name:** e.g. `coach`. Tailscale takes it over, so the dashboard's address becomes
+  `https://coach.<your-tailnet>.ts.net`. Left at the default, it's something like
+  `ubuntu-2gb-fsn1-1`; you can still [rename it later](#8-everyday-use-updates-backups).
 
 Click **Create & Buy now** and note the server's IPv4 address. Other providers ask the same.
 
@@ -317,6 +319,16 @@ Wi-Fi at home.
   | Startup errors | `journalctl --user -u garmin-coach -n 50` |
   | Tailscale address | `tailscale serve status` |
 
+- **Renaming the server later**, e.g. to `coach`: on the server, as root,
+  ```sh
+  tailscale set --hostname=coach
+  sed -i 's|^Environment=COACH_ALLOWED_HOSTS=.*|Environment=COACH_ALLOWED_HOSTS=coach.<your-tailnet>.ts.net|' \
+    /home/coach/.config/systemd/user/garmin-coach.service
+  systemctl --user -M coach@ daemon-reload && systemctl --user -M coach@ restart garmin-coach
+  tailscale serve reset && tailscale serve --bg 8080      # HTTPS for the new name
+  ```
+  `tailscale serve status` then shows the new address. The old one stops working: change
+  bookmarks, and add the phone's home-screen icon again.
 - **Another address** (e.g. a second Tailscale name): edit
   `~/.config/systemd/user/garmin-coach.service`. Comma-separate the names in the
   `Environment=COACH_ALLOWED_HOSTS=` line. Then run
