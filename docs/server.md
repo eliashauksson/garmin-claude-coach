@@ -18,7 +18,7 @@ phone / laptop ──(Tailscale, HTTPS)──▶ server: tailscale serve ──�
                                                                  Garmin, Coros, Claude
 ```
 
-Time needed: about 15 minutes with the setup script, 30–45 by hand.
+Time needed: about half an hour with the setup script (including creating the server), 45–60 by hand.
 
 ## Quick setup: one script
 On a **fresh Debian or Ubuntu server** ([step 1](#1-get-a-server) helps you get one), logged in
@@ -43,7 +43,9 @@ At the end it prints the dashboard's address. While it runs, you only need to:
    phone and laptop.
 3. **If Tailscale asks to turn on HTTPS certificates,** open that link too and allow it.
 
-Then continue with [step 5](#5-move-your-data-and-logins) (data and logins), 6 and 7. Running the
+Afterwards, in the [Tailscale admin console](https://login.tailscale.com/admin/machines), choose
+⋯ › **Disable key expiry** for the server ([step 3](#3-tailscale), point 5). Then continue with
+[step 5](#5-move-your-data-and-logins) (data and logins), 6 and 7. Running the
 script again is safe: finished steps are skipped, and the app is updated.
 
 Options, after `sudo bash -s --`:
@@ -92,8 +94,41 @@ Pick one:
 | Always on | yes | while it's plugged in and online |
 | Garmin login | from a data-centre IP: Garmin may ask for the MFA code more often | from your home IP, like your laptop |
 
-**VPS:** create a server with Ubuntu 24.04 and add your SSH key when you create it (the provider
-explains how). Note its public IP address.
+**An SSH key** lets your laptop log in to the server. Give it its own name, so it stays apart
+from other keys you have:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/coach -C "coach-server"   # a passphrase is optional
+cat ~/.ssh/coach.pub                                     # copy this whole line
+```
+
+**VPS, e.g. Hetzner:** in the [Cloud Console](https://console.hetzner.cloud), open a project and
+click **Add Server**:
+- **Location:** one near you (Falkenstein or Nuremberg from Switzerland).
+- **Image:** Ubuntu 24.04.
+- **Type:** the cheapest with **2 GB of memory or more**. Check the memory column: the smallest
+  types have 1 GB, and the app then gets killed during syncs. Already picked one? Switch the
+  server off, then **Rescale** it ("CPU and RAM only" keeps the disk, so you can scale back).
+- **Networking:** keep **public IPv4** on (IPv6 too). The setup downloads from GitHub, which has
+  no IPv6.
+- **SSH keys:** **Add SSH key**, paste the line from above.
+- **Name:** e.g. `coach`.
+
+Click **Create & Buy now** and note the server's IPv4 address. Other providers ask the same.
+
+So you don't have to name the key every time, add the server to `~/.ssh/config` on the laptop:
+
+```
+Host coach
+    HostName <server-ip>
+    User root
+    IdentityFile ~/.ssh/coach
+    IdentitiesOnly yes
+```
+
+`ssh coach` then logs you in. (Without this, use `ssh -i ~/.ssh/coach root@<server-ip>`.)
+`IdentitiesOnly` keeps ssh from trying your other keys first, which a server may refuse as
+"too many authentication failures".
 
 **At home:** install Ubuntu Server or Raspberry Pi OS (64-bit) and turn on SSH. You'll need the
 machine's local IP address (from your router, or `hostname -I` on the machine).
@@ -102,7 +137,7 @@ machine's local IP address (from your router, or `hostname -I` on the machine).
 Log in from your laptop:
 
 ```sh
-ssh root@<server-ip>          # a Raspberry Pi: ssh <your-user>@<pi-ip>
+ssh coach                     # or ssh root@<server-ip>; a Raspberry Pi: ssh <your-user>@<pi-ip>
 ```
 
 **A normal user** (skip this if you already log in as a non-root user). The app runs as this
@@ -253,6 +288,12 @@ To bring its data up to date, restore a backup from the server (the reverse of s
    - **iPhone (Safari):** Share › **Add to Home Screen**.
    - **Android (Chrome):** ⋮ › **Add to Home screen**.
 
+Opened from the home screen, the dashboard gets its own icon and runs full-screen, like an app.
+On Android, Chrome may also offer **Install app**, which does the same.
+
+**On Android, use Chrome.** The DuckDuckGo browser can't open Tailscale addresses (*Connection
+refused*), although Tailscale is connected. You can keep DuckDuckGo for everything else.
+
 If the page doesn't load, check Tailscale first: the phone must be connected to it, also on
 Wi-Fi at home.
 
@@ -285,13 +326,14 @@ Wi-Fi at home.
 
 | What you see | What to do |
 |---|---|
+| *Connection refused* on the phone, Tailscale connected | The browser. DuckDuckGo on Android can't open Tailscale addresses; use Chrome. Also check Tailscale's **Use Tailscale DNS** setting and Android's **Private DNS** (set it to Automatic). |
 | The page doesn't load at all | Is Tailscale connected on this device? On the server: `tailscale status`, `tailscale serve status` (should show port 8080), `systemctl --user status garmin-coach`. |
 | *"Requests from other websites are not allowed."* | The address you opened isn't allowed. Check the `COACH_ALLOWED_HOSTS` line in the service file (step 8). It must be exactly the name in your address bar, without `https://`. Each start writes the allowed names to `app.log` ("Server mode; allowed hosts: …"). |
 | The service stops when you log out | Linger is off. Run `sudo loginctl enable-linger $USER`. |
 | *"active (running)"*, but `curl` gets no answer | It's still starting (up to a minute). Otherwise look in `app.log`. |
 | Garmin login fails or asks for MFA every time | On a VPS, copy the login from the laptop instead (step 5, option B). |
 | Days are off by one, syncs at odd hours | Set the time zone (step 2), then `systemctl --user restart garmin-coach`. |
-| The server is slow or the app gets killed | Too little memory. Use 2 GB or more, or add swap. |
+| The server is slow or the app gets killed | Too little memory: `free -h` shows it. Use 2 GB or more (on Hetzner: power off, **Rescale**), or add swap. |
 | *"The data folder … is in use by another Garmin Coach"* | A second copy is running, e.g. one started by hand. `pkill -f coach.api`, then `systemctl --user restart garmin-coach`. |
 
 ## 10. Removing it
