@@ -444,7 +444,8 @@
   "Stores the activities of `src` (a coach.source/ActivitySource, called
   `source`) since a little before `state-key`'s date (from `epoch` the first
   time), skipping ones already stored. Scores the new ones. Returns the ids
-  of the activities stored or updated."
+  of the activities stored or updated. A failed fetch throws with
+  :remaining, the number of new activities not stored."
   [src ds source state-key epoch]
   (let [relinked (relink-stored! ds)
         t      (today)
@@ -457,9 +458,15 @@
         stored (atom (vec relinked))]
     (println (format "  %s → %s  %d listed, %d new" from t (count listed) (count fresh)))
     (try
-      (doseq [summary fresh]
-        (swap! stored conj (store-source-activity! ds source (:id summary)
-                                                   (source/fetch-full-activity src summary))))
+      (doseq [[i summary] (map-indexed vector fresh)]
+        (swap! stored conj (store-source-activity!
+                            ds source (:id summary)
+                            (try (source/fetch-full-activity src summary)
+                                 ;; how many are still to come, for the message
+                                 (catch Throwable e
+                                   (throw (ex-info (ex-message e)
+                                                   (assoc (ex-data e) :remaining (- (count fresh) i))
+                                                   e)))))))
       (db/set-state! ds state-key t)
       (finally
         (when (seq @stored)

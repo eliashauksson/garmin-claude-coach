@@ -22,6 +22,7 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - metrics: pure TSS/NP/IF/CTL/ATL/TSB, power curve/eFTP/cycling VO2 max etc. · analysis: glue between db and metrics, API queries, eFTP stored as bike FTP (source "estimate")
 - overview: everything behind the dashboard start page (/api/overview)
 - readiness: pure morning readiness check · adapt: signals that the plan should adapt
+- readiness-score: pure, Garmin's training readiness rebuilt from raw data (six factors + combination, `fit`) · readiness-estimate: its DB glue, shown when Garmin has no score, refit after each sync, CLI `compare`
 - plan-rules: pure checks of a week against training-principles.md (warnings only)
 - season: date helpers + week position in the season · season-plan: Claude drafts every week to race day
 - plan: storage for weeks, proposals and accepted workouts · planner: Claude week proposals, `request` (all Claude calls)

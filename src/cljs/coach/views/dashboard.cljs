@@ -86,10 +86,11 @@
          " " (.getFullYear d) " · Garmin")))
 
 (defn- takeaway [{:keys [readiness vitals]}]
-  (let [{:keys [score level]} readiness
+  (let [{:keys [score level estimate]} readiness
         lvl (lower (ui/enum level))
         hrv (or (lower (ui/enum (:hrv_status vitals))) "—")]
     [:p.takeaway {:replicant/key "take"}
+     (when estimate (str (t "Garmin has no readiness this morning; this is the app's estimate.") " "))
      (cond
        (nil? score)
        (t "Your watch hasn't worked out today's readiness yet. It appears after you wake up and sync.")
@@ -155,16 +156,19 @@
                                                   :animation-delay (str (* i 60) "ms")}}])]
       [:span.factor-val (if p (str p "%") "—")]])])
 
-(defn- readiness-card [{:keys [feedback] :as r}]
+(defn- readiness-card [{:keys [feedback estimate] :as r}]
   [:section.card.readiness {:replicant/key "readiness"}
    (ui/label-row {:icon :bolt :accent (tone-var (tone (:level r)) "--text-3")
                   :tint (case (tone (:level r)) :good "--tint-green" :warn "--tint-amber" :bad "--tint-red" "--surface-2")
-                  :soft? true :label (t "Training readiness") :info "readiness"
-                  :right (when feedback (ui/pill (ui/enum feedback)))})
+                  :soft? true :label (t "Training readiness") :info (if estimate "readiness-estimate" "readiness")
+                  :right (cond estimate (ui/pill (t "Estimate"))
+                               feedback (ui/pill (ui/enum feedback)))})
    [:div.readiness-body
     (ring r)
     (factors (:factors r))]
-   (note (t "Garmin's score from 0 to 100, built from last night's sleep, recovery time, load balance, stress and HRV. The bars show how much each one helps today."))])
+   (note (if estimate
+           (t "Garmin has no score this morning, so this is the app's estimate, built like Garmin's from the same six factors. It is usually within about 8 points of Garmin's.")
+           (t "Garmin's score from 0 to 100, built from last night's sleep, recovery time, load balance, stress and HRV. The bars show how much each one helps today.")))])
 
 (defn- vital [{:keys [key tint tint-var icon accent label value unit sub visual info]}]
   [:section.card.vital {:replicant/key key :class (str "tint-" tint)}

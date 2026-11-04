@@ -172,8 +172,8 @@
                r))
       (.catch (fn [e] (swap! state update-in [:ui k] assoc :busy false :error (.-message e))))))
 
-(defn start-sync! []
-  (-> (js/fetch "/api/sync" #js {:method "POST"})
+(defn start-sync! [& [url]]
+  (-> (js/fetch (or url "/api/sync") #js {:method "POST"})
       (.then #(.json %))
       (.then (fn [body]
                (sync-state! (js->clj body :keywordize-keys true))
@@ -320,6 +320,7 @@
                       (swap! state dissoc :flash)
                       (api! method url body))
       :sync         (start-sync!)
+      :sync-coros   (start-sync! "/api/coros/sync")
       :ai-setting   (let [[task field value] args
                           current (some #(when (= task (:id %)) %)
                                         (get-in @state [:data costs/settings-url :tasks]))]

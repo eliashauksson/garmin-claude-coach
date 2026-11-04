@@ -18,6 +18,7 @@
             [coach.plan :as plan]
             [coach.planner :as planner]
             [coach.readiness :as readiness]
+            [coach.readiness-estimate :as readiness-estimate]
             [coach.season :as season]
             [coach.season-plan :as season-plan]
             [coach.sync :as sync]
@@ -27,6 +28,7 @@
             [clojure.string :as str]
             [reitit.ring :as ring]
             [ring.adapter.jetty :as jetty]
+            [ring.middleware.not-modified :refer [wrap-not-modified]]
             [ring.middleware.params :refer [wrap-params]])
   (:import (java.time LocalDate)))
 
@@ -35,22 +37,41 @@
 
 (defonce sync-state (atom {:running false}))
 
+(defn- coros-last-sync [ds]
+  (try (some-> (db/get-state ds :coros_last_sync) (json/read-str :key-fn keyword))
+       (catch Throwable _ nil)))
+
+(defn- coros-paused?
+  "Coros refused for its daily FIT file limit and the next day hasn't come:
+  asking again would only be refused (and may count against the limit)."
+  [{:keys [kind paused_until]}]
+  (and (= "rate-limit" (some-> kind name)) (string? paused_until)
+       (neg? (compare (str (LocalDate/now)) paused_until))))
+
 (defn- run-coros!
-  "Syncs the Coros rides. {:ok true :new n} or {:ok false :kind :message}."
-  [ds]
-  (let [r (try (merge {:ok true} (sync/coros! ds))
-               (catch Throwable e
-                 (println "Coros sync failed:" (ex-message e))
-                 (merge {:ok false} (sync/failure e))))
-        r (assoc r :finished_at (str (java.time.Instant/now)))]
-    (try (db/set-state! ds :coros_last_sync (json/write-str r)) (catch Throwable _))
-    r))
+  "Syncs the Coros rides. {:ok true :new n} or {:ok false :kind :message}; a
+  daily-limit refusal adds :remaining and :paused_until (tomorrow), and until
+  then only `force` (the Coros card's Sync now) asks Coros again."
+  [ds & [{:keys [force]}]]
+  (let [prev (coros-last-sync ds)]
+    (if (and (not force) (coros-paused? prev))
+      (do (println "Coros: daily file limit reached, waiting until" (:paused_until prev)) prev)
+      (let [r    (try (merge {:ok true} (sync/coros! ds))
+                      (catch Throwable e
+                        (println "Coros sync failed:" (ex-message e))
+                        (merge {:ok false} (sync/failure e) (select-keys (ex-data e) [:remaining]))))
+            r    (cond-> r
+                   (= :rate-limit (:kind r)) (assoc :paused_until (str (.plusDays (LocalDate/now) 1))))
+            done (str (java.time.Instant/now))
+            r    (assoc r :finished_at done :last_ok (if (:ok r) done (:last_ok prev)))]
+        (try (db/set-state! ds :coros_last_sync (json/write-str r)) (catch Throwable _))
+        r))))
 
 (defn- coros-status
   "For Settings: the login and the last Coros sync."
   [ds]
   (assoc (coros-auth/status)
-         :last_sync (some-> (db/get-state ds :coros_last_sync) (json/read-str :key-fn keyword))))
+         :last_sync (coros-last-sync ds)))
 
 (defn- run-job!
   "Runs `f` with a Garmin source in the background unless a sync or history
@@ -87,17 +108,42 @@
                    :last_ok (if (:ok result) done (:last_ok @sync-state))))))
       @sync-state)))
 
+(defn- run-coros-sync!
+  "Starts a sync of the Coros rides alone (job \"coros\"), unless a sync is
+  running or Coros isn't connected. Needs no Garmin login. `force`: ask Coros
+  even while paused for its daily limit. Returns the state."
+  [ds & [force]]
+  (if-not (coros-auth/connected?)
+    @sync-state
+    (let [[old _] (swap-vals! sync-state #(if (:running %) % (assoc % :running true :job "coros"
+                                                                      :started_at (str (java.time.Instant/now)))))]
+      (when-not (:running old)
+        (future
+          (try (backup/daily! ds)
+               (catch Throwable e (println "Daily backup failed:" (ex-message e))))
+          (let [r (try (run-coros! ds {:force force})
+                       (catch Throwable e {:ok false :message (ex-message e)}))]
+            (swap! sync-state assoc :running false :job nil
+                   :finished_at (or (:finished_at r) (str (java.time.Instant/now)))))))
+      @sync-state)))
+
 (defn- run-sync!
-  "Starts an incremental sync unless one is running. Returns the state."
+  "Starts an incremental sync unless one is running. Returns the state.
+  Without a Garmin login only the Coros rides sync (when connected)."
   [ds]
-  (run-job! ds "sync" #(sync/incremental! % ds)
-            ;; new data may call for adapting the plan; a failure here isn't a sync failure.
-            ;; Without credits every Claude request would fail, so the check waits.
-            (fn [result]
-              (cond
-                (costs/credits-out ds) (assoc result :plan_check_skipped "no Claude credits")
-                :else (try (assoc result :proposals (:proposed (planner/check! ds)))
-                           (catch Throwable e (assoc result :plan_check_error (ex-message e))))))))
+  (if (and (not (auth/connected?)) (coros-auth/connected?))
+    (run-coros-sync! ds)
+    (run-job! ds "sync" #(sync/incremental! % ds)
+              ;; new data may call for adapting the plan; a failure here isn't a sync failure.
+              ;; Without credits every Claude request would fail, so the check waits.
+              (fn [result]
+                ;; the readiness estimate learns from Garmin's newest scores
+                (try (readiness-estimate/refit! ds (str (LocalDate/now)))
+                     (catch Throwable e (println "Readiness refit failed:" (ex-message e))))
+                (cond
+                  (costs/credits-out ds) (assoc result :plan_check_skipped "no Claude credits")
+                  :else (try (assoc result :proposals (:proposed (planner/check! ds)))
+                             (catch Throwable e (assoc result :plan_check_error (ex-message e)))))))))
 
 (defn- run-history!
   "Loads everything before the first sync (coach.sync/load-history!)."
@@ -231,6 +277,10 @@
   [ds]
   (let [t    (today)
         days (analysis/wellness ds (season/add-days t -1) t)
+        ;; no score from Garmin this morning: the app's estimate stands in
+        est  (when (and (seq days) (nil? (:readiness (last days)))) (readiness-estimate/for-date ds t))
+        days (cond-> (vec days)
+               est (update (dec (count days)) assoc :readiness (:score est) :readiness_estimated true))
         ws   (filter #(= "planned" (:status %)) (plan/workouts ds t t))]
     (assoc (readiness/check days ws (athlete/settings))
            :date t :workouts ws)))
@@ -373,7 +423,9 @@
                                  (throw (ex-info (str "Not a date: " date) {})))
                                (ok-tr ds (cond-> (assoc (analysis/day-summary ds date)
                                                   :season (plan/week-info ds date)
-                                                  :planned (plan/workouts ds date date))
+                                                  :planned (plan/workouts ds date date)
+                                                  ;; the app's own score when Garmin has none
+                                                  :readiness_estimate (readiness-estimate/for-date ds date))
                                      ;; suggestions for today's sessions, from this morning's readiness
                                      (= date (today)) (assoc :readiness_check (readiness-today ds)))))))}]
     ;; the dashboard's coach overview (coach-dashboard-spec.md)
@@ -413,6 +465,7 @@
                                   (ok (coros-auth/start-login!
                                        (str "http://127.0.0.1:" (:server-port req) "/api/coros/callback"))))
                         :delete (fn [_] (ok (coros-auth/disconnect!)))}]
+    ["/coros/sync"     {:post (fn [_] (json-response 202 (run-coros-sync! ds true)))}]
     ["/coros/callback" {:get (fn [{:keys [query-params]}]
                                (try (coros-auth/finish-login! (update-keys query-params keyword))
                                     (when @syncing? (run-sync! ds))
@@ -526,9 +579,17 @@
                                        "Content-Disposition" (str "attachment; filename=\"" name "\"")}
                              :body    (io/file path)})))}]]]])
 
-(defn- index [_]
+(defn- index
+  "The page, with the app version on its script and stylesheet addresses: a
+  browser that kept an older version's files fetches the new ones after an
+  update."
+  [_]
   (if-let [r (io/resource "public/index.html")]
-    {:status 200 :headers {"Content-Type" "text/html; charset=utf-8"} :body (slurp r)}
+    (let [v (java.net.URLEncoder/encode (coach-app/version) "UTF-8")]
+      {:status 200 :headers {"Content-Type" "text/html; charset=utf-8"}
+       :body (-> (slurp r)
+                 (str/replace "\"/js/main.js\"" (str "\"/js/main.js?v=" v "\""))
+                 (str/replace "\"/css/app.css\"" (str "\"/css/app.css?v=" v "\"")))})
     {:status 404 :body "index.html missing"}))
 
 (defn- wrap-errors
@@ -584,6 +645,16 @@
           (json-response 403 {:error "Requests from other websites are not allowed."}))
       (handler req))))
 
+(defn- wrap-revalidate
+  "The page and its files are checked with the server on every load (a 304
+  when unchanged), so an updated app is never shown with yesterday's JS."
+  [handler]
+  (fn [req]
+    (let [r (handler req)]
+      (cond-> r
+        (and r (not (str/starts-with? (:uri req "") "/api/")))
+        (assoc-in [:headers "Cache-Control"] "no-cache")))))
+
 (defn app [ds]
   (-> (ring/ring-handler
        (ring/router (conj (routes ds) ["/" {:get index}]))
@@ -591,6 +662,8 @@
         (ring/create-resource-handler {:path "/" :root "public"})
         (ring/create-default-handler
          {:not-found (constantly (json-response 404 {:error "not found"}))})))
+      wrap-not-modified
+      wrap-revalidate
       wrap-errors
       wrap-params
       wrap-local-only))

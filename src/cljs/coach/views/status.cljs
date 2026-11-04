@@ -150,6 +150,19 @@
         running (list [:span.spinner {:aria-hidden "true"}] (t "Syncing…"))
         :else (t "Sync now"))]]))
 
+(defn coros-sync-button
+  "Settings, Coros card: syncs the Coros rides alone, like `sync-button` for
+  Garmin. Every Garmin sync fetches them too."
+  [{:keys [running job coros]}]
+  (let [last-sync (:last_sync coros)]
+    [:span {:style {:display "inline-flex" :gap "10px" :align-items "center"}}
+     (when (and (not running) last-sync (false? (:ok last-sync)) (not= "rate-limit" (:kind last-sync)))
+       [:span.error (t "Sync failed")])
+     [:button.btn-ink {:disabled running :on {:click [[:sync-coros]]}}
+      (if (and running (#{"sync" "coros"} job))
+        (list [:span.spinner {:aria-hidden "true"}] (t "Syncing…"))
+        (t "Sync now"))]]))
+
 (defn backup-link
   "Sidebar: download a fresh backup; shows when the last one was made."
   [{:keys [data]}]

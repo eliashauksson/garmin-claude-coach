@@ -12,7 +12,8 @@
 
 (defn check
   "`days` are wellness rows, oldest first, ending today (:hrv_avg :hrv_status
-  :rhr :sleep_s :sleep_score :readiness :body_battery_high). `workouts` are
+  :rhr :sleep_s :sleep_score :readiness :body_battery_high; :readiness_estimated when
+  :readiness is the app's estimate). `workouts` are
   today's planned workouts. `settings` are the athlete's thresholds (:hrv_low :rhr_high, athlete.md: Baselines);
   a check without its threshold is skipped."
   [days workouts {:keys [hrv_low rhr_high]}]
@@ -32,7 +33,9 @@
                    rhr-bad   (conj (i18n/t "Resting HR {0} is {1} or higher" rhr rhr_high))
                    unbal     (conj (i18n/t "HRV unbalanced or low for 2 days: rest of the week as recovery, plan next week lower"))
                    sleep-bad (conj (i18n/t "Short or poor sleep: move morning runs to the evening, or rest"))
-                   ready-bad (conj (i18n/t "Training readiness {0} is below 30" (:readiness t)))
+                   ready-bad (conj (if (:readiness_estimated t)
+                                     (i18n/t "Estimated training readiness {0} is below 30 (Garmin has no score this morning)" (:readiness t))
+                                     (i18n/t "Training readiness {0} is below 30" (:readiness t))))
                    bb-bad    (conj (i18n/t "Body battery {0} this morning is below 30" (:body_battery_high t))))
         rest?    (and hrv-bad rhr-bad)
         no-key?  (or hrv-bad rhr-bad unbal ready-bad bb-bad)]

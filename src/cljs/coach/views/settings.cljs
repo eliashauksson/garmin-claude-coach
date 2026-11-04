@@ -162,34 +162,57 @@
                  (garmin-login login)])
               (history-section sync)))))
 
+(defn- coros-connect-button [busy label]
+  [:button.btn-ink {:disabled busy :on {:click [[:coros-login]]}}
+   (if busy (t "Opening Coros…") label)])
+
 (defn- coros-card
-  "Rides from a Coros bike computer: signing in happens on Coros's own page,
-  which sends the browser back here."
-  [{:keys [coros running]} {:keys [busy error]}]
-  (let [{:keys [connected connected_at login_error last_sync]} coros]
+  "Rides from a Coros bike computer, laid out like the Garmin card: signing in
+  happens on Coros's own page, which sends the browser back here."
+  [{:keys [coros running] :as sync} {:keys [busy error]}]
+  (let [{:keys [connected connected_at login_error last_sync]} coros
+        auth-failed (= "auth" (some-> (:kind last_sync) name))]
     (ui/card {:flex "1 1 360px" :class "connect"}
              [:div.lab "Coros" [:span.sp] (connected-pill connected)]
              (if-not connected
                (list
-                [:div {:replicant/key "t"} (t "For rides recorded on a Coros bike computer. Sign in once on the Coros page; every sync then fetches your new rides, with their per-second data. Nothing is ever written to Coros.")]
-                [:div.connect-row {:replicant/key "b"}
-                 [:button.btn-ink {:disabled busy :on {:click [[:coros-login]]}}
-                  (if busy (t "Opening Coros…") (t "Connect Coros"))]])
+                [:div {:replicant/key "t"} (t "For rides recorded on a Coros bike computer. Sign in once on the Coros page:")]
+                [:div.connect-row {:replicant/key "b"} (coros-connect-button busy (t "Connect Coros"))]
+                [:div.sub {:replicant/key "n"} (t "Every sync then fetches your new rides, with their per-second data. The login stays on this computer. Nothing is ever written to Coros.")])
                (list
-                (when-let [w (status/when-str connected_at)]
-                  [:div {:replicant/key "t"} (t "Connected since {0}" w)])
-                (cond
-                  running
-                  [:div.sub {:replicant/key "s"} [:span.spinner-inline {:aria-hidden "true"}] (t "Syncing…")]
-                  (:ok last_sync)
-                  [:div.sub {:replicant/key "s"}
+                [:div {:replicant/key "t"}
+                 (if auth-failed
+                   (t "Coros login expired")
+                   (if-let [w (status/when-str connected_at)] (t "Connected since {0}" w) "—"))]
+                (if (:ok last_sync)
+                  [:div.sub {:replicant/key "l"}
                    (t "Last Coros sync: {0}, {1} new activities" (status/when-str (:finished_at last_sync)) (:new last_sync))]
-                  last_sync
+                  (when-let [w (status/when-str (:last_ok last_sync))]
+                    [:div.sub {:replicant/key "l"} (t "Last successful sync: {0}" w)]))
+                (cond
+                  (or running (not last_sync) (:ok last_sync) auth-failed) nil
+                  ;; Coros's daily FIT file limit: nothing wrong, the rest comes later
+                  (= "rate-limit" (:kind last_sync))
+                  [:div.sub {:replicant/key "s"}
+                   (if-let [n (:remaining last_sync)]
+                     (t "Coros allows 50 ride files a day and today's are used up. {0} more will load after the limit resets." n)
+                     (t "Coros allows 50 ride files a day and today's are used up. The rest will load after the limit resets."))
+                   (when-let [d (:paused_until last_sync)]
+                     (when (neg? (compare (ui/iso-today) d))
+                       (str " " (t "Automatic syncs wait until {0}; Sync now tries right away." (ui/date-short d)))))]
+                  :else
                   [:div.error {:replicant/key "s"} (t "The last Coros sync failed: {0}" (:message last_sync))])
-                [:div.connect-row {:replicant/key "b"}
-                 (when (= "auth" (some-> (:kind last_sync) name))
-                   [:button.btn-ink {:disabled busy :on {:click [[:coros-login]]}} (t "Connect again")])
-                 [:button.pill {:on {:click [[:coros-disconnect]]}} (t "Disconnect")]]))
+                [:div {:replicant/key "b"} (status/coros-sync-button sync)]
+                (if auth-failed
+                  (list [:div.lab {:replicant/key "rl"} (t "Connect again")]
+                        [:div.connect-row {:replicant/key "rb"}
+                         (coros-connect-button busy (t "Connect Coros"))
+                         [:button.pill {:on {:click [[:coros-disconnect]]}} (t "Disconnect")]])
+                  [:details.connect-replace {:replicant/key "r"}
+                   [:summary (t "Connect again")]
+                   [:div.connect-row
+                    (coros-connect-button busy (t "Connect Coros"))
+                    [:button.pill {:on {:click [[:coros-disconnect]]}} (t "Disconnect")]]])))
              (when-let [e (or error login_error)]
                [:div.error {:replicant/key "x"} e]))))
 

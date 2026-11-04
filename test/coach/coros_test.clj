@@ -198,7 +198,13 @@
                                                        fetched (+ big 5))
                                           ds "coros" :coros_synced_through "2026-01-01")))
       (is (= 4 (count (ids ds))))
-      (is (= "2026-10-01" (db/get-state ds :coros_synced_through))))))
+      (is (= "2026-10-01" (db/get-state ds :coros_synced_through))))
+    (testing "the failure says how many new rides are still missing"
+      (let [e (try (sync/activities-only! (fake-source [{:id (+ big 5) :date "2026-10-05"} {:id (+ big 6) :date "2026-10-06"}]
+                                                       fetched (+ big 5))
+                                          ds "coros" :coros_synced_through "2026-01-01")
+                   (catch clojure.lang.ExceptionInfo e e))]
+        (is (= {:kind :rate-limit :remaining 2} (ex-data e)))))))
 
 (def garmin-copy
   {:id 19429741372 :date "2025-03-05" :start_time_local "2025-03-05T11:09:09" :start_time_gmt "2025-03-05T10:09:09"

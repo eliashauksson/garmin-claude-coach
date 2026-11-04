@@ -4,9 +4,11 @@
             [coach.api :as api]
             [coach.auth :as auth]
             [coach.backup :as backup]
+            [coach.coros-auth :as coros-auth]
             [coach.db :as db]
             [coach.token :as token]
-            [coach.plan]))
+            [coach.plan]
+            [coach.sync :as sync]))
 
 (defn- temp-ds []
   (let [f (java.io.File/createTempFile "coach-api" ".db")]
@@ -137,3 +139,50 @@
         (is (not (cb :get {"host" "127.0.0.1:8090" "sec-fetch-site" "cross-site"})))
         (is (cb :post {"host" "127.0.0.1:8090" "sec-fetch-site" "cross-site"}))
         (is (cb :get {"host" "evil.example:8090" "sec-fetch-site" "cross-site"}) "still only on this computer")))))
+
+(deftest coros-sync-test
+  (let [ds  (temp-ds)
+        run (fn [] (#'api/run-coros-sync! ds))]
+    (testing "without a Coros login nothing starts"
+      (with-redefs [coros-auth/connected? (constantly false)]
+        (reset! api/sync-state {:running false})
+        (is (not (:running (run))))))
+    (testing "a running sync isn't joined by another"
+      (with-redefs [coros-auth/connected? (constantly true)]
+        (reset! api/sync-state {:running true :job "sync"})
+        (is (= "sync" (:job (run))))))
+    (testing "without a Garmin login, the regular sync syncs Coros alone"
+      (let [started (atom nil)]
+        (with-redefs [auth/connected?       (constantly false)
+                      coros-auth/connected? (constantly true)
+                      api/run-coros-sync!   (fn [_] (reset! started :coros) {})]
+          (#'api/run-sync! ds)
+          (is (= :coros @started)))))
+    (reset! api/sync-state {:running false})))
+
+(deftest revalidate-test
+  (let [app (api/app (temp-ds))]
+    (testing "the page is checked with the server on every load, the API isn't marked"
+      (is (= "no-cache" (get-in (app {:request-method :get :uri "/"}) [:headers "Cache-Control"])))
+      (is (nil? (get-in (app {:request-method :get :uri "/api/nothing-here"}) [:headers "Cache-Control"]))))
+    (testing "the script's address carries the version, so an update fetches the new one"
+      (is (re-find #"/js/main\.js\?v=" (:body (app {:request-method :get :uri "/"})))))))
+
+(deftest coros-daily-limit-test
+  (let [ds    (temp-ds)
+        calls (atom 0)
+        run   (fn [& [opts]] (#'api/run-coros! ds opts))]
+    (binding [*out* (java.io.StringWriter.)]
+      (with-redefs [sync/coros! (fn [_] (swap! calls inc)
+                                  (throw (ex-info "You have reached the daily limit of 50 activity FIT files."
+                                                  {:kind :rate-limit :remaining 4})))]
+        (testing "a daily-limit refusal says how many rides are missing and pauses until tomorrow"
+          (let [r (run)]
+            (is (= [false :rate-limit 4] [(:ok r) (:kind r) (:remaining r)]))
+            (is (= (str (.plusDays (java.time.LocalDate/now) 1)) (:paused_until r)))))
+        (testing "automatic syncs don't ask Coros again until then"
+          (is (= "rate-limit" (:kind (run))))
+          (is (= 1 @calls)))
+        (testing "the Coros card's Sync now does"
+          (run {:force true})
+          (is (= 2 @calls)))))))

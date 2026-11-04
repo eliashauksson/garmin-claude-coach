@@ -13,6 +13,7 @@
             [coach.athlete :as athlete]
             [coach.db :as db]
             [coach.garmin-mcp :as gm]
+            [coach.readiness-estimate :as readiness-estimate]
             [coach.season :as season]))
 
 (def window-days "Recovery charts: the last 30 days, today included." 30)
@@ -304,7 +305,9 @@
         vo2      (db/query ds ["SELECT date, value AS vo2, carried_forward FROM vo2max
                                 WHERE sport = 'running' AND date BETWEEN ? AND ? ORDER BY date" from today])]
     {:date      today
-     :readiness (readiness (:raw (last wellness)))
+     ;; Garmin's score, or the app's estimate on a morning Garmin has none
+     :readiness (or (readiness (:raw (last wellness)))
+                    (when (= today (:date (last wellness))) (readiness-estimate/for-date ds today)))
      :vitals    (vitals nights days)
      :nights    nights
      :days      days

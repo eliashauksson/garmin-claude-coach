@@ -60,13 +60,20 @@
 ;; ---------------------------------------------------------------------------
 ;; Row 1
 
-(defn- readiness-card [w]
-  (let [score (:readiness w)]
+(defn- readiness-card
+  "Garmin's score; on a morning Garmin has none, the app's estimate `est`."
+  [w est]
+  (let [est   (when-not (:readiness w) est)
+        score (or (:readiness w) (:score est))
+        level (or (:readiness_level w) (:level est))]
     (ui/card {:tint "green" :flex "1 1 260px"}
-             (ui/label-row {:icon :bolt :accent "--green" :label (t "Training readiness")})
+             (ui/label-row {:icon :bolt :accent "--green" :label (t "Training readiness")
+                            :info (if est "readiness-estimate" "readiness")})
              [:div.big.xl (or score "—")]
              [:div.sub {:style {:color "var(--green-text)" :font-weight 600}}
-              (if (:readiness_level w) (str (t (sentence (:readiness_level w))) " · " (t *morning*)) (t "No reading {0}" (t *morning*)))]
+              (cond est   (str (t (sentence level)) " · " (t "Estimate"))
+                    level (str (t (sentence level)) " · " (t *morning*))
+                    :else (t "No reading {0}" (t *morning*)))]
              [:div.track [:div {:style {:width (str (or score 0) "%") :background "var(--green)"}}]])))
 
 (defn- body-battery-card [w day intraday]
@@ -356,7 +363,7 @@
        (when d
          (list
           [:div.row {:replicant/key "r1"}
-           (readiness-card w) (body-battery-card w day i) (sleep-card w day)]
+           (readiness-card w (:readiness_estimate d)) (body-battery-card w day i) (sleep-card w day)]
           [:div {:replicant/key "r2"} (heart-rate-card w day i)]
           [:div.row {:replicant/key "r3"}
            (stress-card w day i) (steps-card w day i)]

@@ -14,6 +14,10 @@
       :what (tk "A score from 0 to 100 for how ready you are for hard training today.")
       :how (tk "Garmin combines last night's sleep, your sleep over recent nights, recovery time, acute load, HRV and stress history. Each factor is shown as a bar.")
       :read (tk "High: a good day for quality work. Low: keep it easy. The lowest factor bar tells you why.")}
+     {:id "readiness-estimate" :name (tk "Training readiness (estimate)") :src :app
+      :what (tk "The app's own readiness score, shown only on mornings Garmin has none.")
+      :how (tk "Built like Garmin's from the same six factors: last night's sleep score, the two nights before, HRV against your normal range, recovery hours left from recent workouts, acute load, and awake stress over the last two days. How much each counts was worked out from your own mornings with Garmin's score, and is refitted after every sync.")
+      :read (tk "Read it like Garmin's score, with the same levels. On your past mornings it was about 8 points from Garmin's on average and never more than one level off. After a hard workout it can come out too high.")}
      {:id "recovery-time" :name (tk "Recovery time") :src :garmin
       :what (tk "Hours until Garmin thinks you're recovered enough for another hard session.")
       :how (tk "Set after each activity from how hard it was, then adjusted by sleep and stress.")
