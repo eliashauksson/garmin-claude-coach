@@ -645,17 +645,27 @@
   - the browser's Sec-Fetch-Site must not say another site sent it;
   - a changing request with an Origin must come from this computer.
   Requests without those headers (curl, the installer) are fine.
-  One exception to the second rule: Coros's sign-in page sending the browser
-  back to /api/coros/callback. That GET only completes a login this app
-  started, with the one-time state it made up (coach.coros-auth), and
-  answers with nothing but a redirect."
+  Two exceptions to the second rule:
+  - opening the page itself (a top-level page load, not /api): a phone's
+    home-screen shortcut or a link elsewhere sends \"cross-site\". The other
+    site can't read the page or frame it, and the page's own requests are
+    same-origin again;
+  - Coros's sign-in page sending the browser back to /api/coros/callback.
+    That GET only completes a login this app started, with the one-time state
+    it made up (coach.coros-auth), and answers with nothing but a redirect."
   [{:keys [headers request-method uri]}]
   (let [host   (get headers "host")
         site   (get headers "sec-fetch-site")
-        origin (get headers "origin")]
+        origin (get headers "origin")
+        get?   (#{:get :head} request-method)
+        page?  (and get?
+                    (= "navigate" (get headers "sec-fetch-mode"))
+                    (= "document" (get headers "sec-fetch-dest"))
+                    (not (str/starts-with? (or uri "") "/api/")))]
     (boolean
      (or (and host (not ((local-hosts) (some-> (host-name host) str/lower-case))))
          (and (#{"cross-site" "same-site"} site)
+              (not page?)
               (not (and (= :get request-method) (= "/api/coros/callback" uri))))
          (and origin (not (#{:get :head} request-method)) (not (local-origin? origin)))))))
 
@@ -665,7 +675,8 @@
   (fn [req]
     (if (foreign-request? req)
       (do (println "Refused a request from another website:" (:request-method req) (:uri req)
-                   (get-in req [:headers "origin"]) (get-in req [:headers "host"]))
+                   (get-in req [:headers "origin"]) (get-in req [:headers "host"])
+                   (get-in req [:headers "sec-fetch-site"]))
           (json-response 403 {:error "Requests from other websites are not allowed."}))
       (handler req))))
 

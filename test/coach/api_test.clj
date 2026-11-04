@@ -141,6 +141,21 @@
         (is (cb :post {"host" "127.0.0.1:8090" "sec-fetch-site" "cross-site"}))
         (is (cb :get {"host" "evil.example:8090" "sec-fetch-site" "cross-site"}) "still only on this computer")))))
 
+(deftest page-navigation-test
+  (with-redefs [paths/allowed-hosts (constantly #{"coach.tail1.ts.net"})]
+    (let [nav {"host" "coach.tail1.ts.net" "sec-fetch-site" "cross-site"
+               "sec-fetch-mode" "navigate" "sec-fetch-dest" "document"}
+          foreign? (fn [method uri headers] (api/foreign-request? {:request-method method :uri uri :headers headers}))]
+      (testing "opening the page from a home-screen shortcut or a link elsewhere"
+        (is (not (foreign? :get "/" nav)))
+        (is (not (foreign? :get "/" (assoc nav "sec-fetch-site" "same-site")))))
+      (testing "but nothing else from another site"
+        (is (foreign? :get "/api/backup/download" nav) "the API stays same-origin only")
+        (is (foreign? :post "/" nav))
+        (is (foreign? :get "/" (assoc nav "sec-fetch-dest" "iframe")) "no framing")
+        (is (foreign? :get "/" (dissoc nav "sec-fetch-mode")) "e.g. an <img>")
+        (is (foreign? :get "/" (assoc nav "host" "evil.example")) "the Host check still applies")))))
+
 (deftest allowed-hosts-test
   (testing "no allowed hosts (the local app): only this computer"
     (with-redefs [paths/allowed-hosts (constantly #{})]
