@@ -86,15 +86,42 @@ Where things are:
 | Log | `app.log` in the data folder | `app.log` in the data folder |
 | Uninstall | Start menu › Uninstall Garmin Coach | `~/.local/share/garmin-coach/uninstall.sh` |
 
-**On a server:** to keep it syncing around the clock and open it from your phone and laptop
-(privately, through Tailscale), run `installer/server-setup.sh` on a fresh Debian/Ubuntu server;
-see [`docs/server.md`](docs/server.md).
-
 The installer downloads Java 21 ([Adoptium](https://adoptium.net)), [uv](https://github.com/astral-sh/uv)
 (which runs the Garmin connector and fetches Python for it) and the app itself, `garmin-coach.jar`,
 from the latest release.
 
-### Making a release
+## Install on a server (phone and always on)
+Optional. On a small always-on server the app syncs every 2 h whether the laptop is on or not, and
+you open the same dashboard on your phone and laptop. It is never on the open internet: it listens
+on the server's 127.0.0.1 only, and [Tailscale](https://tailscale.com) (free for personal use)
+passes it on over HTTPS to your own devices, at an address like `https://coach.tail1234.ts.net`.
+About half an hour. Full guide: [`docs/server.md`](docs/server.md).
+
+You need a Debian/Ubuntu server with **2 GB of memory or more** (e.g. a Hetzner Cloud VPS for
+about €5 a month, with public IPv4 kept on; or a Raspberry Pi 4/5 at home), an SSH key for it, and
+Tailscale on your phone and laptop.
+
+1. **Create the server** with Ubuntu 24.04 and your SSH key, and log in: `ssh root@<server-ip>`.
+2. **Run the setup script.** It updates the system, opens only SSH in the firewall, sets the time
+   zone, creates a user `coach`, installs Tailscale (open the sign-in link it prints) and the app as
+   a systemd user service, and turns on `tailscale serve`. It prints the dashboard's address.
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/server-setup.sh \
+     | sudo bash -s -- --timezone Europe/Zurich
+   ```
+   Running it again is safe: finished steps are skipped and the app is updated.
+3. **Tailscale admin console › Machines:** ⋯ › **Disable key expiry** for the server.
+4. **Move your data and logins:** Download backup in the laptop app, then Restore from a file on
+   the server's page. Log in to Garmin, paste the Claude key and connect Coros there (or copy
+   `~/.garminconnect`, `~/.config/coach/anthropic-key` and `coros.json` over; see the guide).
+5. **Laptop app:** turn off Start with the computer and quit it, so only the server syncs.
+6. **Phone:** with Tailscale on, open the address and add it to the home screen (on Android in
+   Chrome; the DuckDuckGo browser can't open Tailscale addresses). It opens full-screen with the
+   app icon.
+
+Updates: **Update now** in Settings, or run the setup script again.
+
+## Making a release
 Push a version tag (`git tag v1.0.0 && git push origin v1.0.0`): the Release workflow runs the
 tests, builds `garmin-coach.jar` and publishes it with the installers. To try an installer with a
 local build, run `make app` and then `bash installer/install.sh` (or `installer\install-windows.cmd`)
