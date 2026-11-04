@@ -120,6 +120,7 @@ kbd { border-bottom-width: 2px; }
   background: var(--tint); color: var(--blue); font-weight: 800; font-variant-numeric: tabular-nums;
 }
 .checklist ol, .checklist ul { margin-top: 4px; }
+.checklist > li > div { min-width: 0; } /* long commands scroll inside their box */
 
 table { border-collapse: collapse; width: 100%; font-size: 15px; }
 .table { overflow-x: auto; max-width: none; margin: 8px 0 12px; }
@@ -156,6 +157,7 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
       <li><a href="#coros">Coros bike computer</a></li>
       <li><a href="#costs">What Claude costs</a></li>
       <li><a href="#daily">Every day</a></li>
+      <li><a href="#server">Phone and always on</a></li>
       <li><a href="#data">Your data</a></li>
       <li><a href="#help">When something goes wrong</a></li>
       <li><a href="#remove">Updating and removing</a></li>
@@ -282,6 +284,66 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
         <li>After a workout, answer <b>How did it go?</b> on the Dashboard. The coach uses your feedback when it adjusts the plan.</li>
         <li>To stop it, use <span class="ui">Settings › General › Quit the app</span>.</li>
       </ul>
+      <p class="muted">Want it on your phone too, and syncing while your laptop is off? See <a href="#server">Phone and always on</a>.</p>
+    </section>
+
+    <section id="server">
+      <h2>Phone and always on</h2>
+      <p>On your laptop, the app syncs only while the laptop is on, and you open it only there. You can instead run it on a small <b>server</b>, a computer that is always on. Then it syncs every 2 hours whatever your laptop does, and you open the same dashboard on your <b>phone and laptop</b>, wherever you are.</p>
+      <p>This is optional and a bit more technical. You type a few commands, and it takes about 15 minutes. The laptop app keeps working either way.</p>
+
+      <div class="note">
+        <b>How it stays private</b>
+        The app has no password of its own, so it is never put on the open internet. <a href="https://tailscale.com">Tailscale</a>, free for personal use, links your server, phone and laptop into a private network of their own. Only your devices can open the dashboard, at an address like <code>https://coach.tail1234.ts.net</code>.
+      </div>
+
+      <h3>What you need</h3>
+      <ul>
+        <li><b>A server</b> with Debian or Ubuntu and at least 2&nbsp;GB of memory (4&nbsp;GB is comfortable). The cheapest good choice is a small rented server, for example <b>Hetzner Cloud CAX11</b> for about €5 a month. A Raspberry Pi 4 or 5 (4&nbsp;GB) at home works too.</li>
+        <li><b>A Tailscale account.</b> Sign up at <a href="https://login.tailscale.com">login.tailscale.com</a> with Google, Microsoft, Apple or GitHub.</li>
+        <li>The <b>Tailscale app</b> on your phone and laptop (<a href="https://tailscale.com/download">tailscale.com/download</a>), signed in with that account.</li>
+      </ul>
+
+      <h3>Set it up</h3>
+      <ol class="checklist">
+        <li><div>
+          <b>Get the server.</b> At Hetzner, create a server with <b>Ubuntu 24.04</b>, and add your SSH key while creating it (Hetzner explains how). Note its IP address.
+        </div></li>
+        <li><div>
+          <b>Log in to it</b> from a terminal on your laptop (on Windows: PowerShell):
+          <div class="cmd">
+            <pre id="ssh-cmd">ssh root@&lt;server IP address&gt;</pre>
+          </div>
+        </div></li>
+        <li><div>
+          <b>Run the setup.</b> Paste this line and press <kbd>Enter</kbd>:
+          <div class="cmd">
+            <pre id="server-cmd">curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/server-setup.sh | sudo bash</pre>
+            <button class="copy" type="button" data-copy="server-cmd" id="copy-server">Copy</button>
+          </div>
+          It installs everything by itself. It needs you three times:
+          <ul>
+            <li>It asks for your <b>time zone</b>. Type it in, e.g. <code>Europe/Zurich</code>.</li>
+            <li>It shows a <b>Tailscale link</b>. Open it in your browser and sign in.</li>
+            <li>If it shows a second link to <b>turn on HTTPS</b>, open that too and allow it.</li>
+          </ul>
+          At the end it shows your dashboard's address. Write it down.
+        </div></li>
+        <li><div>
+          <b>Bring your data along.</b> In the app on your laptop, click <span class="ui">Settings › General › Backup › Download backup</span>. Then open the new address and click <span class="ui">Settings › General › Backup › Restore a backup › Restore from a file…</span>, and choose that file.
+        </div></li>
+        <li><div>
+          <b>Connect again on the server</b>, in <span class="ui">Settings › General</span> at the new address: log in to Garmin, paste your Claude API key, and connect Coros if you use it. Garmin may ask for its code more often than at home, because a rented server is in a data centre.
+        </div></li>
+        <li><div>
+          <b>Stop the laptop app.</b> Otherwise both keep syncing and your plans end up in two places. In the laptop app, turn off <span class="ui">Start with the computer</span> and click <span class="ui">Quit the app</span>. From now on, use the new address.
+        </div></li>
+        <li><div>
+          <b>On your phone,</b> open the address and add it to your home screen. On an iPhone: <span class="ui">Share › Add to Home Screen</span>. On Android: <span class="ui">⋮ › Add to Home screen</span>.
+        </div></li>
+      </ol>
+      <p><b>Afterwards</b> it works like the laptop app: <span class="ui">Update now</span> in Settings updates it, and it makes its own daily backup. Now and then, keep a copy elsewhere with <span class="ui">Download backup</span>.</p>
+      <p class="muted">Step-by-step details, every option and fixes for common problems: <a href="https://github.com/eliashauksson/garmin-claude-coach/blob/main/docs/server.md">the server guide</a>.</p>
     </section>
 
     <section id="data">
@@ -319,6 +381,10 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
         <dd>Add credit on the <a href="https://platform.claude.com/settings/billing">billing page</a>, then click <span class="ui">I've added funds, check again</span>.</dd>
         <dt>“Can't reach the coach server”</dt>
         <dd>The app isn't running. Open it with the <b>Garmin Coach</b> icon; the page reconnects by itself.</dd>
+        <dt>The address doesn't open on my phone (server)</dt>
+        <dd>Open the Tailscale app and check that it is connected, also on Wi-Fi at home. The phone can only reach the server through Tailscale.</dd>
+        <dt>“Requests from other websites are not allowed.” (server)</dt>
+        <dd>Open the dashboard at exactly the address the setup showed. Other addresses for the same server are refused on purpose.</dd>
         <dt>The icon does nothing (Linux)</dt>
         <dd>Some desktops ask before running a new icon: right-click it and choose <span class="ui">Allow Launching</span>.</dd>
         <dt>Still stuck?</dt>
@@ -330,6 +396,7 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
       <h2>Updating and removing</h2>
       <p><b>Updates.</b> When a new version is out, <span class="ui">Settings › General</span> shows it with an <span class="ui">Update now</span> button. The app downloads the new version and restarts by itself in a minute or two; your data stays.</p>
       <p><b>Removing it.</b> On Windows, use <span class="ui">Start menu › Uninstall Garmin Coach</span>. On Linux, run <code>~/.local/share/garmin-coach/uninstall.sh</code> in a terminal. Either way it asks whether to delete your training data too; the answer “no” keeps it, so you can reinstall later and pick up where you left off.</p>
+      <p><b>On a server</b>, log in and run <code>~/.local/share/garmin-coach/uninstall.sh</code> as the app's user (<code>coach</code>), then <code>sudo tailscale serve reset</code>. If you rented the server, delete it at your provider so you stop paying.</p>
     </section>
   </main>
 
