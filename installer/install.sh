@@ -44,8 +44,9 @@ SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
-LOCAL_JAR=""
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../target/garmin-coach.jar" ]; then
+LOCAL_JAR="${GARMIN_COACH_JAR:-}" # a build given by path (server-setup.sh --jar)
+[ -z "$LOCAL_JAR" ] || [ -f "$LOCAL_JAR" ] || fail "there is no file $LOCAL_JAR."
+if [ -z "$LOCAL_JAR" ] && [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../target/garmin-coach.jar" ]; then
   LOCAL_JAR="$SCRIPT_DIR/../target/garmin-coach.jar"
 fi
 
@@ -96,7 +97,11 @@ bold "3/4  Installing the app…"
 if [ -n "$LOCAL_JAR" ]; then
   echo "Using the local build $LOCAL_JAR"
   cp "$LOCAL_JAR" "$DIR/app/garmin-coach.jar.new"
-  cp "$SCRIPT_DIR/icon.png" "$DIR/app/icon.png"
+  if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/icon.png" ]; then
+    cp "$SCRIPT_DIR/icon.png" "$DIR/app/icon.png"
+  else
+    download "$RELEASE/icon.png" "$DIR/app/icon.png"
+  fi
 else
   download "$RELEASE/garmin-coach.jar" "$DIR/app/garmin-coach.jar.new"
   download "$RELEASE/icon.png" "$DIR/app/icon.png"
@@ -123,7 +128,7 @@ if [ -n "$SERVER" ]; then
     HOSTS="$(sed -n 's/^Environment=COACH_ALLOWED_HOSTS=//p' "$UNIT" | head -n 1)"
   fi
   if [ -z "$HOSTS" ] && command -v tailscale >/dev/null; then
-    HOSTS="$(tailscale status --json --peers=false 2>/dev/null | grep -o '"DNSName": *"[^"]*"' | head -n 1 \
+    HOSTS="$(tailscale status --json --peers=false 2>/dev/null | grep -o -m 1 '"DNSName": *"[^"]*"' \
              | sed 's/.*"\([^"]*\)"$/\1/; s/\.$//')" || HOSTS=""
   fi
 

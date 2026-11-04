@@ -18,7 +18,45 @@ phone / laptop ──(Tailscale, HTTPS)──▶ server: tailscale serve ──�
                                                                  Garmin, Coros, Claude
 ```
 
-Time needed: about 30–45 minutes.
+Time needed: about 15 minutes with the setup script, 30–45 by hand.
+
+## Quick setup: one script
+On a **fresh Debian or Ubuntu server** ([step 1](#1-get-a-server) helps you get one), logged in
+as root or as a user with sudo:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/server-setup.sh | sudo bash
+```
+
+It does steps 2–4 below for you:
+- system updates;
+- a firewall that lets only SSH in;
+- your time zone (it asks);
+- a user `coach` for the app (or you, when run with sudo);
+- Tailscale (it prints a link to sign in);
+- the app as a service;
+- `tailscale serve`.
+
+At the end it prints the dashboard's address. While it runs, you only need to:
+1. **Answer the time zone question**, e.g. `Europe/Zurich`.
+2. **Open the Tailscale link** it prints and sign in. Use the same account you'll use on your
+   phone and laptop.
+3. **If Tailscale asks to turn on HTTPS certificates,** open that link too and allow it.
+
+Then continue with [step 5](#5-move-your-data-and-logins) (data and logins), 6 and 7. Running the
+script again is safe: finished steps are skipped, and the app is updated.
+
+Options, after `sudo bash -s --`:
+- `--timezone Europe/Zurich`: don't ask for the time zone.
+- `--authkey tskey-…`: a [Tailscale auth key](https://login.tailscale.com/admin/settings/keys)
+  instead of the sign-in link.
+- `--user NAME`: run the app as another user.
+- `--no-firewall`: leave the firewall alone.
+- `--port 8080`: a different port.
+- `--jar FILE`: install your own build. To use this before a release includes server mode: on the
+  laptop run `make app`, then
+  `scp target/garmin-coach.jar installer/server-setup.sh installer/install.sh root@<server-ip>:`.
+  On the server run `sudo bash server-setup.sh --jar garmin-coach.jar`.
 
 ---
 

@@ -87,7 +87,8 @@ Where things are:
 | Uninstall | Start menu › Uninstall Garmin Coach | `~/.local/share/garmin-coach/uninstall.sh` |
 
 **On a server:** to keep it syncing around the clock and open it from your phone and laptop
-(privately, through Tailscale), see [`docs/server.md`](docs/server.md).
+(privately, through Tailscale), run `installer/server-setup.sh` on a fresh Debian/Ubuntu server;
+see [`docs/server.md`](docs/server.md).
 
 The installer downloads Java 21 ([Adoptium](https://adoptium.net)), [uv](https://github.com/astral-sh/uv)
 (which runs the Garmin connector and fetches Python for it) and the app itself, `garmin-coach.jar`,
