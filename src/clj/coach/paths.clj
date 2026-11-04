@@ -178,3 +178,36 @@
   (when-let [{l :lock ^RandomAccessFile raf :raf} @lock]
     (try (.release ^FileLock l) (.close raf) (catch Exception _))
     (reset! lock nil)))
+
+;; ---------------------------------------------------------------------------
+;; Running on a server (docs/server.md): systemd keeps the app running and
+;; restarts it, and the dashboard is opened through other host names (a
+;; Tailscale address) besides 127.0.0.1.
+
+(defonce ^:private server-mode (atom (= "1" (System/getenv "COACH_SERVER"))))
+
+(defn server?
+  "Whether this run is the server install (--server or COACH_SERVER=1)."
+  []
+  @server-mode)
+
+(defn use-server-mode! [on?] (reset! server-mode (boolean on?)))
+
+(defn parse-hosts
+  "Pure: lower-case host names from \"a.ts.net, b\" or [\"a.ts.net\" \"b\"]."
+  [v]
+  (->> (if (string? v) (str/split v #"[,\s]+") v)
+       (map (comp str/lower-case str/trim str))
+       (remove str/blank?)
+       set))
+
+(def ^:private allowed-hosts*
+  (delay (into (parse-hosts (System/getenv "COACH_ALLOWED_HOSTS"))
+               (parse-hosts (:allowed-hosts (read-config))))))
+
+(defn allowed-hosts
+  "Host names besides this computer's that may open the dashboard: from
+  $COACH_ALLOWED_HOSTS (comma-separated) and :allowed-hosts in config.edn.
+  Read once per run."
+  []
+  @allowed-hosts*)

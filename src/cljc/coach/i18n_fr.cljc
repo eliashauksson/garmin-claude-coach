@@ -958,6 +958,8 @@
    "Now using the data in {0}." "Les données de {0} sont maintenant utilisées."
    "Off" "Non"
    "On" "Oui"
+   "Runs on a server: it is always on and syncs every 2 hours by itself." "Tourne sur un serveur : toujours allumée, elle synchronise toute seule toutes les 2 heures."
+   "On a server, the app always runs: systemd starts it." "Sur un serveur, l'app tourne toujours : systemd la démarre."
    "Only in the installed app." "Seulement dans l'app installée."
    "Only the installed app can start with the computer." "Seule l'app installée peut démarrer avec l'ordinateur."
    "Only the installed app updates itself." "Seule l'app installée se met à jour elle-même."

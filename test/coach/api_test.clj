@@ -6,6 +6,7 @@
             [coach.backup :as backup]
             [coach.coros-auth :as coros-auth]
             [coach.db :as db]
+            [coach.paths :as paths]
             [coach.token :as token]
             [coach.plan]
             [coach.sync :as sync]))
@@ -139,6 +140,38 @@
         (is (not (cb :get {"host" "127.0.0.1:8090" "sec-fetch-site" "cross-site"})))
         (is (cb :post {"host" "127.0.0.1:8090" "sec-fetch-site" "cross-site"}))
         (is (cb :get {"host" "evil.example:8090" "sec-fetch-site" "cross-site"}) "still only on this computer")))))
+
+(deftest allowed-hosts-test
+  (testing "no allowed hosts (the local app): only this computer"
+    (with-redefs [paths/allowed-hosts (constantly #{})]
+      (is (api/foreign-request? {:request-method :get :uri "/" :headers {"host" "coach.tail1.ts.net"}}))))
+  (with-redefs [paths/allowed-hosts (constantly #{"coach.tail1.ts.net"})]
+    (let [foreign? (fn [method headers] (api/foreign-request? {:request-method method :uri "/api/quit" :headers headers}))]
+      (testing "the page opened through an allowed host (tailscale serve)"
+        (is (not (foreign? :get {"host" "coach.tail1.ts.net" "sec-fetch-site" "same-origin"})))
+        (is (not (foreign? :post {"host" "COACH.tail1.ts.net" "origin" "https://coach.tail1.ts.net" "sec-fetch-site" "same-origin"})))
+        (is (not (foreign? :post {"host" "127.0.0.1:8080"})) "this computer still works"))
+      (testing "everything else is still refused"
+        (is (foreign? :get {"host" "evil.example"}))
+        (is (foreign? :get {"host" "coach.tail1.ts.net.evil.example"}))
+        (is (foreign? :get {"host" "coach.tail1.ts.net" "sec-fetch-site" "cross-site"}))
+        (is (foreign? :post {"host" "coach.tail1.ts.net" "origin" "https://evil.example"}))))))
+
+(deftest coros-callback-url-test
+  (with-redefs [paths/allowed-hosts (constantly #{"coach.tail1.ts.net"})]
+    (let [url (fn [headers] (api/coros-callback-url {:server-port 8080 :headers headers}))]
+      (is (= "http://127.0.0.1:8080/api/coros/callback" (url {"host" "127.0.0.1:8080"})))
+      (is (= "http://127.0.0.1:8080/api/coros/callback" (url {"host" "evil.example"})) "not an allowed host")
+      (is (= "http://127.0.0.1:8080/api/coros/callback" (url {})))
+      (is (= "https://coach.tail1.ts.net/api/coros/callback" (url {"host" "coach.tail1.ts.net"})) "tailscale serve: HTTPS, no port")
+      (is (= "http://coach.tail1.ts.net:8080/api/coros/callback" (url {"host" "coach.tail1.ts.net:8080"})))
+      (is (= "https://coach.tail1.ts.net:8443/api/coros/callback"
+             (url {"host" "coach.tail1.ts.net:8443" "x-forwarded-proto" "https"}))))))
+
+(deftest parse-hosts-test
+  (is (= #{"a.ts.net" "b"} (paths/parse-hosts " A.ts.net, b ,")))
+  (is (= #{"a.ts.net"} (paths/parse-hosts ["a.ts.net" ""])))
+  (is (= #{} (paths/parse-hosts nil))))
 
 (deftest coros-sync-test
   (let [ds  (temp-ds)

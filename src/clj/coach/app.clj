@@ -115,7 +115,9 @@
   (println "Restarting…")
   (stop!)
   (paths/unlock-data-dir!)
-  (spawn! (apply launch-command port "--background" flags))
+  ;; on a server, systemd (Restart=always) starts it again
+  (when-not (paths/server?)
+    (spawn! (apply launch-command port "--background" flags)))
   (shutdown-agents)
   (System/exit 0))
 
@@ -140,7 +142,7 @@
     [(.waitFor p) out]))
 
 (defn autostart? []
-  (when (paths/installed?)
+  (when (and (paths/installed?) (not (paths/server?)))
     (if (paths/windows?)
       (zero? (first (run! ["reg" "query" run-key "/v" run-name])))
       (.isFile (autostart-file)))))
@@ -150,6 +152,8 @@
   [on? port]
   (when-not (paths/installed?)
     (throw (ex-info (t "Only the installed app can start with the computer.") {})))
+  (when (paths/server?)
+    (throw (ex-info (t "On a server, the app always runs: systemd starts it.") {})))
   (if (paths/windows?)
     ;; PowerShell, with the value in an environment variable: no quoting
     ;; problems with the paths in it
@@ -191,11 +195,17 @@
         log (paths/data-file "update.log")]
     (paths/trim-log! log)
     (spit log (str "\n--- " (Instant/now) " ---\n") :append true)
-    (spawn! (if (paths/windows?)
-              ["powershell" "-NoProfile" "-ExecutionPolicy" "Bypass" "-Command"
-               (str "irm " (:windows installer-urls) " | iex")]
-              ["setsid" "bash" "-c" (str "curl -fsSL " (:linux installer-urls) " | bash")])
-            {:env env :log log})
+    (if (paths/server?)
+      ;; in a unit of its own: the installer restarts this app's unit, which
+      ;; would otherwise stop the installer with it
+      (spawn! (into ["systemd-run" "--user" "--collect" "--quiet" "--unit" "garmin-coach-update"]
+                    (concat (for [[k v] (assoc env "GARMIN_COACH_SERVER" "1")] (str "--setenv=" k "=" v))
+                            ["bash" "-c" (str "curl -fsSL " (:linux installer-urls) " | bash >> '" log "' 2>&1")])))
+      (spawn! (if (paths/windows?)
+                ["powershell" "-NoProfile" "-ExecutionPolicy" "Bypass" "-Command"
+                 (str "irm " (:windows installer-urls) " | iex")]
+                ["setsid" "bash" "-c" (str "curl -fsSL " (:linux installer-urls) " | bash")])
+              {:env env :log log}))
     {:started true}))
 
 ;; ---------------------------------------------------------------------------

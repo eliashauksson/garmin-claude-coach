@@ -390,8 +390,25 @@
    :default_data_dir (str (paths/default-data-dir))
    :data_dir_env     (boolean (paths/env-data-dir))
    :autostart        (coach-app/autostart?)
+   :server           (paths/server?)
    :update           (coach-app/update-status)
    :notice           (coach-app/notice-message)})
+
+(declare host-name)
+
+(defn coros-callback-url
+  "Where Coros sends the browser back to after its sign-in: the address this
+  page was opened at when that is an allowed host (a phone on a server's
+  Tailscale address), else 127.0.0.1. Behind `tailscale serve` the Host has
+  no port and the page is HTTPS; a proxy's X-Forwarded-Proto wins."
+  [{:keys [headers server-port]}]
+  (let [host (some-> (get headers "host") str/trim str/lower-case)
+        name (host-name host)]
+    (if (and name ((paths/allowed-hosts) name))
+      (let [proto (or (some-> (get headers "x-forwarded-proto") (str/split #",") first str/trim not-empty)
+                      (if (= name host) "https" "http"))]
+        (str proto "://" host "/api/coros/callback"))
+      (str "http://127.0.0.1:" server-port "/api/coros/callback"))))
 
 (defn app-routes [ds]
   ["/app"
@@ -462,8 +479,7 @@
     ;; Coros: sign in on Coros's own page, which sends the browser back to
     ;; /coros/callback; a new login starts a sync
     ["/coros/login"    {:post   (fn [req]
-                                  (ok (coros-auth/start-login!
-                                       (str "http://127.0.0.1:" (:server-port req) "/api/coros/callback"))))
+                                  (ok (coros-auth/start-login! (coros-callback-url req))))
                         :delete (fn [_] (ok (coros-auth/disconnect!)))}]
     ["/coros/sync"     {:post (fn [_] (json-response 202 (run-coros-sync! ds true)))}]
     ["/coros/callback" {:get (fn [{:keys [query-params]}]
@@ -602,7 +618,13 @@
            (println "Error on" (:request-method req) (:uri req) "-" (str e))
            (json-response 500 {:error (str "Server error: " (or (ex-message e) (str (class e))))})))))
 
-(def ^:private local-hosts #{"127.0.0.1" "localhost" "[::1]"})
+(def ^:private loopback-hosts #{"127.0.0.1" "localhost" "[::1]"})
+
+(defn- local-hosts
+  "This computer's names, plus the host names allowed to open the dashboard
+  on a server (coach.paths/allowed-hosts, e.g. a Tailscale address)."
+  []
+  (into loopback-hosts (paths/allowed-hosts)))
 
 (defn- host-name
   "\"127.0.0.1\" from a Host header like \"127.0.0.1:8080\"; also for [::1]:8080."
@@ -610,14 +632,16 @@
   (when h (second (re-matches #"(?i)(\[[^\]]*\]|[^:]*)(?::\d+)?" (str/trim h)))))
 
 (defn- local-origin? [origin]
-  (boolean (some->> origin (re-matches #"(?i)https?://([^/]+)") second host-name str/lower-case local-hosts)))
+  (boolean (some->> origin (re-matches #"(?i)https?://([^/]+)") second host-name str/lower-case ((local-hosts)))))
 
 (defn foreign-request?
   "Pure: whether a request comes from another website rather than this page.
-  The server listens on 127.0.0.1 only, but any website open in the browser
+  The server listens on 127.0.0.1 only (on a server, a proxy such as
+  `tailscale serve` passes the allowed host names on), but any website open in the browser
   can still send requests there, or rename itself to 127.0.0.1 (DNS
   rebinding) to read the answers. So:
-  - the Host must be this computer (a rebound site still sends its own name);
+  - the Host must be this computer or an allowed host (a rebound site still
+    sends its own name);
   - the browser's Sec-Fetch-Site must not say another site sent it;
   - a changing request with an Origin must come from this computer.
   Requests without those headers (curl, the installer) are fine.
@@ -630,7 +654,7 @@
         site   (get headers "sec-fetch-site")
         origin (get headers "origin")]
     (boolean
-     (or (and host (not (local-hosts (some-> (host-name host) str/lower-case))))
+     (or (and host (not ((local-hosts) (some-> (host-name host) str/lower-case))))
          (and (#{"cross-site" "same-site"} site)
               (not (and (= :get request-method) (= "/api/coros/callback" uri))))
          (and origin (not (#{:get :head} request-method)) (not (local-origin? origin)))))))
@@ -800,21 +824,35 @@
   (start! opts))
 
 (defn -main
-  "clojure -M -m coach.api [port] [--no-sync] [--open | --background]
+  "clojure -M -m coach.api [port] [--no-sync] [--open | --background | --server]
 
   --open is what the app shortcut runs: it starts the dashboard unless it is
   already running, logs to app.log in the data folder and opens it in the
   browser. --background does the same without the browser (starting with
-  the computer, restarts)."
+  the computer, restarts). --server (or COACH_SERVER=1) is the server
+  install under systemd (docs/server.md): logs to app.log, and exits on a
+  failed start or a restart, for systemd to start it again."
   [& args]
+  (when (some #{"--server"} args) (paths/use-server-mode! true))
   (let [port (or (some parse-long args) 8080)
         url  (str "http://127.0.0.1:" port "/")
         bg?  (some #{"--background"} args)
         shortcut? (or bg? (some #{"--open"} args))
         open! #(when-not bg? (open-browser! url))
         opts {:port port :sync? (not (some #{"--no-sync"} args))}]
-    (if-not shortcut?
+    (cond
+      (paths/server?)
+      (do (log-to-file!)
+          (println "Server mode; allowed hosts:" (str/join ", " (sort (paths/allowed-hosts))))
+          (try (start-app! opts true)
+               (catch Throwable e
+                 (println "Couldn't start:" (ex-message e))
+                 (System/exit 1))))
+
+      (not shortcut?)
       (start-app! opts false)
+
+      :else
       (if (running? port)
         (do (open!) (System/exit 0))
         (do (log-to-file!)

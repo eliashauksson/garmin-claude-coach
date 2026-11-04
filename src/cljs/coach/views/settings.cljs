@@ -221,7 +221,7 @@
     [:div {:replicant/key "notice" :class (if ok "ok-line" "error")}
      message " " [:button.pill {:on {:click [[:dismiss-notice]]}} (t "OK")]]))
 
-(defn- app-card [{:keys [version installed update autostart notice]} ui-state]
+(defn- app-card [{:keys [version installed update autostart notice server]} ui-state]
   (let [{:keys [latest available url]} update
         updating (get-in ui-state [:app-update :busy])]
     (ui/card {:flex "1 1 320px"}
@@ -237,15 +237,18 @@
                (and installed latest)
                [:div.sub {:replicant/key "u"} (t "This is the newest version.")])
              (when-let [e (get-in ui-state [:app-update :error])] [:div.error e])
-             [:div.lab {:style {:margin-top "6px"}} (t "Start with the computer")]
-             (if installed
+             (if server
+               [:div.sub {:replicant/key "srv"} (t "Runs on a server: it is always on and syncs every 2 hours by itself.")]
                (list
-                (choice (if autostart "on" "off") [["on" (t "On")] ["off" (t "Off")]] [:autostart-set])
-                [:div.sub {:replicant/key "as"} (t "Starts the app in the background when you log in, so it keeps syncing: Garmin keeps some data (training status, race predictions) only for the day itself.")])
-               [:div.sub (t "Only in the installed app.")])
-             (when-let [e (get-in ui-state [:autostart :error])] [:div.error e])
-             [:div.sub (t "The app keeps running in the background, syncing every 2 hours, until you quit it or shut down the computer. Its shortcut opens it again.")]
-             [:div [:button.pill {:on {:click [[:quit]]}} (t "Quit the app")]])))
+                [:div.lab {:replicant/key "asl" :style {:margin-top "6px"}} (t "Start with the computer")]
+                (if installed
+                  (list
+                   (choice (if autostart "on" "off") [["on" (t "On")] ["off" (t "Off")]] [:autostart-set])
+                   [:div.sub {:replicant/key "as"} (t "Starts the app in the background when you log in, so it keeps syncing: Garmin keeps some data (training status, race predictions) only for the day itself.")])
+                  [:div.sub {:replicant/key "asn"} (t "Only in the installed app.")])
+                (when-let [e (get-in ui-state [:autostart :error])] [:div.error {:replicant/key "ase"} e])
+                [:div.sub {:replicant/key "bg"} (t "The app keeps running in the background, syncing every 2 hours, until you quit it or shut down the computer. Its shortcut opens it again.")]
+                [:div {:replicant/key "q"} [:button.pill {:on {:click [[:quit]]}} (t "Quit the app")]])))))
 
 (defn- data-card [{:keys [data_dir default_data_dir data_dir_env notice]} {:keys [input busy error existing]}]
   (ui/card {:flex "1 1 320px"}
