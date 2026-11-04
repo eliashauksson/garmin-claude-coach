@@ -290,7 +290,7 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
     <section id="server">
       <h2>Phone and always on</h2>
       <p>On your laptop, the app syncs only while the laptop is on, and you open it only there. You can instead run it on a small <b>server</b>, a computer that is always on. Then it syncs every 2 hours whatever your laptop does, and you open the same dashboard on your <b>phone and laptop</b>, wherever you are.</p>
-      <p>This is optional and a bit more technical. You type a few commands, and it takes about 15 minutes. The laptop app keeps working either way.</p>
+      <p>This is optional and a bit more technical. You type a few commands, and it takes about half an hour. The laptop app keeps working either way.</p>
 
       <div class="note">
         <b>How it stays private</b>
@@ -299,7 +299,7 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
 
       <h3>What you need</h3>
       <ul>
-        <li><b>A server</b> with Debian or Ubuntu and at least 2&nbsp;GB of memory (4&nbsp;GB is comfortable). The cheapest good choice is a small rented server, for example <b>Hetzner Cloud CAX11</b> for about €5 a month. A Raspberry Pi 4 or 5 (4&nbsp;GB) at home works too.</li>
+        <li><b>A server</b> with Debian or Ubuntu and at least 2&nbsp;GB of memory (4&nbsp;GB is comfortable). The cheapest good choice is a small rented server, for example at <b>Hetzner Cloud</b> for about €5 a month. A Raspberry Pi 4 or 5 (4&nbsp;GB) at home works too.</li>
         <li><b>A Tailscale account.</b> Sign up at <a href="https://login.tailscale.com">login.tailscale.com</a> with Google, Microsoft, Apple or GitHub.</li>
         <li>The <b>Tailscale app</b> on your phone and laptop (<a href="https://tailscale.com/download">tailscale.com/download</a>), signed in with that account.</li>
       </ul>
@@ -307,12 +307,32 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
       <h3>Set it up</h3>
       <ol class="checklist">
         <li><div>
-          <b>Get the server.</b> At Hetzner, create a server with <b>Ubuntu 24.04</b>, and add your SSH key while creating it (Hetzner explains how). Note its IP address.
+          <b>Make an SSH key</b>, the key that lets your laptop log in to the server. In a terminal on your laptop (on Windows: PowerShell):
+          <div class="cmd">
+            <pre id="key-cmd">ssh-keygen -t ed25519 -f ~/.ssh/coach</pre>
+            <button class="copy" type="button" data-copy="key-cmd" id="copy-key">Copy</button>
+          </div>
+          A passphrase is optional. Giving the key its own name, here <code>coach</code>, keeps it apart from other keys you may have. Then show it, and copy the whole line:
+          <div class="cmd">
+            <pre id="pub-cmd">cat ~/.ssh/coach.pub</pre>
+          </div>
         </div></li>
         <li><div>
-          <b>Log in to it</b> from a terminal on your laptop (on Windows: PowerShell):
+          <b>Create the server.</b> In the <a href="https://console.hetzner.cloud">Hetzner Cloud Console</a>, open a project and click <span class="ui">Add Server</span>:
+          <ul>
+            <li><b>Location:</b> one near you, e.g. Falkenstein or Nuremberg.</li>
+            <li><b>Image:</b> Ubuntu 24.04.</li>
+            <li><b>Type:</b> the cheapest with <b>2&nbsp;GB of memory or more</b>. Check the memory: the very smallest types have only 1&nbsp;GB, and the app then stops during syncs. If you picked one, you can change it later under <span class="ui">Rescale</span> (switch the server off first).</li>
+            <li><b>Networking:</b> leave both <b>IPv4</b> and IPv6 on. The setup downloads from GitHub, which needs IPv4.</li>
+            <li><b>SSH keys:</b> <span class="ui">Add SSH key</span>, and paste the line you copied.</li>
+            <li><b>Name:</b> e.g. <code>coach</code>.</li>
+          </ul>
+          Click <span class="ui">Create &amp; Buy now</span>, and note the server's <b>IPv4 address</b>.
+        </div></li>
+        <li><div>
+          <b>Log in to it</b> from your laptop's terminal. Type <code>yes</code> when it asks whether to continue connecting.
           <div class="cmd">
-            <pre id="ssh-cmd">ssh root@&lt;server IP address&gt;</pre>
+            <pre id="ssh-cmd">ssh -i ~/.ssh/coach root@&lt;server IP address&gt;</pre>
           </div>
         </div></li>
         <li><div>
@@ -330,16 +350,22 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
           At the end it shows your dashboard's address. Write it down.
         </div></li>
         <li><div>
+          <b>Keep the server in Tailscale.</b> Tailscale signs devices out after 180 days, and a server can't sign itself back in. On <a href="https://login.tailscale.com/admin/machines">login.tailscale.com/admin/machines</a>, click <span class="ui">⋯</span> next to the server and choose <span class="ui">Disable key expiry</span>.
+        </div></li>
+        <li><div>
+          <b>Open the address on your laptop</b>, with Tailscale on. You see the dashboard, still empty. Bookmark it.
+        </div></li>
+        <li><div>
           <b>Bring your data along.</b> In the app on your laptop, click <span class="ui">Settings › General › Backup › Download backup</span>. Then open the new address and click <span class="ui">Settings › General › Backup › Restore a backup › Restore from a file…</span>, and choose that file.
         </div></li>
         <li><div>
-          <b>Connect again on the server</b>, in <span class="ui">Settings › General</span> at the new address: log in to Garmin, paste your Claude API key, and connect Coros if you use it. Garmin may ask for its code more often than at home, because a rented server is in a data centre.
+          <b>Connect again on the server</b>, in <span class="ui">Settings › General</span> at the new address: log in to Garmin, paste your Claude API key, and connect Coros if you use it. Garmin may ask for its code more often than at home, because a rented server is in a data centre. To avoid that, you can copy your laptop's Garmin login to the server instead; <a href="https://github.com/eliashauksson/garmin-claude-coach/blob/main/docs/server.md#5-move-your-data-and-logins">the server guide</a> shows how.
         </div></li>
         <li><div>
           <b>Stop the laptop app.</b> Otherwise both keep syncing and your plans end up in two places. In the laptop app, turn off <span class="ui">Start with the computer</span> and click <span class="ui">Quit the app</span>. From now on, use the new address.
         </div></li>
         <li><div>
-          <b>On your phone,</b> open the address and add it to your home screen. On an iPhone: <span class="ui">Share › Add to Home Screen</span>. On Android: <span class="ui">⋮ › Add to Home screen</span>.
+          <b>On your phone,</b> turn Tailscale on, open the address and add it to your home screen. On an iPhone, in Safari: <span class="ui">Share › Add to Home Screen</span>. On Android, in <b>Chrome</b>: <span class="ui">⋮ › Add to Home screen</span> (or <span class="ui">Install app</span>). The icon then opens the dashboard full-screen, like an app. Use Chrome on Android: the DuckDuckGo browser can't open Tailscale addresses.
         </div></li>
       </ol>
       <p><b>Afterwards</b> it works like the laptop app: <span class="ui">Update now</span> in Settings updates it, and it makes its own daily backup. Now and then, keep a copy elsewhere with <span class="ui">Download backup</span>.</p>
@@ -382,7 +408,7 @@ footer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; text-align: 
         <dt>“Can't reach the coach server”</dt>
         <dd>The app isn't running. Open it with the <b>Garmin Coach</b> icon; the page reconnects by itself.</dd>
         <dt>The address doesn't open on my phone (server)</dt>
-        <dd>Open the Tailscale app and check that it is connected, also on Wi-Fi at home. The phone can only reach the server through Tailscale.</dd>
+        <dd>Open the Tailscale app and check that it is connected, also on Wi-Fi at home. The phone can only reach the server through Tailscale. If it says <i>Connection refused</i> although Tailscale is on, try another browser: on Android, the DuckDuckGo browser doesn't work, Chrome does.</dd>
         <dt>“Requests from other websites are not allowed.” (server)</dt>
         <dd>Open the dashboard at exactly the address the setup showed. Other addresses for the same server are refused on purpose.</dd>
         <dt>The icon does nothing (Linux)</dt>
