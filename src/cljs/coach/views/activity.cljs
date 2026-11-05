@@ -103,8 +103,16 @@
                             "np"))
      (tile (t "Efficiency factor") (ui/fixed (:ef a) 2) nil
               (some->> (:decoupling a) (t "decoupling {0}%")) "ef")
-     (tile (t "Garmin load") (some-> (:garmin_load a) js/Math.round) nil
-              (some->> (ui/fixed (:aerobic_te a) 1) (t "aerobic TE {0}")) "garmin-load")])]
+     (if (or (:garmin_load a) (not (:load_est a)))
+       (tile (t "Garmin load") (some-> (:garmin_load a) js/Math.round) nil
+             (some->> (ui/fixed (:aerobic_te a) 1) (t "aerobic TE {0}")) "garmin-load")
+       ;; a ride Garmin never saw: the app's own estimate (coach.epoc)
+       (tile (t "Training load (estimate)") (js/Math.round (:load_est a)) nil
+             (case (:load_method a)
+               "hr+power" (t "from heart rate and power")
+               "power"    (t "from power")
+               (t "from heart rate"))
+             "load-estimate"))])]
     (into [:div.row]
           (map (fn [tl tint] (ui/tile (assoc tl :tint tint :size "sm" :flex "1 1 140px"))) tiles tints))))
 

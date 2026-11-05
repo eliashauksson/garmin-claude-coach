@@ -77,6 +77,15 @@
   (doseq [[s e] (chunks start end vo2max-chunk-days)]
     (db/upsert-vo2max! ds (source/fetch-vo2max src s e))))
 
+(defn sync-load-trend!
+  "Garmin's daily acute and chronic load (coach.load-model checks ours
+  against it). Not needed for anything else, so a failure only prints."
+  [src ds start end]
+  (try
+    (doseq [[s e] (chunks start end vo2max-chunk-days)]
+      (db/upsert-load-trend! ds (source/fetch-load-trend src s e)))
+    (catch Throwable e (println "Load trend failed:" (ex-message e)))))
+
 (defn sync-thresholds!
   "Stores Garmin's current thresholds. The first time, they apply to all
   history (valid from `epoch`); afterwards a changed value starts a new
@@ -287,6 +296,7 @@
         (println "Intraday:" (count dates) "days, saving the ones not stored yet before Garmin drops them"))
       (sync-intraday-dates! src ds dates))
     (sync-vo2max! src ds from t)
+    (sync-load-trend! src ds from t)
     (sync-overview! src ds t)
     (let [changed? (sync-thresholds! src ds)
           new-ids  (sync-streams! src ds)
@@ -494,7 +504,8 @@
   [src ds]
   (backfill! src ds)
   (when-let [from (earliest-date ds)]
-    (sync-vo2max! src ds from (today)))
+    (sync-vo2max! src ds from (today))
+    (sync-load-trend! src ds from (today)))
   (sync-streams! src ds)
   (analysis/compute-metrics! ds)
   (analysis/update-eftp! ds)
@@ -552,14 +563,14 @@
 
 (defn -main
   "clojure -M -m coach.sync [sync | backfill [max-chunks] | history | streams [max] | intraday [days] |
-                            vo2max | thresholds | overview | metrics | status]"
+                            vo2max | loadtrend [from] | thresholds | overview | metrics | status]"
   [& [cmd n]]
   (let [ds (doto (db/datasource) db/migrate!)]
     (case cmd
       "status"  (prn (status ds))
       "metrics" (do (println "Scored" (analysis/compute-metrics! ds) "activities")
                     (analysis/update-eftp! ds))
-      (let [_ (when-not (#{"sync" "backfill" "history" "streams" "intraday" "vo2max" "thresholds" "overview"} (or cmd "sync"))
+      (let [_ (when-not (#{"sync" "backfill" "history" "streams" "intraday" "vo2max" "loadtrend" "thresholds" "overview"} (or cmd "sync"))
                 (println "Unknown command:" cmd) (System/exit 2))
             {:keys [ok]}
             (run-cli-sync!
@@ -574,6 +585,7 @@
                     "intraday"   (let [days (if n (parse-long n) 7)]
                                    (sync-intraday! src ds (str (.minusDays (d (today)) (dec days))) (today)))
                     "vo2max"     (sync-vo2max! src ds epoch (today))
+                    "loadtrend"  (sync-load-trend! src ds (or n epoch) (today))
                     "overview"   (sync-overview! src ds (today))
                     "thresholds" (do (println "Changed:" (sync-thresholds! src ds))
                                      (run! prn (db/thresholds ds))))))]

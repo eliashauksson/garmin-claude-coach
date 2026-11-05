@@ -280,6 +280,13 @@
                 []))
      :raw (dissoc raw :date)}))
 
+(defn load-trend-rows
+  "From get_training_load_trend: one row per day with Garmin's acute (atl)
+  and chronic (ctl) load. Days without an acute load are left out."
+  [res]
+  (vec (for [p (:trend (m res)) :when (and (map? p) (string? (:date p)) (number? (:atl p)))]
+         {:date (:date p) :acute (:atl p) :chronic (when (number? (:ctl p)) (:ctl p)) :raw p})))
+
 ;; Coach overview: training status, race predictions, endurance, sleep need.
 ;; Each returns nil for an answer without data, so nothing empty is stored.
 
@@ -400,6 +407,10 @@
       (vec (for [p (:trend (m r)) :when (:vo2_max p)]
              {:date (:date p) :sport (:sport r) :value (:vo2_max p)
               :carried_forward (boolean (:carried_forward p))}))))
+
+  (fetch-load-trend [_ start-date end-date]
+    (Thread/sleep (long delay-ms))
+    (load-trend-rows (call client "get_training_load_trend" {"start_date" start-date "end_date" end-date})))
 
   (fetch-training-status [_ date]
     (Thread/sleep (long delay-ms))

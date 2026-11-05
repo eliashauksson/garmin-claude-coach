@@ -23,6 +23,7 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - overview: everything behind the dashboard start page (/api/overview)
 - readiness: pure morning readiness check · adapt: signals that the plan should adapt
 - readiness-score: pure, Garmin's training readiness rebuilt from raw data (six factors + combination, `fit`) · readiness-estimate: its DB glue, shown when Garmin has no score, refit after each sync, CLI `compare`
+- epoc: pure, Garmin-style training load (peak EPOC) from HR or power, acute load · load-model: its DB glue, fitted to Garmin's loads (refit every 20 new ones), power calibration, CLI `compare`; gives rides Garmin never saw (Coros) `activity_metrics.load_est`
 - plan-rules: pure checks of a week against training-principles.md (warnings only)
 - season: date helpers + week position in the season · season-plan: Claude drafts every week to race day
 - plan: storage for weeks, proposals and accepted workouts · planner: Claude week proposals, `request` (all Claude calls)

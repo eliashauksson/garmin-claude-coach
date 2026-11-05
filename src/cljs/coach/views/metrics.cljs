@@ -68,12 +68,16 @@
       :read (tk "Depends on activities recorded with Garmin, so rides recorded only on another device are missing from it.")}]}
 
    {:id "training" :title (tk "Training on the Dashboard")
-    :intro (tk "The Training cards use Garmin's training load per activity. The Training load section below them uses the app's own TSS.")
+    :intro (tk "The Training cards use Garmin's training load per activity, or the app's estimate for rides Garmin never saw. The Training load section below them uses the app's own TSS.")
     :items
     [{:id "garmin-load" :name (tk "Garmin training load") :src :garmin
       :what (tk "Garmin's load for one activity. The heatmap, the weekly bars and the 28-day totals add these up.")
       :how (tk "From EPOC: the extra oxygen your body uses after exercise, estimated from heart rate.")
       :read (tk "Comparable between sports, but on a different scale from TSS.")}
+     {:id "load-estimate" :name (tk "Training load (estimate)") :src :app
+      :what (tk "The app's own version of Garmin's training load, for activities Garmin has none for, such as rides recorded on a Coros bike computer. They count in the Training cards and the readiness estimate like Garmin's.")
+      :how (tk "Like Garmin, from EPOC: it builds up while you train above about a third of your maximum heart rate, much faster the harder you go, eases off when you go easy, and keeps building through long efforts. On a ride with a power meter, power is used as well, so short surges count that heart rate is too slow for. The constants are fitted to Garmin's own load on your activities and refitted as new ones come in.")
+      :read (tk "Read it like Garmin's load. On your past activities it was about 12% from Garmin's in the middle case and 9% for rides; single workouts can be further off.")}
      {:id "acwr" :name (tk "Acute vs chronic load") :src :garmin
       :what (tk "Your load of the last 7 days divided by your usual load of the last 4 weeks.")
       :how (tk "Garmin's acute and chronic load, and its ratio and range.")

@@ -5,6 +5,7 @@
             [next.jdbc]
             [clojure.string :as str]
             [coach.db :as db]
+            [coach.epoc :as epoc]
             [coach.metrics :as m])
   (:import (java.time LocalDate)))
 
@@ -65,6 +66,18 @@
         median (let [v (vec (sort (vals by)))] (when (seq v) (v (quot (count v) 2))))]
     (fn [date] (or (by date) median 50))))
 
+(defn- state-json [ds k] (some-> (db/get-state ds k) (json/read-str :key-fn keyword)))
+
+(defn load-params
+  "coach.epoc constants: the last fit (coach.load-model), else the defaults."
+  [ds]
+  (merge epoc/defaults (state-json ds :load_params)))
+
+(defn power-cal
+  "coach.epoc power calibration [a b], nil until enough rides have both."
+  [ds]
+  (state-json ds :power_cal))
+
 (defn compute-metrics!
   "Computes and stores metrics. `ids` limits it to those activities;
   without it, every activity is (re)computed."
@@ -73,6 +86,8 @@
    (let [rows    (db/thresholds ds)
          sex     (db/get-state ds :sex)
          rest-hr (rest-hr-lookup ds)
+         lp      (load-params ds)
+         cal     (power-cal ds)
          acts    (if ids
                    (db/query ds (into [(str "SELECT * FROM activities WHERE id IN ("
                                             (str/join "," (repeat (count ids) "?")) ")")]
@@ -84,10 +99,11 @@
         (for [a batch]
           (let [th     (assoc (thresholds-at rows (:date a)) :rest_hr (rest-hr (:date a)) :sex sex)
                 stream (db/load-stream ds (:id a))]
-            (assoc (m/activity-metrics a stream th)
-                   :activity_id (:id a)
-                   :inputs th
-                   :route (route-thumb stream))))))
+            (merge (m/activity-metrics a stream th)
+                   (when stream (epoc/activity-load lp cal th (= :bike (m/sport-family (:sport a))) stream))
+                   {:activity_id (:id a)
+                    :inputs th
+                    :route (route-thumb stream)})))))
      (count acts))))
 
 ;; ---------------------------------------------------------------------------
@@ -217,7 +233,7 @@
 (def ^:private activity-select
   "SELECT a.id, a.date, a.start_time_local, a.sport, a.name, a.distance_m, a.duration_s,
           a.moving_s, a.elev_gain_m, a.avg_hr, a.max_hr, a.calories,
-          a.training_load AS garmin_load, a.aerobic_te,
+          a.training_load AS garmin_load, a.aerobic_te, m.load_est, m.load_method,
           m.tss, m.tss_method, m.intensity, m.tss_per_hour, m.np, m.ngp_mps, m.vi, m.ef,
           m.decoupling, m.kj, m.hr_zones_s, m.peaks, m.route,
           json_extract(a.raw, '$.detail.workout_rpe') / 10.0 AS garmin_rpe,

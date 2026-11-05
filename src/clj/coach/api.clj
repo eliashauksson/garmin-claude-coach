@@ -14,6 +14,7 @@
             [coach.costs :as costs]
             [coach.db :as db]
             [coach.i18n :as i18n]
+            [coach.load-model :as load-model]
             [coach.overview :as overview]
             [coach.plan :as plan]
             [coach.planner :as planner]
@@ -65,6 +66,10 @@
             done (str (java.time.Instant/now))
             r    (assoc r :finished_at done :last_ok (if (:ok r) done (:last_ok prev)))]
         (try (db/set-state! ds :coros_last_sync (json/write-str r)) (catch Throwable _))
+        ;; new rides with power refine the power calibration (coach.epoc)
+        (when (and (:ok r) (pos? (or (:new r) 0)))
+          (try (load-model/calibrate-power! ds)
+               (catch Throwable e (println "Power calibration failed:" (ex-message e)))))
         r))))
 
 (defn- coros-status
@@ -140,6 +145,9 @@
                 ;; the readiness estimate learns from Garmin's newest scores
                 (try (readiness-estimate/refit! ds (str (LocalDate/now)))
                      (catch Throwable e (println "Readiness refit failed:" (ex-message e))))
+                ;; our training load (rides Garmin never saw) learns from Garmin's newest loads
+                (try (load-model/update! ds)
+                     (catch Throwable e (println "Training load refit failed:" (ex-message e))))
                 (cond
                   (costs/credits-out ds) (assoc result :plan_check_skipped "no Claude credits")
                   :else (try (assoc result :proposals (:proposed (planner/check! ds)))

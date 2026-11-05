@@ -24,6 +24,8 @@
      :steps [24 hourly totals] :raw {...}}.")
   (fetch-vo2max [this start-date end-date]
     "VO2 max per day [{:date :sport :value :carried_forward}]. Max 90 days.")
+  (fetch-load-trend [this start-date end-date]
+    "Garmin's daily acute and chronic load [{:date :acute :chronic :raw}]. Max 90 days.")
   (fetch-training-status [this date]
     "Training status and load focus on `date`: {:date :raw {:status {...} :balance {...}}},
     nil when Garmin has none.")

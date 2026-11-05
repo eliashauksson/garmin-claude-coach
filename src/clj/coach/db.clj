@@ -237,6 +237,13 @@
       text       TEXT NOT NULL,
       created_at TEXT NOT NULL,
       PRIMARY KEY (hash, lang))"
+   ;; Garmin's daily acute/chronic load (get_training_load_trend), to check ours against
+   "CREATE TABLE IF NOT EXISTS load_trend (
+      date       TEXT PRIMARY KEY,
+      acute      REAL,
+      chronic    REAL,
+      raw        TEXT NOT NULL,
+      fetched_at TEXT NOT NULL)"
    ;; activities from an activity-only source (Coros): which stored activity
    ;; each one became, merged = 1 when it was the same ride as one from Garmin
    "CREATE TABLE IF NOT EXISTS source_activities (
@@ -270,7 +277,10 @@
    ["plan_proposals" "delivery" "TEXT"]
    ["season_plans" "delivery" "TEXT"]
    ;; "How did it go?" dismissed without an answer (not asked again)
-   ["activity_feedback" "skipped" "INTEGER NOT NULL DEFAULT 0"]])
+   ["activity_feedback" "skipped" "INTEGER NOT NULL DEFAULT 0"]
+   ;; our own Garmin-style training load (coach.epoc), for rides Garmin never saw
+   ["activity_metrics" "load_est" "REAL"]
+   ["activity_metrics" "load_method" "TEXT"]])
 
 (defn- ensure-column! [ds [table column type]]
   (let [cols (set (map :name (jdbc/execute! ds [(str "PRAGMA table_info(" table ")")]
@@ -323,6 +333,7 @@
 (defn upsert-training-status! [ds rows] (upsert! ds "training_status" "date" [:date :raw :fetched_at] rows))
 (defn upsert-race-predictions! [ds rows]
   (upsert! ds "race_predictions" "date" [:date :t5k :t10k :thalf :tmar :raw :fetched_at] rows))
+(defn upsert-load-trend! [ds rows] (upsert! ds "load_trend" "date" [:date :acute :chronic :raw :fetched_at] rows))
 (defn upsert-endurance! [ds rows] (upsert! ds "endurance_score" "date" [:date :score :raw :fetched_at] rows))
 (defn upsert-sleep-need! [ds rows] (upsert! ds "sleep_need" "date" [:date :need_min :raw :fetched_at] rows))
 
@@ -404,7 +415,7 @@
 
 (def metric-cols
   [:activity_id :tss :tss_method :intensity :tss_per_hour :np :ngp_mps :vi :ef
-   :decoupling :kj :hr_zones_s :peaks :inputs :route :computed_at])
+   :decoupling :kj :hr_zones_s :peaks :inputs :route :load_est :load_method :computed_at])
 
 (defn upsert-metrics! [ds rows]
   (when (seq rows)

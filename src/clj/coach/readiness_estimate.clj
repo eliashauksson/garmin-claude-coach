@@ -55,9 +55,14 @@
         raw  (raw-of (:raw (rows date)))
         wake (wake-time date raw)
         hv   (m (:hrv raw))
+        ;; Garmin's load where it has one, else ours (coach.epoc): rides from
+        ;; Coros count too, which Garmin's own score never sees
         acts (for [{:keys [start_time_gmt duration_s training_load]}
-                   (db/query ds ["SELECT start_time_gmt, duration_s, training_load FROM activities
-                                  WHERE training_load IS NOT NULL AND date BETWEEN ? AND ?"
+                   (db/query ds ["SELECT a.start_time_gmt, a.duration_s,
+                                         coalesce(a.training_load, m.load_est) AS training_load
+                                  FROM activities a LEFT JOIN activity_metrics m ON m.activity_id = a.id
+                                  WHERE coalesce(a.training_load, m.load_est) IS NOT NULL
+                                    AND a.date BETWEEN ? AND ?"
                                  (add-days date -61) (add-days date 1)])
                    :let [start (utc-time start_time_gmt)]
                    :when (and start (.isBefore start wake))]

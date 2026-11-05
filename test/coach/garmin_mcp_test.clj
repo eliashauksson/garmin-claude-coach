@@ -140,3 +140,13 @@
   (is (= 72.5 (gm/profile-weight-kg {:userData {:weight 72480.0}})))
   (is (nil? (gm/profile-weight-kg {:userData {:weight nil}})))
   (is (nil? (gm/profile-weight-kg "Error: no profile"))))
+
+(deftest load-trend-rows-test
+  (let [rows (gm/load-trend-rows {:trend [{:date "2030-05-12" :atl 142 :ctl 219 :acwr 0.6}
+                                          {:date "2030-05-13" :atl 0 :ctl nil}
+                                          {:date "2030-05-14" :ctl 219}
+                                          "No data"]})]
+    (is (= [["2030-05-12" 142 219] ["2030-05-13" 0 nil]] (mapv (juxt :date :acute :chronic) rows))
+        "days without an acute load are left out; 0 is kept (load-model skips it)")
+    (is (= 0.6 (get-in rows [0 :raw :acwr]))))
+  (is (= [] (gm/load-trend-rows "Error: nothing"))))

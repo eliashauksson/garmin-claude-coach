@@ -132,7 +132,8 @@
    :distance_m (n? (:distance_m a))
    :duration_s (n? (:duration_s a))
    :avg_hr     (round (:avg_hr a))
-   :load       (n? (:garmin_load a))
+   ;; Garmin's load, or ours (coach.epoc) for rides Garmin never saw
+   :load       (or (n? (:garmin_load a)) (n? (:load_est a)))
    ;; [below Z1, Z1 ... Z5] seconds, from the app's own HR zones (coach.metrics)
    :zones_s    (:hr_zones_s a)})
 
