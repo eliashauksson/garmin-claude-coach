@@ -2,6 +2,7 @@
   "Storage for the training plan: weeks, AI proposals and the planned
   workouts the athlete accepted. Plans live only here; nothing goes to Garmin."
   (:require [clojure.data.json :as json]
+            [clojure.string :as str]
             [coach.db :as db]
             [coach.i18n :as i18n]
             [coach.plan-rules :as rules]
@@ -140,7 +141,7 @@
         cols    (filter #(contains? changes %) (conj workout-cols :status))]
     (when (seq cols)
       (jdbc/execute! ds (into [(str "UPDATE planned_workouts SET "
-                                    (clojure.string/join ", " (map #(str (name %) " = ?") cols))
+                                    (str/join ", " (map #(str (name %) " = ?") cols))
                                     ", updated_at = ? WHERE id = ?")]
                               (concat (map changes cols) [(now) id]))))))
 

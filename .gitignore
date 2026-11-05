@@ -1,4 +1,5 @@
 .cpcache/
+.clj-kondo/.cache/
 .nrepl-port
 data/
 *.log
@@ -20,3 +21,4 @@ resources/public/fonts/
 /data-archive-*/
 target/
 config.edn
+!.clj-kondo/config.edn

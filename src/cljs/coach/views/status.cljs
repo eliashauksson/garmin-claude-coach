@@ -51,7 +51,7 @@
 (defn- connect-banners
   "Before Garmin or Claude is connected. Not on the Dashboard or Settings,
   whose setup checklist and connect cards say the same."
-  [{:keys [setup auth]} page]
+  [{:keys [setup]} page]
   (when (and setup (not (#{:dashboard :settings} page)))
     (list
      (when (false? (:garmin setup))

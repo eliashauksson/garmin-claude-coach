@@ -88,7 +88,7 @@
     (:duration_min edits) (update :duration_min #(js/parseInt %))
     (:distance_km edits)  (update :distance_km #(js/parseFloat %))))
 
-(defn- item-row [{:keys [id items]} item existing ui-state monday]
+(defn- item-row [{:keys [id]} item existing ui-state monday]
   (let [{:keys [idx date slot session_id title intensity description reason decision]} item
         editing (get-in ui-state [:editing id idx])
         edits   (get-in ui-state [:edits id idx])
@@ -177,7 +177,7 @@
 
 ;; ---------------------------------------------------------------------------
 
-(defn- week-card [{:keys [monday sunday week phase] :as wk} workouts proposal ui-state season?]
+(defn- week-card [{:keys [monday sunday week phase]} workouts proposal ui-state season?]
   (let [mine     (filter #(<= (compare monday (:date %)) 0 (compare sunday (:date %))) workouts)
         running? (= "running" (:status proposal))]
     (ui/card {}

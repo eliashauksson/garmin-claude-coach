@@ -112,7 +112,7 @@
                    (map #(str/trim (str/replace % #"^✗" ""))))]
     (or (not-empty (str/join " " why)) (last lines) "")))
 
-(defn- output [job] (locking (:out job) (str (:out job))))
+(defn- output [job] (let [out (:out job)] (locking out (str out))))
 
 (defn- wait-for
   "Waits until the login exits or (unless `mfa-asked?`) asks for the code.

@@ -2,7 +2,8 @@
   "Morning readiness check (training-principles.md: Monitoring; thresholds in athlete.md: Baselines). Pure: takes the
   recent wellness rows and today's planned workouts, returns the signals and
   a suggested change per workout. Nothing is applied without approval."
-  (:require [coach.i18n :as i18n]
+  (:require [clojure.string :as str]
+            [coach.i18n :as i18n]
             [coach.plan-rules :as rules]))
 
 (defn- easier [session-id key?]
@@ -20,7 +21,7 @@
   (let [t        (last days)
         hrv      (:hrv_avg t)
         rhr      (:rhr t)
-        statuses (map #(some-> (:hrv_status %) clojure.string/upper-case) (take-last 2 days))
+        statuses (map #(some-> (:hrv_status %) str/upper-case) (take-last 2 days))
         hrv-bad  (and hrv hrv_low (< hrv hrv_low))
         rhr-bad  (and rhr rhr_high (>= rhr rhr_high))
         unbal    (and (= 2 (count statuses)) (every? #{"UNBALANCED" "LOW"} statuses))

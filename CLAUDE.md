@@ -7,6 +7,7 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - `make run`: dashboard on http://127.0.0.1:8081/, syncs on start and every 2 h (8080 is the installed app's port)
 - `make offline`: port 8090, no sync · `make watch`: shadow-cljs watch (reload the page) · `make build`: `npm run release`
 - `make test`: `clojure -M:test` (cognitect test-runner; one ns: `clojure -M:test -n coach.plan-test`)
+- `make lint`: clj-kondo over src + test (`.clj-kondo/config.edn`); keep it at 0 warnings
 - `make app`: frontend release + `clojure -T:build uber` → target/garmin-coach.jar (installer/)
 - `make sync` / `make status` (coach.sync CLI) · `make backup` / `backups` / `restore FILE=…` (coach.backup CLI)
 - Data folder: `$COACH_DATA_DIR`, else config.edn, else data/ (coach.paths)

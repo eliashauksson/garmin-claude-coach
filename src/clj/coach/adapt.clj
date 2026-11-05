@@ -2,7 +2,8 @@
   "Signals that the plan should adapt (training-principles.md: Monitoring, Load & recovery),
   computed in code from recent activities, feedback, wellness and the plan.
   A triggering signal leads to an adjustment proposal; the athlete decides."
-  (:require [coach.analysis :as analysis]
+  (:require [clojure.string :as str]
+            [coach.analysis :as analysis]
             [coach.i18n :refer [t]]
             [coach.metrics :as m]
             [coach.plan-rules :as rules]
@@ -21,7 +22,7 @@
           with status) :tsb :phase (season plan, or nil)
           :settings (the athlete's thresholds: :steady_hr :rhr_high, athlete.md: Baselines; a
           signal without its threshold is skipped)}"
-  [{:keys [today acts wellness workouts tsb phase settings]}]
+  [{:keys [today acts wellness workouts tsb settings]}]
   (let [monday    (season/monday today)
         week-acts (filter #(<= (compare monday (:date %)) 0) acts)
         planned-by-act (into {} (keep #(when (:activity_id %) [(:activity_id %) %])) workouts)
@@ -44,7 +45,7 @@
         pain       (filter #(and (pos? (or (:pain %) 0)) (>= (compare (:date %) (season/add-days today -3)) 0)) acts)
         last2      (take-last 2 wellness)
         hrv-bad    (and (= 2 (count last2))
-                        (every? #(#{"UNBALANCED" "LOW"} (some-> (:hrv_status %) clojure.string/upper-case)) last2))
+                        (every? #(#{"UNBALANCED" "LOW"} (some-> (:hrv_status %) str/upper-case)) last2))
         rhr-high   (:rhr_high settings)
         rhr-bad    (and rhr-high (= 2 (count last2)) (every? #(some-> (:rhr %) (>= rhr-high)) last2))
         this-week  (filter #(<= (compare monday (:date %)) 0 (compare (season/add-days monday 6) (:date %))) workouts)

@@ -6,7 +6,8 @@
             [coach.db :as db]
             [coach.plan :as plan]
             [coach.claude :as claude]
-            [coach.planner :as planner])
+            [coach.planner :as planner]
+            [next.jdbc])
   (:import (com.anthropic.core ObjectMappers)
            (com.anthropic.models.beta.messages BetaMessage)))
 

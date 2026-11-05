@@ -231,7 +231,7 @@
 
 (defn card
   "A bento card. :tint is a token suffix (\"green\", \"blue\"…) or nil for white."
-  [{:keys [tint flex class] :as opts} & children]
+  [{:keys [tint flex class]} & children]
   (into [:section.card {:class (remove nil? [(when tint (str "tint-" tint)) class])
                         :style (when flex {:flex flex})}]
         children))

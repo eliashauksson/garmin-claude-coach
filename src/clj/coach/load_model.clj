@@ -8,7 +8,7 @@
             [coach.epoc :as epoc]
             [coach.metrics :as m]
             [coach.readiness-score :as rs])
-  (:import (java.time Instant LocalDate)))
+  (:import (java.time Instant)))
 
 (def min-rows "Fit only with this many Garmin activities that have heart rate." 100)
 (def refit-after "Refit once this many new Garmin loads came in since the last fit." 20)

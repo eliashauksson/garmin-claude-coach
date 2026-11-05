@@ -1,0 +1,4 @@
+;; clj-kondo settings for `make lint`. Defaults otherwise.
+{:config-in-ns
+ ;; the test stubs implement only the DataSource methods each test calls
+ {coach.sync-test {:linters {:missing-protocol-method {:level :off}}}}}

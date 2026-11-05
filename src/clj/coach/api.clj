@@ -420,7 +420,7 @@
         (str proto "://" host "/api/coros/callback"))
       (str "http://127.0.0.1:" server-port "/api/coros/callback"))))
 
-(defn app-routes [ds]
+(defn app-routes []
   ["/app"
    ["" {:get (fn [_] (ok (app-status)))}]
    ["/notice" {:delete (fn [_] (reset! coach-app/notice nil) (ok (app-status)))}]
@@ -468,7 +468,7 @@
                                        (:summarising job) (assoc :summarising true)))))))}]
     (plan-routes ds)
     (athlete-routes ds)
-    (app-routes ds)
+    (app-routes)
     ["/auth"        {:get (fn [_] (ok (auth-status ds)))}]
     ;; the loopback token, handed only to a same-origin fetch from the page
     ["/token"       {:get (fn [req] (if (same-origin-fetch? req)

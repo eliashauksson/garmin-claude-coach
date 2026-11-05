@@ -1,9 +1,12 @@
 (ns coach.translate-test
-  (:require [clojure.string :as str]
+  (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is testing]]
+            [coach.ai-settings :as ai]
             [coach.athlete :as athlete]
             [coach.db :as db]
-            [coach.translate :as tr]))
+            [coach.i18n :as i18n]
+            [coach.translate :as tr]
+            [next.jdbc]))
 
 (defn- no-athlete-files
   "Keeps the tests away from the real data/athlete*.md files."
@@ -25,7 +28,7 @@
   "Stands in for coach.claude/request: \"[de] text\" etc. Records the calls."
   [calls]
   (fn [{:keys [task messages]}]
-    (let [{:keys [target_languages texts]} (clojure.data.json/read-str (second (first messages)) :key-fn keyword)]
+    (let [{:keys [target_languages texts]} (json/read-str (second (first messages)) :key-fn keyword)]
       (swap! calls conj {:task task :targets target_languages :texts texts})
       {:response {:translations (vec (for [t texts]
                                        (into {} (for [l target_languages] [(keyword l) (str "[" l "] " t)]))))}})))
@@ -39,7 +42,7 @@
 (defn- all-languages
   "Runs `f` with the Translations scope set to all languages (the default is the selected one)."
   [f]
-  (with-redefs [coach.ai-settings/for-task (constantly {:scope "all"})] (f)))
+  (with-redefs [ai/for-task (constantly {:scope "all"})] (f)))
 
 (deftest translate-once-and-store
   (all-languages
@@ -104,15 +107,15 @@
         today (str (java.time.LocalDate/now))]
     (add-workout! ds today "Easy run" "Relaxed 30 minutes on flat ground.")
     (tr/remember-source! ds "en" ["Easy run" "Relaxed 30 minutes on flat ground."])
-    (with-redefs [coach.ai-settings/for-task (constantly {:scope "selected"})]
+    (with-redefs [ai/for-task (constantly {:scope "selected"})]
       (testing "in the language the text is in: nothing to do"
         (is (zero? (tr/translate-missing! ds (fake-claude calls))))
         (is (empty? @calls)))
       (testing "after switching to French: only French is requested"
         (try
-          (reset! coach.i18n/lang "fr")
+          (reset! i18n/lang "fr")
           (is (= 2 (tr/translate-missing! ds (fake-claude calls))))
           (is (= [["fr"]] (map :targets @calls)))
           (is (= "[fr] Easy run" (tr/localize ds "fr" "Easy run")))
           (is (= "Easy run" (tr/localize ds "de" "Easy run")) "German wasn't made")
-          (finally (reset! coach.i18n/lang "en")))))))
+          (finally (reset! i18n/lang "en")))))))

@@ -1,5 +1,6 @@
 (ns coach.app-test
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [coach.app :as app]
             [coach.paths :as paths]))
@@ -49,7 +50,7 @@
     (spit f (apply str (for [i (range 1000)] (str "line " i "\n"))))
     (is (not (paths/trim-log! f 100000 1000)) "small enough: untouched")
     (is (paths/trim-log! f 5000 1000))
-    (let [lines (clojure.string/split-lines (slurp f))]
+    (let [lines (str/split-lines (slurp f))]
       (is (re-find #"older lines removed" (first lines)))
       (is (= "line 999" (last lines)) "the newest lines stay")
       (is (every? #(re-matches #"line \d+" %) (rest lines)) "whole lines only")

@@ -139,8 +139,7 @@
         plan-by (group-by :date (:workouts (get data plan-url)))
         well-by (into {} (map (juxt :date identity)) (get data well-url))
         this-monday (ui/monday today)
-        anchor  (ui/monday (get-in route [:params :week] today))
-        d1 (ui/parse-date from) d2 (ui/parse-date to)]
+        anchor  (ui/monday (get-in route [:params :week] today))]
     [:div {:style {:display "contents"}}
      [:div.page-head
       [:div.title

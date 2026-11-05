@@ -16,7 +16,8 @@
             [coach.translate :as translate]
             [coach.workout :as workout]
             [malli.core :as m]
-            [malli.error :as me])
+            [malli.error :as me]
+            [next.jdbc])
   (:import (java.time Duration LocalDate)))
 
 ;; ---------------------------------------------------------------------------
@@ -288,8 +289,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
           {:keys [response usage]} (call-claude (user-message ctx) response-schema
                                                     {:task :week_plan :ref (str "proposal " id) :cache? cache?})
           {:keys [response warnings]} (validate monday response ctx)]
-      (do (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage})
-                    (claude/translate-soon! (translate/proposal-texts ds id))))
+      (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage})
+      (claude/translate-soon! (translate/proposal-texts ds id)))
     (catch Throwable e
       (plan/fail-proposal! ds id (or (ex-message e) (str (class e)))))))
 
@@ -318,8 +319,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
  {:done (fn [ds {:keys [id monday ctx] :as data} response usage]
           (try
             (let [{:keys [response warnings]} (validate monday response ctx)]
-              (do (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage})
-                    (claude/translate-soon! (translate/proposal-texts ds id))))
+              (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage})
+              (claude/translate-soon! (translate/proposal-texts ds id)))
             (finally (next-week! ds data))))
   :fail (fn [ds {:keys [id] :as data} msg]
           (plan/fail-proposal! ds id msg)
@@ -449,8 +450,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 (defn- finish-adjustment! [ds id today scope-end in-scope ctx response usage]
   (let [{:keys [response warnings]} (validate-adjustment today scope-end response in-scope
                                                          #(plan/week-info ds %))]
-    (do (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage})
-                    (claude/translate-soon! (translate/proposal-texts ds id)))))
+    (plan/finish-proposal! ds id {:context ctx :response response :warnings warnings :usage usage})
+    (claude/translate-soon! (translate/proposal-texts ds id))))
 
 (claude/register-batch-handler!
  :adjust

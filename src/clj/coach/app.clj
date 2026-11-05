@@ -4,6 +4,7 @@
   because they replace or move the data folder (restoring a backup, moving
   the data). Those are written to config.edn as :pending and done by the
   next start, before anything opens the database."
+  (:refer-clojure :exclude [run!])
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -13,7 +14,7 @@
            (java.lang ProcessBuilder$Redirect)
            (java.net URI)
            (java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers)
-           (java.nio.file Files LinkOption StandardCopyOption)
+           (java.nio.file Files StandardCopyOption)
            (java.time Duration Instant)))
 
 (def repo "eliashauksson/garmin-claude-coach")
