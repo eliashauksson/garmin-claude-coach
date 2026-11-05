@@ -162,6 +162,10 @@
       :what (tk "Your best average heart rate, speed and power over 5 seconds, 1, 5, 20 and 60 minutes.")
       :how (tk "The best rolling average for each duration in the activity.")
       :read (tk "Shows what you did in the hardest parts.")}
+     {:id "planned-vs-actual" :name (tk "Planned vs actual") :src :app
+      :what (tk "For an activity that fulfilled a planned session: each block's target next to what you did. The coloured bars in the charts are the targets, one per block.")
+      :how (tk "The coach gives every step a target: heart rate when the point is staying in a zone, pace (min/km) when it's about a specific speed, power on rides. The blocks are laid over the activity by time from its start; each step's actual value is its average over that time (pace from the average speed). A single target value gets a small band (±2 bpm, ±5 s/km, ±5 W).")
+      :read (tk "Look at the work blocks first. Pauses and a late start shift the activity against the plan, so later blocks can be off by a few minutes.")}
      {:id "aerobic-te" :name (tk "Aerobic training effect") :src :garmin
       :what (tk "Garmin's rating from 0 to 5 of how much an activity improved your aerobic fitness.")
       :how (tk "From the activity's heart rate and your fitness level.")

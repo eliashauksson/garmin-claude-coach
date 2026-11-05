@@ -341,7 +341,11 @@
                                          (let [id (parse-long (:id path-params))]
                                            (plan/accept-all! ds id (boolean (:replace (body req))))
                                            (ok-tr ds (plan/proposal ds id)))))}]]
-   ["/workouts/:id" {:patch  (guarded (fn [{:keys [path-params] :as req}]
+   ["/workouts/:id" {:get    (fn [{:keys [path-params]}]
+                               (if-let [w (plan/workout ds (parse-long (:id path-params)))]
+                                 (ok-tr ds w)
+                                 (json-response 404 {:error "not found"})))
+                     :patch  (guarded (fn [{:keys [path-params] :as req}]
                                         (plan/update-workout! ds (parse-long (:id path-params)) (body req))
                                         (ok {:ok true})))
                      :delete (fn [{:keys [path-params]}]
@@ -524,7 +528,10 @@
                (if-let [a (analysis/activity ds id)]
                  (ok (cond-> a
                        ;; with the watch's all-day heart rate where the activity has none
-                       (= "true" (get query-params "streams")) (assoc :streams (first (analysis/stream-with-hr ds a)))))
+                       (= "true" (get query-params "streams")) (assoc :streams (first (analysis/stream-with-hr ds a)))
+                       ;; the planned session it fulfilled, in the current language
+                       true (assoc :planned (some->> (plan/planned-for-activity ds a)
+                                                     (translate/localize ds @i18n/lang)))))
                  (json-response 404 {:error "not found"}))))}]
     ["/wellness"    {:get (fn [{:keys [query-params]}]
                             (let [[from to] (date-range query-params 90)]
@@ -779,7 +786,10 @@
      (let [lang (db/get-state ds :lang)]
        (reset! i18n/lang (if (i18n/language-ids lang) lang "en")))
      ;; Claude's older texts, and any translation that failed, in every language
-     (when (planner/api-key?) (planner/translate-soon!))
+     (when (planner/api-key?)
+       (planner/translate-soon!)
+       ;; blocks for sessions planned before sessions had them (once)
+       (planner/structure-once! ds))
      (let [n (costs/import-earlier! ds)]
        (when (pos? n) (println "Imported" n "earlier Claude requests into the cost log")))
      (start-batch-poller! ds)

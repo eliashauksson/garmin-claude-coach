@@ -279,7 +279,7 @@
        (for [w workouts
              :let [c (by-id (:id w))]]
          [:div {:replicant/key (:id w) :style {:display "flex" :flex-direction "column" :gap "4px"}}
-          [:div (plan/session-chip (:session_id w)) " " [:b (:title w)]
+          [:div (plan/session-chip (:session_id w)) " " [:a.plain {:href (str "#/workouts/" (:id w))} [:b (:title w)]]
            [:span.sub (str " · " (:slot w) (when (pos? (:duration_min w)) (str " · " (:duration_min w) " min")))]]
           (when c
             [:div {:style {:display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap"}}
@@ -301,7 +301,7 @@
    (if (seq planned)
      (for [w planned]
        [:div {:replicant/key (:id w)}
-        (plan/session-chip (:session_id w)) " " [:b (:title w)]
+        (plan/session-chip (:session_id w)) " " [:a.plain {:href (str "#/workouts/" (:id w))} [:b (:title w)]]
         [:span.sub (str " · " (:slot w) (when (pos? (:duration_min w)) (str " · " (:duration_min w) " min"))
                         (when (not= "planned" (:status w)) (str " · " (t (:status w)))))]])
      [:div.sub (t "Nothing planned.")])])

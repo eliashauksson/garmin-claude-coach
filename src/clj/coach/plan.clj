@@ -74,31 +74,70 @@
                 :else w)))
           (sort-by (juxt :date :slot) workouts))))
 
+(defn parse-blocks
+  "A stored row with its JSON blocks (coach.workout) as data."
+  [row]
+  (cond-> row
+    (string? (:blocks row)) (update :blocks #(try (json/read-str % :key-fn keyword) (catch Exception _ nil)))))
+
+(defn- encode-blocks
+  "A workout as stored: blocks as JSON."
+  [w]
+  (cond-> w (coll? (:blocks w)) (update :blocks json/write-str)))
+
 (defn workouts
   "Planned workouts in [from, to] with done/missed resolved. Cancelled ones
   (removed by an accepted adjustment) are left out."
   [ds from to]
-  (with-done (db/query ds ["SELECT * FROM planned_workouts WHERE date BETWEEN ? AND ? AND status <> 'cancelled'
-                            ORDER BY date, slot" from to])
-    (db/query ds ["SELECT id, date, sport FROM activities WHERE date BETWEEN ? AND ?" from to])
-    (today)))
+  (mapv parse-blocks
+        (with-done (db/query ds ["SELECT * FROM planned_workouts WHERE date BETWEEN ? AND ? AND status <> 'cancelled'
+                                  ORDER BY date, slot" from to])
+          (db/query ds ["SELECT id, date, sport FROM activities WHERE date BETWEEN ? AND ?" from to])
+          (today))))
+
+(defn workout
+  "One planned workout with done/missed resolved (and the matched
+  :activity_id), or nil."
+  [ds id]
+  (when-let [date (:date (first (db/query ds ["SELECT date FROM planned_workouts WHERE id = ?" id])))]
+    (or (some #(when (= id (:id %)) %) (workouts ds date date))
+        ;; a cancelled one isn't in the day's list
+        (parse-blocks (first (db/query ds ["SELECT * FROM planned_workouts WHERE id = ?" id]))))))
+
+(defn planned-for-activity
+  "The planned workout an activity fulfilled (coach.plan/with-done), or nil."
+  [ds {:keys [id date]}]
+  (when date
+    (some #(when (= id (:activity_id %)) %) (workouts ds date date))))
 
 (def statuses #{"planned" "skipped" "done" "cancelled"})
 
-(def workout-cols [:date :slot :session_id :title :duration_min :distance_km :intensity :description :reason])
+(def workout-cols [:date :slot :session_id :title :duration_min :distance_km :intensity :description :reason
+                   :goal :blocks])
 
 (defn add-workout! [ds w & [proposal-id]]
-  (:id (exec! ds (into ["INSERT INTO planned_workouts (date, slot, session_id, title, duration_min, distance_km,
-                           intensity, description, reason, proposal_id, created_at, updated_at)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id"]
-                       (concat (map w workout-cols) [proposal-id (now) (now)])))))
+  (let [w (encode-blocks w)]
+    (:id (exec! ds (into ["INSERT INTO planned_workouts (date, slot, session_id, title, duration_min, distance_km,
+                             intensity, description, reason, goal, blocks, proposal_id, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id"]
+                         (concat (map w workout-cols) [proposal-id (now) (now)]))))))
+
+(defn set-structure!
+  "Adds goal and blocks to a workout that has no blocks yet (the one-time
+  backfill, coach.planner/structure!). Returns whether it was set."
+  [ds id goal blocks]
+  (pos? (:next.jdbc/update-count
+         (jdbc/execute-one! ds ["UPDATE planned_workouts SET goal = ?, blocks = ?, updated_at = ?
+                                 WHERE id = ? AND blocks IS NULL"
+                                goal (json/write-str (vec blocks)) (now) id]))))
 
 (defn update-workout!
   "Edits a planned workout; :status may be planned/skipped/done/cancelled."
   [ds id changes]
   (when (and (:status changes) (not (statuses (:status changes))))
     (throw (ex-info "Unknown status" {:status (:status changes)})))
-  (let [cols (filter #(contains? changes %) (conj workout-cols :status))]
+  (let [changes (encode-blocks changes)
+        cols    (filter #(contains? changes %) (conj workout-cols :status))]
     (when (seq cols)
       (jdbc/execute! ds (into [(str "UPDATE planned_workouts SET "
                                     (clojure.string/join ", " (map #(str (name %) " = ?") cols))
@@ -145,9 +184,9 @@
                                         (json/write-str warnings) (json/write-str usage) (now) id])))
      (doseq [[i w] (map-indexed vector (or (:changes response) (:workouts response)))]
       (jdbc/execute! tx (into ["INSERT INTO proposal_items (proposal_id, idx, date, slot, session_id, title,
-                                  duration_min, distance_km, intensity, description, reason, op, target_id)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"]
-                              (concat [id i] (map w workout-cols)
+                                  duration_min, distance_km, intensity, description, reason, goal, blocks, op, target_id)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"]
+                              (concat [id i] (map (encode-blocks w) workout-cols)
                                       [(or (:op w) "add") (when (pos? (or (:workout_id w) 0)) (:workout_id w))])))))))
 
 (defn proposal [ds id]
@@ -157,7 +196,9 @@
           targets (into {} (for [t (keep :target_id items)]
                              [t (first (db/query ds ["SELECT * FROM planned_workouts WHERE id = ?" t]))]))]
       (assoc (parse p :response :warnings :usage :signals)
-             :items (mapv #(cond-> (parse % :prev) (:target_id %) (assoc :current (targets (:target_id %)))) items)))))
+             :items (mapv #(cond-> (parse-blocks (parse % :prev))
+                             (:target_id %) (assoc :current (parse-blocks (targets (:target_id %)))))
+                          items)))))
 
 (defn open-proposals
   "Proposals that are generating or still have undecided items."

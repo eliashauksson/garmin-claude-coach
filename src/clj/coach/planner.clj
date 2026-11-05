@@ -17,6 +17,7 @@
             [coach.plan :as plan]
             [coach.plan-rules :as rules]
             [coach.season :as season]
+            [coach.workout :as workout]
             [malli.core :as m]
             [malli.error :as me])
   (:import (com.anthropic.client.okhttp AnthropicOkHttpClient)
@@ -185,6 +186,23 @@
 ;; ---------------------------------------------------------------------------
 ;; Prompt and response schema
 
+(def structure-guide
+  "How Claude writes a session's goal and blocks (coach.workout); shared by
+  the week plan, adjustments and the one-time backfill."
+  "- `goal`: 1-2 short sentences: what the session is for and what to focus on while doing it.
+- `blocks`: the session's structure in order, the athlete's watch-free guide and what the
+  recorded activity is compared with. A block has a `label` (a few words), `repeat` (1, or the
+  number of repetitions) and `steps`, each with `kind` (warmup, steady, work, recovery,
+  cooldown), `duration_s`, `target`, `from`, `to` and a short `note` (\"\" when nothing to add).
+  The steps' durations times their repeats add up to `duration_min`. Choose each step's target
+  by what matters in it: `hr` when the point is staying in a zone (easy and long running,
+  warm-ups, recoveries), `pace` when it is about a specific speed (race pace, tempo,
+  threshold, intervals), `power` for rides with a power meter, `open` when no number applies
+  (strides, hill sprints by feel, gym, hikes). Use the athlete's zones and thresholds.
+  `from`/`to` hold the range: bpm or watts as numbers in a string (\"135\"), pace as min/km
+  \"m:ss\" (\"4:20\"); one value to hold goes in both; both \"\" for open. Gym sessions
+  may have no blocks.")
+
 (def system-intro
   (str
   "You are the running coach for the athlete described in the two documents above: the general
@@ -224,6 +242,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 - `title`: a few words.
 - `intensity`: the zone with its HR range, or the load guidance for gym work.
 - `description`: one line with the session's structure (e.g. 15' warm-up, 3×10' T with 2' jog, 10' cool-down).
+" structure-guide "
 - `reason`: one short line, at most about 12 words.
 - `summary`: 2-3 sentences on the week's intent.
 - `warnings`: only what the athlete must know (readiness concerns, rule tensions, missing information), one line each.
@@ -231,6 +250,41 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 # Coaching documents
 
 "))
+
+(def step-schema
+  {"type" "object" "additionalProperties" false
+   "required" ["kind" "duration_s" "target" "from" "to" "note"]
+   "properties" {"kind" {"type" "string" "enum" workout/kinds}
+                 "duration_s" {"type" "integer"}
+                 "target" {"type" "string" "enum" workout/target-types}
+                 "from" {"type" "string"}
+                 "to" {"type" "string"}
+                 "note" {"type" "string"}}})
+
+(def blocks-schema
+  {"type" "array"
+   "items" {"type" "object" "additionalProperties" false
+            "required" ["label" "repeat" "steps"]
+            "properties" {"label" {"type" "string"}
+                          "repeat" {"type" "integer"}
+                          "steps" {"type" "array" "items" step-schema}}}})
+
+(def Blocks
+  [:vector [:map
+            [:label :string]
+            [:repeat int?]
+            [:steps [:vector [:map
+                              [:kind (into [:enum] workout/kinds)]
+                              [:duration_s int?]
+                              [:target (into [:enum] workout/target-types)]
+                              [:from :string] [:to :string] [:note :string]]]]]])
+
+(defn with-block-time
+  "A session's duration_min from its blocks, when it has some: the rule
+  checks then see the time actually planned."
+  [w]
+  (let [s (workout/total-s (:blocks w))]
+    (cond-> w (pos? s) (assoc :duration_min (Math/round (/ s 60.0))))))
 
 (def response-schema
   {"type" "object"
@@ -247,7 +301,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
     "workouts" {"type" "array"
                 "items" {"type" "object" "additionalProperties" false
                          "required" ["date" "slot" "session_id" "title" "duration_min" "distance_km"
-                                     "intensity" "description" "reason"]
+                                     "intensity" "description" "reason" "goal" "blocks"]
                          "properties" {"date" {"type" "string" "format" "date"}
                                        "slot" {"type" "string" "enum" ["AM" "PM"]}
                                        "session_id" {"type" "string" "enum" (sort rules/session-ids)}
@@ -256,7 +310,9 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                                        "distance_km" {"type" "number"}
                                        "intensity" {"type" "string"}
                                        "description" {"type" "string"}
-                                       "reason" {"type" "string"}}}}}})
+                                       "reason" {"type" "string"}
+                                       "goal" {"type" "string"}
+                                       "blocks" blocks-schema}}}}})
 
 (def Response
   [:map
@@ -272,7 +328,9 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                         [:distance_km number?]
                         [:intensity :string]
                         [:description :string]
-                        [:reason :string]]]]])
+                        [:reason :string]
+                        [:goal :string]
+                        [:blocks Blocks]]]]])
 
 (defn user-message [ctx]
   (str "Propose the sessions for the target week. Here is the athlete's current data as JSON:\n\n"
@@ -591,7 +649,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
     (throw (ex-info (str "Invalid plan from the model: " (pr-str (me/humanize err))) {:response response})))
   (let [sunday (season/add-days monday 6)
         inside #(<= (compare monday (:date %)) 0 (compare sunday (:date %)))
-        ws     (vec (filter inside (:workouts response)))
+        ws     (mapv with-block-time (filter inside (:workouts response)))
         weeks  (:last_6_weeks ctx)
         prev   {:run_min (:run_min (last weeks))
                 ;; "previous longest run" = longest of the recent weeks, not just last week
@@ -680,7 +738,9 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
    "distance_km" {"type" "number"}
    "intensity" {"type" "string"}
    "description" {"type" "string"}
-   "reason" {"type" "string"}})
+   "reason" {"type" "string"}
+   "goal" {"type" "string"}
+   "blocks" blocks-schema})
 
 (def adjust-schema
   {"type" "object"
@@ -707,7 +767,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                        [:slot [:enum "AM" "PM"]]
                        [:session_id (into [:enum] rules/session-ids)]
                        [:title :string] [:duration_min int?] [:distance_km number?]
-                       [:intensity :string] [:description :string] [:reason :string]]]]])
+                       [:intensity :string] [:description :string] [:reason :string]
+                       [:goal :string] [:blocks Blocks]]]]])
 
 (defn adapt-inputs
   "What coach.adapt/signals needs, from the database."
@@ -754,7 +815,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
         ok?      (fn [{:keys [op workout_id date]}]
                    (and (<= (compare today date) 0 (compare scope-end date))
                         (or (= op "add") (open-ids workout_id))))
-        changes  (vec (filter ok? (:changes response)))
+        changes  (mapv with-block-time (filter ok? (:changes response)))
         after    (apply-changes (filter #(#{"planned" "done"} (:status %)) in-scope) changes)
         weeks    (distinct (map #(season/monday (:date %)) changes))]
     {:response (assoc response :changes changes)
@@ -805,6 +866,73 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
         (catch Throwable e
           (plan/fail-proposal! ds id (or (ex-message e) (str (class e)))))))
     id))
+
+;; ---------------------------------------------------------------------------
+;; Structure for sessions planned before sessions had blocks (once)
+
+(def structure-schema
+  {"type" "object"
+   "additionalProperties" false
+   "required" ["workouts"]
+   "properties"
+   {"workouts" {"type" "array"
+                "items" {"type" "object" "additionalProperties" false
+                         "required" ["workout_id" "goal" "blocks"]
+                         "properties" {"workout_id" {"type" "integer"}
+                                       "goal" {"type" "string"}
+                                       "blocks" blocks-schema}}}}})
+
+(def Structure
+  [:map [:workouts [:vector [:map [:workout_id int?] [:goal :string] [:blocks Blocks]]]]])
+
+(defn structure-message [sessions]
+  (str "These sessions are already in the athlete's plan, accepted with only a one-line description. "
+       "Don't change them: for each, write its `goal` and `blocks` so they match its description, "
+       "duration and intensity exactly, using the workout_id given.\n\n"
+       structure-guide "\n\nSessions as JSON:\n\n" (json/write-str sessions)))
+
+(defn unstructured
+  "Planned sessions from `today` on that have no blocks yet."
+  [ds today]
+  (filterv #(and (= "planned" (:status %)) (nil? (:blocks %)))
+           (plan/workouts ds today "9999-12-31")))
+
+(defn structure!
+  "Asks Claude for the goal and blocks of the planned sessions that have
+  none (coach.workout). Only adds structure; the sessions stay as accepted.
+  Returns the number of sessions given a structure."
+  [ds today]
+  (let [ws (unstructured ds today)]
+    (if (empty? ws)
+      0
+      (let [{:keys [response]} (request (claude-opts (structure-message
+                                                      (mapv #(select-keys % [:id :date :session_id :title :duration_min
+                                                                             :distance_km :intensity :description :reason])
+                                                            ws))
+                                                     structure-schema {:task :structure :ref "structure"}))]
+        (when-let [err (m/explain Structure response)]
+          (throw (ex-info (str "Invalid structure from the model: " (pr-str (me/humanize err))) {:response response})))
+        (let [ids (set (map :id ws))
+              n   (count (for [{:keys [workout_id goal blocks]} (:workouts response)
+                               :when (and (ids workout_id) (plan/set-structure! ds workout_id goal blocks))]
+                           workout_id))]
+          (translate-soon! (mapcat (fn [{:keys [goal blocks]}]
+                                     (cons goal (concat (map :label blocks) (map :note (mapcat :steps blocks)))))
+                                   (:workouts response)))
+          n)))))
+
+(defn structure-once!
+  "The one-time backfill at dashboard start, in the background; marked done
+  in sync_state after it succeeds (a failure is retried at the next start)."
+  [ds]
+  (when-not (or (db/get-state ds :structure_backfill) (costs/credits-out ds))
+    (future
+      (try
+        (let [n (structure! ds (str (LocalDate/now)))]
+          (db/set-state! ds :structure_backfill (str (LocalDate/now)))
+          (when (pos? n) (println "Added blocks to" n "planned sessions")))
+        (catch Throwable e
+          (println "Session structure backfill failed:" (or (ex-message e) (class e))))))))
 
 (defn api-key? [] (try (api-key) true (catch Exception _ false)))
 

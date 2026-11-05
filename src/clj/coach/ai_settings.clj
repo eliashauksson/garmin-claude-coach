@@ -56,6 +56,9 @@
    {:id "athlete_summary" :label (tk "Athlete summary")  :model "claude-haiku-5-5" :effort "low"
     :about (tk "The short overview on the athlete card.")
     :why   (tk "Summarising a document is simple work: Haiku costs about a fortieth of Opus.")}
+   {:id "structure"       :label (tk "Session structure") :model "claude-sonnet-5-5" :effort "medium"
+    :about (tk "Blocks and goal for sessions planned before sessions had them, once.")
+    :why   (tk "Turns an accepted session's description into steps with targets; careful reading, no planning.")}
    {:id "translation"     :label (tk "Translations")    :model "claude-sonnet-5-5" :effort "low"
     :about (tk "Claude's texts in the other dashboard languages, once per result.")
     :why   (tk "Translating short texts needs good wording, not deep thought; Sonnet writes natural German and French.")}])

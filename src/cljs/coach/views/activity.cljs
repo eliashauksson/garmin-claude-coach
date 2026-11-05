@@ -3,7 +3,9 @@
             [coach.charts :as c]
             [coach.i18n :refer [t tk]]
             [coach.ui :as ui]
-            [coach.views.feedback :as feedback]))
+            [coach.views.feedback :as feedback]
+            [coach.views.structure :as st]
+            [coach.workout :as w]))
 
 (defn- rolling
   "Centered moving average over `w` samples (nils skipped), to calm GPS speed."
@@ -76,6 +78,94 @@
                                      :formatter (fn [p] (str (if (< (.-value p) 60) "<1m" (ui/hm (.-value p))) " · "
                                                              (js/Math.round (* 100 (/ (.-value p) (max 1 total)))) "%"))}}])))})))
 
+;; ---------------------------------------------------------------------------
+;; The planned session it fulfilled: planned vs actual per block
+
+(def ^:private target-titles {"hr" (tk "Heart rate vs plan") "pace" (tk "Pace vs plan") "power" (tk "Power vs plan")})
+
+(defn- target-data
+  "[t value] pairs of the stream for a target type, smoothed like the
+  stream charts (pace from 15 s speed, power over 5 s)."
+  [s target]
+  (case target
+    "hr"    (series-data (:t s) (:hr s))
+    "pace"  (series-data (:t s) (map #(when (and % (> % 1.0)) (/ 1000 %)) (rolling (:speed s) 15)))
+    "power" (series-data (:t s) (rolling (:power s) 5))
+    []))
+
+(defn- goal-chart
+  "The actual stream with a goal bar per block of this target type: the
+  block's time across, its target range up and down."
+  [target segments s]
+  (let [color (st/target-colors target)
+        segs  (filter #(and (= target (:target %)) (:low %)) segments)
+        data  (target-data s target)
+        [lo hi] (percentile-bounds data)
+        lo    (apply min (remove nil? (cons lo (map :low segs))))
+        hi    (apply max (remove nil? (cons hi (map :high segs))))
+        pace? (= "pace" target)
+        fmt   (if pace? w/pace-str #(str (js/Math.round %)))]
+    (ui/card {:flex "1 1 420px"}
+     [:div.lab (t (target-titles target)) (ui/info "planned-vs-actual")]
+     (c/echart
+      {:key (str "goal-" target) :class "short" :group "activity"
+       :option-fn
+       (fn []
+         (-> (c/base {:x-type "value" :x-fmt elapsed-fmt :y-fmt fmt :y-inverse pace?
+                      :y-min (js/Math.floor (- lo (* 0.05 (- hi lo)))) :y-max (js/Math.ceil (+ hi (* 0.05 (- hi lo))))
+                      :tooltip-fmt (fn [params]
+                                     (let [p (first params) [secs y] (js->clj (.-value p))
+                                           seg (some #(when (and (<= (:start %) secs) (< secs (:end %))) %) segments)]
+                                       (c/tooltip-rows (t "at {0}" (elapsed-fmt secs))
+                                                       [{:label (case target "hr" "bpm" "pace" "/km" "power" "W")
+                                                         :value (fmt y) :color (c/css-var color)}
+                                                        (when seg
+                                                          {:label (t "plan") :value (or (st/target-str seg) (st/kind-label (:kind seg)))})])))})
+             (update-in [:yAxis :axisLabel] assoc :showMinLabel false :showMaxLabel false)
+             (assoc :series [(assoc (c/line (t (target-titles target)) color data)
+                                    :markArea {:silent true
+                                               :itemStyle {:color (c/alpha color 0.18)}
+                                               :data (vec (for [g segs]
+                                                            [{:xAxis (:start g) :yAxis (:low g)}
+                                                             {:xAxis (:end g) :yAxis (:high g)}]))}
+                                    :markLine {:silent true :symbol "none" :label {:show false}
+                                               :lineStyle {:color (c/css-var "--text-3") :opacity 0.25 :type "solid" :width 1}
+                                               :data (vec (for [g (rest segments)] {:xAxis (:start g)}))})])))}))))
+
+(defn- planned-section
+  "The planned session (goal, profile) and, with a stream, each block's
+  target against what was done."
+  [p s]
+  (let [blocks   (:blocks p)
+        segments (w/expand blocks)
+        compared (when (seq (:t s)) (w/compare-segments segments s))]
+    (list
+     [:div {:replicant/key "planned"}
+      (ui/card {}
+               [:div.lab (t "Planned session")]
+               [:div [:a.plain {:href (str "#/workouts/" (:id p))} [:b (:title p)]]
+                (when-not (str/blank? (:goal p)) [:div.sub (:goal p)])]
+               (when (seq blocks) (st/profile blocks {:height "28px"})))]
+     (when (and (seq blocks) (seq (:t s)))
+       (into [:div.row {:replicant/key "goal-charts"}]
+             (for [target (w/targets blocks)
+                   :when (seq (target-data s target))]
+               (goal-chart target segments s))))
+     (when (seq compared)
+       [:div {:replicant/key "goal-table"}
+        (ui/card {}
+                 [:div.lab (t "Planned vs actual") (ui/info "planned-vs-actual")]
+                 (ui/table [{:label (t "Step") :render (fn [g] [:span [:span.wk-dot {:class (:kind g)}]
+                                                                (str (:label g) (when (> (:reps g) 1) (str " " (:rep g) "/" (:reps g)))
+                                                                     ;; the step's kind, when the block has several
+                                                                     (when (< 1 (count (get-in blocks [(:block g) :steps])))
+                                                                       (str " · " (st/kind-label (:kind g)))))])}
+                            {:label (t "Time") :value #(str (st/clock (:start %)) "–" (st/clock (:end %)))}
+                            {:label (t "Target") :value #(or (st/target-str %) "—")}
+                            {:label (t "Actual") :value #(or (st/value-str (:target %) (:actual %)) "—") :align :r}
+                            {:label "" :render #(or (st/verdict-pill %) "")}]
+                           compared))]))))
+
 (def peak-labels {:5 "5 s" :60 "1 min" :300 "5 min" :1200 "20 min" :3600 "60 min"})
 
 (def tints (cycle ["blue" "purple" "green" "amber" "red"]))
@@ -141,6 +231,7 @@
                               (some->> (ui/time-of (:start_time_local a)) (str " · ")))]]
         [:div {:replicant/key "tiles"} (tile-row a run?)]
         (feedback/activity-card ui-state a)
+        (when-let [p (:planned a)] (planned-section p s))
         (when (seq pts)
           [:div {:replicant/key "map"}
            (ui/card {} (c/route-map {:key (str "map-" (:id a)) :latlngs pts

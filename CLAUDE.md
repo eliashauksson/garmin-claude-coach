@@ -34,14 +34,15 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 
 ## Namespaces (src/cljs, src/cljc)
 - app: state, routing, `fetch!` of /api URLs · ui: formatters + shared components · charts: ECharts/Leaflet mount
-- views/: dashboard (start page), calendar, day, activity, feedback, load, plan, season, athlete, settings, costs, metrics (explains every metric), status (error banner)
+- views/: dashboard (start page), calendar, day, activity, feedback, load, plan, season, athlete, settings, costs, metrics (explains every metric), status (error banner), workout (a planned session's card), structure (block profile/list, planned vs actual bits)
 - cljc i18n: `t`/`tk`, language from server · i18n-de / i18n-fr: dictionaries keyed by English text
+- cljc workout: pure, a planned session's blocks (steps with hr/pace/power targets): expand, total time, compare with an activity stream
 
 ## Data flow
 garmin-mcp (via mcp, implements source/DataSource) → sync → db → analysis/metrics → overview, readiness, adapt, plan-rules
 → planner / season-plan (Claude; costs, ai-settings, translate) → plan → api → frontend (`js/fetch` in coach.app).
 coros-mcp (HTTP, coros-auth) → sync/coros! → db: new rides only, each fetched once; runs after the Garmin sync in `run-job!`, failures kept apart.
-api starts garmin-mcp via `requiring-resolve` in `run-job!`; the frontend requires only coach.i18n from cljc.
+api starts garmin-mcp via `requiring-resolve` in `run-job!`; the frontend requires coach.i18n and coach.workout from cljc.
 
 ## Where to look
 - Plan logic: planner.clj (prompt/context/Claude), plan_rules.clj, adapt.clj, readiness.clj, season_plan.clj, plan.clj; routes `/api/plan…` in api.clj

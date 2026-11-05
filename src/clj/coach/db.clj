@@ -280,7 +280,12 @@
    ["activity_feedback" "skipped" "INTEGER NOT NULL DEFAULT 0"]
    ;; our own Garmin-style training load (coach.epoc), for rides Garmin never saw
    ["activity_metrics" "load_est" "REAL"]
-   ["activity_metrics" "load_method" "TEXT"]])
+   ["activity_metrics" "load_method" "TEXT"]
+   ;; a session's purpose and its structure (coach.workout), JSON blocks
+   ["planned_workouts" "goal" "TEXT"]
+   ["planned_workouts" "blocks" "TEXT"]
+   ["proposal_items" "goal" "TEXT"]
+   ["proposal_items" "blocks" "TEXT"]])
 
 (defn- ensure-column! [ds [table column type]]
   (let [cols (set (map :name (jdbc/execute! ds [(str "PRAGMA table_info(" table ")")]

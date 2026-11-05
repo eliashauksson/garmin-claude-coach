@@ -39,7 +39,11 @@
 (defn response-texts [{:keys [summary targets warnings weeks]}]
   (concat [summary] (vals (select-keys targets [:longest_run :quality])) warnings (map :focus weeks)))
 
-(defn- workout-texts [w] ((juxt :title :description :reason :intensity) w))
+(defn- workout-texts [w]
+  (let [blocks (:blocks (plan/parse-blocks w))]
+    (concat ((juxt :title :description :reason :intensity :goal) w)
+            (map :label blocks)
+            (map :note (mapcat :steps blocks)))))
 
 (defn proposal-texts
   "The texts of one stored proposal: its summary and targets, and its sessions."

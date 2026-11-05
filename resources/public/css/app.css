@@ -52,7 +52,7 @@
   --chip-strength-bg: var(--tint-purple); --chip-strength-fg: var(--purple); --fam-strength: var(--purple);
   /* API cost tasks: categorical slots 1-5 of the dataviz reference palette,
      validated on these surfaces (light #ffffff, dark #171a21) */
-  --task-1: #2a78d6; --task-2: #eb6834; --task-3: #1baf7a; --task-4: #eda100; --task-5: #e87ba4; --task-6: #008300;
+  --task-1: #2a78d6; --task-2: #eb6834; --task-3: #1baf7a; --task-4: #eda100; --task-5: #e87ba4; --task-6: #008300; --task-7: #8a5cd0;
 }
 /* Dark theme: set by the theme toggle, or from the system setting until one is chosen (index.html, coach.app) */
 :root[data-theme="dark"] {
@@ -97,7 +97,7 @@
   --chip-hike-bg: rgba(26,122,67,.18);  --chip-hike-fg: #4cd18a;
   --chip-ski-bg: rgba(163,52,111,.18);  --chip-ski-fg: #f08cc8;
   --chip-other-bg: rgba(75,81,96,.18);  --chip-other-fg: #a3a9b5; --fam-other: #8a909c;
-  --task-1: #3987e5; --task-2: #d95926; --task-3: #199e70; --task-4: #c98500; --task-5: #d55181; --task-6: #008300;
+  --task-1: #3987e5; --task-2: #d95926; --task-3: #199e70; --task-4: #c98500; --task-5: #d55181; --task-6: #008300; --task-7: #8a5cd0;
 }
 
 * { box-sizing: border-box; }
@@ -210,6 +210,24 @@ select { font: inherit; font-size: 13px; font-weight: 600; color: var(--text); b
 .track > div { height: 10px; border-radius: 5px; }
 .stages { display: flex; gap: 4px; height: 14px; }
 .stages > div { border-radius: 7px; min-width: 4px; }
+/* a planned session's structure (views/structure.cljs): touching bars, height by kind */
+.wk-profile { display: flex; align-items: flex-end; height: 56px; border-radius: 8px; overflow: hidden; }
+.wk-profile.sm { height: 28px; border-radius: 6px; }
+.wk-profile > div { min-width: 2px; }
+.wk-profile .warmup, .wk-profile .cooldown { height: 35%; background: var(--purple-2); }
+.wk-profile .recovery { height: 25%; background: var(--fam-other); }
+.wk-profile .steady { height: 55%; background: var(--blue); }
+.wk-profile .work { height: 100%; background: var(--red); }
+.wk-blocks { display: flex; flex-direction: column; gap: 10px; }
+.wk-block { display: flex; flex-direction: column; gap: 4px; }
+.wk-step { padding-left: 16px; }
+.wk-note { padding-left: 16px; }
+.wk-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
+.wk-dot.warmup, .wk-dot.cooldown { background: var(--purple-2); }
+.wk-dot.recovery { background: var(--fam-other); }
+.wk-dot.steady { background: var(--blue); }
+.wk-dot.work { background: var(--red); }
+.wk-goal { font-size: 15px; line-height: 1.5; }
 
 /* Tables */
 table { width: 100%; border-collapse: separate; border-spacing: 0; }
@@ -311,6 +329,8 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
 /* Plan page */
 .pill.missed { background: var(--tint-red); color: var(--red); }
 a.pill { text-decoration: none; }
+a.plain { text-decoration: none; }
+a.plain:hover { text-decoration: underline; }
 .plan-row.remove .plan-what b { text-decoration: line-through; }
 .signal { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; }
 .signal .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(-1px); }

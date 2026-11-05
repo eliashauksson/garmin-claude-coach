@@ -6,7 +6,8 @@
             [coach.ui :as ui]
             [coach.views.athlete :as athlete]
             [coach.views.calendar :as cal]
-            [coach.views.season :as season]))
+            [coach.views.season :as season]
+            [coach.views.structure :as st]))
 
 (def weeks-shown "The current week and the two the coach keeps planned ahead." 3)
 
@@ -44,7 +45,7 @@
   [:div.plan-row {:replicant/key id :class status}
    [:div.plan-when (short-date date) [:span.sub (str " " slot)]]
    [:div.plan-what
-    [:div (session-chip session_id) " " [:b title]]
+    [:div (session-chip session_id) " " [:a.plain {:href (str "#/workouts/" id)} [:b title]]]
     [:div.sub (str/join " · " (remove str/blank? [(amount w) intensity]))]]
    (let [patch (fn [k label body] [:button.pill {:replicant/key k :on {:click [[:api "PATCH" (str "/api/plan/workouts/" id) body]]}} label])]
      [:div.plan-actions
@@ -105,6 +106,8 @@
          (diff-badge item existing))]
       [:div.sub (str/join " · " (remove str/blank? [(amount item) intensity]))]
       [:div description]
+      (when (seq (:blocks item)) [:div {:style {:margin "4px 0"}} (st/profile (:blocks item) {:height "28px"})])
+      (when-not (str/blank? (:goal item)) [:div.sub (:goal item)])
       [:div.sub [:i reason]]
       (when editing (edit-form id item edits monday))]
      [:div.plan-actions

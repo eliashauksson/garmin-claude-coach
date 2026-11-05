@@ -12,6 +12,7 @@
             [coach.views.status :as status]
             [coach.views.day :as day]
             [coach.views.metrics :as metrics]
+            [coach.views.workout :as workout]
             [replicant.dom :as r]))
 
 (defonce state (atom {:route {:page :dashboard} :data {} :loading #{} :errors {} :ui {}}))
@@ -33,6 +34,8 @@
                      {:page :activity :id id}
                      {:page :dashboard :params {}})
       "calendar"   {:page :calendar :params params}
+      ;; one planned session's card
+      "workouts"   (if-let [id (second segs)] {:page :workout :id id} {:page :plan :params {}})
       "plan"       {:page :plan :params params}
       "day"        {:page :day :date (second segs)}
       "settings"   {:page :settings :params params}
@@ -45,13 +48,14 @@
 (defn route-hash [{:keys [page id params]}]
   (let [qs (str/join "&" (for [[k v] params :when (some? v)]
                            (str (name k) "=" (js/encodeURIComponent v))))]
-    (str "#/" (case page :dashboard "" :activity (str "activities/" id) (name page))
+    (str "#/" (case page :dashboard "" :activity (str "activities/" id) :workout (str "workouts/" id) (name page))
          (when (seq qs) (str "?" qs)))))
 
 (defn urls [{:keys [page id] :as route}]
   (case page
     :day        [(day/url (:date route))]
     :activity   [(str "/api/activities/" id "?streams=true")]
+    :workout    [(workout/url id)]
     :calendar   (calendar/urls route)
     :plan       (plan/urls)
     :dashboard  (dashboard/urls route)
@@ -444,7 +448,7 @@
 
 (defn view [{:keys [route loading] :as s}]
   (let [page (:page route)
-        active (case page :activity :dashboard :day :calendar page)]
+        active (case page :activity :dashboard :day :calendar :workout :plan page)]
     [:div.shell
      [:nav.side {:aria-label (t "Main")}
       [:div.brand [:span.logo] "Coach"]
@@ -455,6 +459,7 @@
       (case page
         :day        (day/view s (first (urls route)) (:date route))
         :activity   (activity/view s (first (urls route)))
+        :workout    (workout/view s (first (urls route)))
         :calendar   (calendar/view s (urls route))
         :plan       (plan/view s (urls route))
         :dashboard  (dashboard/view s)

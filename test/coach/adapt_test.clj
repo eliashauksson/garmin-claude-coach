@@ -59,7 +59,8 @@
     (.deleteOnExit f)
     (doto (db/datasource (str f)) db/migrate!)))
 
-(def base-w {:slot "AM" :title "t" :duration_min 40 :distance_km 8 :intensity "E" :description "d" :reason "r"})
+(def base-w {:slot "AM" :title "t" :duration_min 40 :distance_km 8 :intensity "E" :description "d" :reason "r"
+             :goal "g" :blocks []})
 
 (deftest adjustment-flow-test
   (let [ds  (temp-ds)

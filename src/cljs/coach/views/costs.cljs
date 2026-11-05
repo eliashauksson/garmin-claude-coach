@@ -22,6 +22,7 @@
    {:id "athlete_chat"    :label (tk "Athlete chat")     :color "--task-4"}
    {:id "athlete_summary" :label (tk "Athlete summary")  :color "--task-5"}
    {:id "translation"     :label (tk "Translations")     :color "--task-6"}
+   {:id "structure"       :label (tk "Session structure") :color "--task-7"}
    ;; neutral grey: not one of the five categorical slots
    {:id "test"            :label (tk "Test calls")       :color "--fam-other"}])
 
