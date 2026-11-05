@@ -150,41 +150,10 @@
      :aerobic_te       (pos-num (get s "total_training_effect"))
      :raw              {:source "coros" :summary summary :session s}}))
 
-(def ^:private record-fields
-  "stream key -> FIT field names, first present wins."
-  {:hr      ["heart_rate"]
-   :speed   ["enhanced_speed" "speed"]
-   :alt     ["enhanced_altitude" "altitude"]
-   :dist    ["distance"]
-   :power   ["power"]
-   :cadence ["cadence"]
-   :lat     ["position_lat"]
-   :lon     ["position_long"]})
-
 (def ^:private zero-means-none
   "Channels a Coros writes as 0 when there's no sensor (no power meter, no
   HR strap): all zeros means no data, not a ride at 0 W."
   #{:hr :power :cadence})
-
-(defn- semicircles->deg [v] (when (number? v) (* v (/ 180.0 2147483648.0))))
-
-(defn records->stream
-  "Columnar stream {:t [s from start] :hr […] …} from FIT record messages.
-  Channels without any value are left out. nil if there are no records."
-  [records]
-  (let [recs (->> records (filter #(number? (get % "timestamp"))) (sort-by #(get % "timestamp")))]
-    (when (seq recs)
-      (let [t0    (get (first recs) "timestamp")
-            field (fn [rec names] (some #(let [v (get rec %)] (when (number? v) v)) names))
-            chans (into {}
-                        (for [[k names] record-fields
-                              :let [xs (mapv #(field % names) recs)
-                                    xs (if (#{:lat :lon} k) (mapv semicircles->deg xs) xs)]
-                              :when (if (zero-means-none k)
-                                      (some #(and % (pos? %)) xs)
-                                      (some some? xs))]
-                          [k xs]))]
-        (assoc chans :t (mapv #(- (get % "timestamp") t0) recs))))))
 
 ;; ---------------------------------------------------------------------------
 
@@ -256,7 +225,7 @@
                                      {:kind :coros :answer (str answer)})))
           msgs   (fit/decode (download url))]
       {:activity (activity-row summary msgs)
-       :stream   (records->stream (get msgs "record"))})))
+       :stream   (fit/records->stream (get msgs "record") {:zero-means-none zero-means-none})})))
 
 (defn start!
   "Connects to Coros's MCP server with the stored login. `delay-ms`

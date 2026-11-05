@@ -40,7 +40,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Refit
 
-(defn fit-stats [ds] (some-> (db/get-state ds :load_fit) (json/read-str :key-fn keyword)))
+(defn fit-stats [ds] (db/state-json ds :load_fit))
 
 (defn- garmin-count [ds]
   (:n (first (db/query ds ["SELECT count(*) AS n FROM activities WHERE training_load > 0"]))))

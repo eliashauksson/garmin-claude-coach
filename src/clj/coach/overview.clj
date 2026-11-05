@@ -7,8 +7,7 @@
   pure functions take plain rows so each formula can be tested on its own.
   Field names are those of the local garmin_mcp server, which curates
   Garmin's JSON (see coach.garmin-mcp)."
-  (:require [clojure.data.json :as json]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [coach.analysis :as analysis]
             [coach.athlete :as athlete]
             [coach.db :as db]
@@ -272,7 +271,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Queries
 
-(defn- raw-of [s] (some-> s (json/read-str :key-fn keyword)))
 
 (defn- latest-row
   "The newest row of `table` on or before `date`."
@@ -287,7 +285,7 @@
         needs (into {} (map (juxt :date :need_min))
                     (db/query ds ["SELECT date, need_min FROM sleep_need WHERE date BETWEEN ? AND ?"
                                   (first ds-dates) today]))]
-    (for [d ds-dates :let [row (get rows d) raw (raw-of (:raw row))]]
+    (for [d ds-dates :let [row (get rows d) raw (db/read-json (:raw row))]]
       {:date d :row row :raw raw :need (get needs d)})))
 
 (defn overview
@@ -316,7 +314,7 @@
      :heatmap   (heatmap acts)
      :weekly    (weekly acts)
      :zones     (zones acts today)
-     :status    (when st (status (raw-of (:raw st))))
+     :status    (when st (status (db/read-json (:raw st))))
      :recent    (recent acts)
      ;; each day it changed, and today's value so the line reaches today
      :vo2       (let [changed (filterv #(zero? (:carried_forward %)) vo2)
@@ -324,4 +322,4 @@
                                 (and (seq vo2) (not= (last vo2) (last changed))) (conj (last vo2)))]
                   (mapv #(select-keys % [:date :vo2]) rows))
      :race      (race (athlete/race) now (monthly preds) today)
-     :endurance (when es (endurance (:score es) (raw-of (:raw es))))}))
+     :endurance (when es (endurance (:score es) (db/read-json (:raw es))))}))

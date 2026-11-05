@@ -11,13 +11,14 @@
 
   Streams are columnar maps {:t [...] :hr [...] :speed [...] ...} with :t in
   seconds from the start; any channel may be missing or contain nils."
+  (:require [coach.season :as season])
   (:import (java.time LocalDate)
            (java.time.temporal IsoFields)))
 
 ;; ---------------------------------------------------------------------------
 ;; Small helpers
 
-(defn- mean [xs] (when (seq xs) (/ (reduce + 0.0 xs) (count xs))))
+(defn mean [xs] (when (seq xs) (/ (reduce + 0.0 xs) (count xs))))
 
 (defn- sd [xs]
   (when (> (count xs) 1)
@@ -360,7 +361,7 @@
   ([rides window-days]
    (let [rides (vec (sort-by :date (filter #(seq (:power %)) rides)))]
      (reduce (fn [acc date]
-               (let [from (str (.minusDays (LocalDate/parse date) (dec window-days)))
+               (let [from (season/add-days date (- (dec window-days)))
                      in   (filter #(<= (compare from (:date %)) 0 (compare date (:date %))) rides)
                      v    (eftp (update-vals (best-curve in) :watts))
                      cur  (:value (peek acc))]

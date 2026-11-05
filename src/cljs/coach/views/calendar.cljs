@@ -10,22 +10,12 @@
 (def weeks-before 4)
 (def weeks-after 1)
 
-(defn- iso [^js d] (.slice (.toISOString d) 0 10))
-
-(defn add-days [date n]
-  (let [d (ui/parse-date date)] (.setDate d (+ (.getDate d) n)) (iso d)))
-
-(defn monday
-  "The Monday on or before `date`."
-  [date]
-  (add-days date (- (mod (+ (.getDay (ui/parse-date date)) 6) 7))))
-
 (defn window
   "[first-day last-day mondays] shown for `route`; ?week=YYYY-MM-DD anchors it."
   [route]
-  (let [anchor  (monday (get-in route [:params :week] (ui/iso-today)))
-        mondays (mapv #(add-days anchor (* 7 %)) (range (- weeks-before) (inc weeks-after)))]
-    [(first mondays) (add-days (peek mondays) 6) mondays]))
+  (let [anchor  (ui/monday (get-in route [:params :week] (ui/iso-today)))
+        mondays (mapv #(ui/add-days anchor (* 7 %)) (range (- weeks-before) (inc weeks-after)))]
+    [(first mondays) (ui/add-days (peek mondays) 6) mondays]))
 
 (defn- min-date [a b] (if (neg? (compare a b)) a b))
 
@@ -39,8 +29,6 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- day-names [] (mapv ui/weekdays [1 2 3 4 5 6 0]))
-
-(defn- secs [a] (or (:moving_s a) (:duration_s a)))
 
 (defn- day-label [date]
   (let [d (ui/parse-date date)]
@@ -56,7 +44,7 @@
                   :style {:border-left-color (str "var(" (:color fam) ")")}}
      [:div.cal-item-name name]
      [:div.cal-item-meta
-      (str/join " · " (remove nil? [(ui/hm (secs a))
+      (str/join " · " (remove nil? [(ui/hm (ui/active-secs a))
                                     (when (and distance_m (pos? distance_m)) (str (ui/km distance_m) " km"))]))]
      (when tss [:div.cal-item-tss (str (js/Math.round tss) " TSS")])]))
 
@@ -99,13 +87,13 @@
                                                      (when (pos? distance_km) (str distance_km " km"))]))]]))
 
 (defn- week-summary [monday acts load-by-date today]
-  (let [sunday   (add-days monday 6)
+  (let [sunday   (ui/add-days monday 6)
         end      (min-date sunday today)
         future?  (pos? (compare monday today))
         sum      #(reduce + 0 (keep % acts))
         by-fam   (->> acts
                       (group-by #(:id (ui/family (:sport %))))
-                      (map (fn [[fid as]] [fid (reduce + 0 (keep secs as))])))
+                      (map (fn [[fid as]] [fid (reduce + 0 (keep ui/active-secs as))])))
         fams     (keep (fn [f] (when-let [s (some #(when (= (:id f) (first %)) (second %)) by-fam)] [f s]))
                        ui/families)
         l        (load-by-date end)
@@ -114,7 +102,7 @@
      [:div.cal-range (str (ui/day-month d1) " – " (ui/day-month d2))]
      (if (seq acts)
        (list
-        [:div.cal-total {:replicant/key "t"} (ui/hm (sum secs))]
+        [:div.cal-total {:replicant/key "t"} (ui/hm (sum ui/active-secs))]
         [:div.sub {:replicant/key "s"}
          (str/join " · " (remove nil? [(if (= 1 (count acts)) (t "1 activity") (t "{0} activities" (count acts)))
                                        (let [km (/ (sum :distance_m) 1000)] (when (pos? km) (str (js/Math.round km) " km")))
@@ -129,7 +117,7 @@
        [:div.cal-load (t "Fitness {0} · Form {1}" (js/Math.round (:ctl l)) (js/Math.round (:tsb l)))])]))
 
 (defn- week-row [monday acts-by-date plan-by-date load-by-date well-by-date today]
-  (let [days (mapv #(add-days monday %) (range 7))]
+  (let [days (mapv #(ui/add-days monday %) (range 7))]
     [:div.cal-week {:replicant/key monday}
      (week-summary monday (mapcat acts-by-date days) load-by-date today)
      (for [[i d] (map-indexed vector days)]
@@ -150,8 +138,8 @@
         load-by (into {} (map (juxt :date identity)) (get data load-url))
         plan-by (group-by :date (:workouts (get data plan-url)))
         well-by (into {} (map (juxt :date identity)) (get data well-url))
-        this-monday (monday today)
-        anchor  (monday (get-in route [:params :week] today))
+        this-monday (ui/monday today)
+        anchor  (ui/monday (get-in route [:params :week] today))
         d1 (ui/parse-date from) d2 (ui/parse-date to)]
     [:div {:style {:display "contents"}}
      [:div.page-head
@@ -161,10 +149,10 @@
       (status/auth-pill (:auth sync))
       (status/sync-button sync)
       [:div.seg
-       [:button {:on {:click [[:set-param :week (add-days anchor -28)]]}} (t "← Earlier")]
+       [:button {:on {:click [[:set-param :week (ui/add-days anchor -28)]]}} (t "← Earlier")]
        [:button {:class (when (= anchor this-monday) "on")
                  :on {:click [[:set-param :week nil]]}} (t "This week")]
-       [:button {:on {:click [[:set-param :week (add-days anchor 28)]]}} (t "Later →")]]]
+       [:button {:on {:click [[:set-param :week (ui/add-days anchor 28)]]}} (t "Later →")]]]
      (some (fn [u] (when-let [e (get errors u)] [:div.error (t "Could not load: {0}" e)])) [acts-url load-url well-url])
      [:div.card.cal
       [:div.cal-head [:div (t "Week")] (for [d (day-names)] [:div {:replicant/key d} d])]

@@ -4,14 +4,13 @@
   A triggering signal leads to an adjustment proposal; the athlete decides."
   (:require [coach.analysis :as analysis]
             [coach.i18n :refer [t]]
+            [coach.metrics :as m]
             [coach.plan-rules :as rules]
             [coach.season :as season]))
 
 (def drift-max "Long-run HR drift (decoupling, %) above which the next long run shouldn't grow (Monitoring)." 8)
 
 (defn- run? [a] (re-find #"running" (str (:sport a))))
-(defn- secs [a] (or (:moving_s a) (:duration_s a) 0))
-(defn- mean [xs] (when (seq xs) (/ (reduce + xs) (count xs))))
 
 (defn signals
   "All current signals. Each is {:key :id :severity (:info :warn :high)
@@ -28,8 +27,8 @@
         planned-by-act (into {} (keep #(when (:activity_id %) [(:activity_id %) %])) workouts)
         session-of #(:session_id (planned-by-act (:id %)))
         easy-run?  #(and (run? %) (or (some-> (session-of %) rules/sessions :easy?)
-                                      (and (nil? (session-of %)) (< (secs %) (* 75 60)))))
-        long-run?  #(and (run? %) (or (some-> (session-of %) rules/sessions :long?) (>= (secs %) (* 75 60))))
+                                      (and (nil? (session-of %)) (< (analysis/active-secs %) (* 75 60)))))
+        long-run?  #(and (run? %) (or (some-> (session-of %) rules/sessions :long?) (>= (analysis/active-secs %) (* 75 60))))
         recent     (filter #(>= (compare (:date %) (season/add-days today -7)) 0) acts)
         steady-hr  (:steady_hr settings)
         too-hard   (filter #(and steady-hr (easy-run? %) (:avg_hr %) (> (:avg_hr %) steady-hr)) week-acts)
@@ -53,7 +52,7 @@
         run-min    (fn [ws] (reduce + 0 (keep #(when (rules/run? %) (:duration_min %)) ws)))
         week-min   (run-min this-week)
         missed-min (run-min missed)
-        ef-of      (fn [from to] (mean (keep #(when (and (easy-run? %) (<= (compare from (:date %)) 0)
+        ef-of      (fn [from to] (m/mean (keep #(when (and (easy-run? %) (<= (compare from (:date %)) 0)
                                                     (neg? (compare (:date %) to)))
                                                  (:ef %))
                                              acts)))

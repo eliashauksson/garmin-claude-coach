@@ -32,3 +32,43 @@
       (persistent! @acc)
       (catch com.garmin.fit.FitRuntimeException e
         (throw (ex-info (str "Unreadable FIT file: " (ex-message e)) {:kind :fit} e))))))
+
+;; ---------------------------------------------------------------------------
+;; Record messages -> stream
+
+(def ^:private record-fields
+  "stream key -> FIT field names, first present wins."
+  {:hr      ["heart_rate"]
+   :speed   ["enhanced_speed" "speed"]
+   :alt     ["enhanced_altitude" "altitude"]
+   :dist    ["distance"]
+   :power   ["power"]
+   :cadence ["cadence"]
+   :lat     ["position_lat"]
+   :lon     ["position_long"]})
+
+(defn- semicircles->deg [v] (when (number? v) (* v (/ 180.0 2147483648.0))))
+
+(defn- number-ts [rec] (let [v (get rec "timestamp")] (when (number? v) v)))
+
+(defn records->stream
+  "Columnar stream {:t [s from start] :hr […] …} from FIT record maps
+  ({\"timestamp\" … \"heart_rate\" …}). Options: `:ts` reads a record's time
+  in seconds (default: a numeric \"timestamp\"); `:zero-means-none` channels
+  count as missing when never above 0 (no sensor, not 0 W). Channels without
+  any value are left out. nil if there are no records."
+  ([records] (records->stream records {}))
+  ([records {:keys [ts zero-means-none] :or {ts number-ts zero-means-none #{}}}]
+   (let [recs (->> records (filter ts) (sort-by ts))]
+     (when (seq recs)
+       (let [t0    (ts (first recs))
+             field (fn [rec names] (some #(let [v (get rec %)] (when (number? v) v)) names))
+             chans (into {}
+                         (for [[k names] record-fields
+                               :let [xs (mapv #(field % names) recs)
+                                     xs (if (#{:lat :lon} k) (mapv semicircles->deg xs) xs)]
+                               :when (if (zero-means-none k)
+                                       (some #(and % (pos? %)) xs)
+                                       (some some? xs))]
+                           [k xs]))]
+         (assoc chans :t (mapv #(- (ts %) t0) recs)))))))

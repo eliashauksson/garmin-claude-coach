@@ -81,10 +81,11 @@
     (is (= "other" (c/sport-name 12345)))))
 
 (deftest records->stream
-  (let [s (c/records->stream [{"timestamp" (+ t0 1) "power" 0 "heart_rate" 120 "speed" 6.0
+  (let [s (fit/records->stream [{"timestamp" (+ t0 1) "power" 0 "heart_rate" 120 "speed" 6.0
                                "position_lat" 566500000 "position_long" 97900000}
                               {"timestamp" t0 "power" 0 "heart_rate" 118 "speed" 5.0}
-                              {"timestamp" (+ t0 2) "power" 0 "cadence" 0 "speed" 6.5}])]
+                              {"timestamp" (+ t0 2) "power" 0 "cadence" 0 "speed" 6.5}]
+                               {:zero-means-none #{:power :cadence}})]
     (testing "sorted by time, t from the start"
       (is (= [0 1 2] (:t s)))
       (is (= [118 120 nil] (:hr s)))
@@ -94,7 +95,7 @@
       (is (not (contains? s :cadence))))
     (testing "positions in degrees"
       (is (< 47.48 (second (:lat s)) 47.49))))
-  (is (nil? (c/records->stream []))))
+  (is (nil? (fit/records->stream []))))
 
 (deftest fit-epoch
   (is (= 1790419085 (fit/unix-seconds t0))))

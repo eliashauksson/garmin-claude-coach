@@ -10,6 +10,8 @@
   [date]
   (str (.with (LocalDate/parse date) (TemporalAdjusters/previousOrSame DayOfWeek/MONDAY))))
 
+(defn today [] (str (LocalDate/now)))
+
 (defn add-days [date n] (str (.plusDays (LocalDate/parse date) n)))
 
 (defn days-between [a b] (.between ChronoUnit/DAYS (LocalDate/parse a) (LocalDate/parse b)))

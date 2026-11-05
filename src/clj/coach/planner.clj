@@ -116,26 +116,25 @@
 (defn- march? [a] (and (re-find #"hiking|walking" (str (:sport a)))
                        (>= (or (:moving_s a) (:duration_s a) 0) 5400)))
 (defn- gym? [a] (re-find #"strength" (str (:sport a))))
-(defn- secs [a] (or (:moving_s a) (:duration_s a) 0))
 
 (defn week-summary
   "Weekly metrics from recorded activities. Easy = runs with avg HR at or
   below the top of the athlete's Easy zone (athlete.md: Thresholds & zones); without it, no easy share."
   [monday acts]
   (let [runs (filter run-act? acts)
-        rt   (reduce + 0 (map secs runs))
+        rt   (reduce + 0 (map analysis/active-secs runs))
         easy-max (:easy_hr_max (athlete/settings))
-        easy (reduce + 0 (map secs (filter #(and easy-max (:avg_hr %) (<= (:avg_hr %) easy-max)) runs)))]
+        easy (reduce + 0 (map analysis/active-secs (filter #(and easy-max (:avg_hr %) (<= (:avg_hr %) easy-max)) runs)))]
     {:monday       monday
      :run_km       (r1 (/ (reduce + 0 (keep :distance_m runs)) 1000.0))
      :run_hours    (r1 (/ rt 3600.0))
      :run_min      (Math/round (/ rt 60.0))
-     :longest_min  (Math/round (/ (apply max 0 (map secs runs)) 60.0))
+     :longest_min  (Math/round (/ (apply max 0 (map analysis/active-secs runs)) 60.0))
      :runs         (count runs)
      :easy_pct     (when (and easy-max (pos? rt)) (Math/round (* 100.0 (/ easy rt))))
      :longest_km   (r1 (/ (apply max 0 (keep :distance_m runs)) 1000.0))
      :marches      (count (filter march? acts))
-     :march_hours  (r1 (/ (reduce + 0 (map secs (filter march? acts))) 3600.0))
+     :march_hours  (r1 (/ (reduce + 0 (map analysis/active-secs (filter march? acts))) 3600.0))
      :gym_sessions (count (filter gym? acts))
      :tss          (Math/round (double (reduce + 0 (keep :tss acts))))}))
 
@@ -163,7 +162,7 @@
      :recent_activities (vec (for [a (filter #(>= (compare (:date %) (season/add-days today -14)) 0) acts)]
                                (merge
                                 {:date (:date a) :sport (:sport a) :name (:name a)
-                                 :km (r1 (some-> (:distance_m a) (/ 1000.0))) :minutes (Math/round (/ (secs a) 60.0))
+                                 :km (r1 (some-> (:distance_m a) (/ 1000.0))) :minutes (Math/round (/ (analysis/active-secs a) 60.0))
                                  :avg_hr (some-> (:avg_hr a) Math/round) :tss (some-> (:tss a) Math/round)}
                                 ;; how it went, in the athlete's words (coach.analysis/save-feedback!)
                                 (when-let [r (analysis/effective-rpe a)] {:rpe (Math/round (double r))})

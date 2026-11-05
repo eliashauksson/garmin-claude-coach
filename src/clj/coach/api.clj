@@ -30,8 +30,7 @@
             [reitit.ring :as ring]
             [ring.adapter.jetty :as jetty]
             [ring.middleware.not-modified :refer [wrap-not-modified]]
-            [ring.middleware.params :refer [wrap-params]])
-  (:import (java.time LocalDate)))
+            [ring.middleware.params :refer [wrap-params]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Sync runs in the background; one at a time.
@@ -39,15 +38,14 @@
 (defonce sync-state (atom {:running false}))
 
 (defn- coros-last-sync [ds]
-  (try (some-> (db/get-state ds :coros_last_sync) (json/read-str :key-fn keyword))
-       (catch Throwable _ nil)))
+  (db/state-json ds :coros_last_sync))
 
 (defn- coros-paused?
   "Coros refused for its daily FIT file limit and the next day hasn't come:
   asking again would only be refused (and may count against the limit)."
   [{:keys [kind paused_until]}]
   (and (= "rate-limit" (some-> kind name)) (string? paused_until)
-       (neg? (compare (str (LocalDate/now)) paused_until))))
+       (neg? (compare (season/today) paused_until))))
 
 (defn- run-coros!
   "Syncs the Coros rides. {:ok true :new n} or {:ok false :kind :message}; a
@@ -62,7 +60,7 @@
                         (println "Coros sync failed:" (ex-message e))
                         (merge {:ok false} (sync/failure e) (select-keys (ex-data e) [:remaining]))))
             r    (cond-> r
-                   (= :rate-limit (:kind r)) (assoc :paused_until (str (.plusDays (LocalDate/now) 1))))
+                   (= :rate-limit (:kind r)) (assoc :paused_until (season/add-days (season/today) 1)))
             done (str (java.time.Instant/now))
             r    (assoc r :finished_at done :last_ok (if (:ok r) done (:last_ok prev)))]
         (try (db/set-state! ds :coros_last_sync (json/write-str r)) (catch Throwable _))
@@ -143,7 +141,7 @@
               ;; Without credits every Claude request would fail, so the check waits.
               (fn [result]
                 ;; the readiness estimate learns from Garmin's newest scores
-                (try (readiness-estimate/refit! ds (str (LocalDate/now)))
+                (try (readiness-estimate/refit! ds (season/today))
                      (catch Throwable e (println "Readiness refit failed:" (ex-message e))))
                 ;; our training load (rides Garmin never saw) learns from Garmin's newest loads
                 (try (load-model/update! ds)
@@ -213,13 +211,12 @@
   [ds status]
   (update status :summary #(when % (translate/localize ds @i18n/lang %))))
 
-(defn- today [] (str (LocalDate/now)))
-(defn- days-ago [n] (str (.minusDays (LocalDate/now) n)))
+(defn- days-ago [n] (season/add-days (season/today) (- n)))
 
 (defn- date-range
   "from/to query params with a default window ending today."
   [params default-days]
-  [(get params "from" (days-ago default-days)) (get params "to" (today))])
+  [(get params "from" (days-ago default-days)) (get params "to" (season/today))])
 
 (defn- auth-status [ds] (auth/status ds))
 
@@ -283,7 +280,7 @@
 (defn readiness-today
   "Readiness check (principles: Monitoring) for today's planned workouts."
   [ds]
-  (let [t    (today)
+  (let [t    (season/today)
         days (analysis/wellness ds (season/add-days t -1) t)
         ;; no score from Garmin this morning: the app's estimate stands in
         est  (when (and (seq days) (nil? (:readiness (last days)))) (readiness-estimate/for-date ds t))
@@ -299,30 +296,30 @@
                (let [[from to] (date-range query-params 0)]
                  (ok-tr ds {:weeks (plan/weeks ds from to)
                       :workouts (plan/workouts ds from to)
-                      :season (plan/week-info ds (today))})))}]
+                      :season (plan/week-info ds (season/today))})))}]
    ["/readiness" {:get (fn [_] (ok-tr ds (readiness-today ds)))}]
    ["/season"
-    ["" {:get    (fn [_] (ok-tr ds (season-plan/overview ds (today))))
+    ["" {:get    (fn [_] (ok-tr ds (season-plan/overview ds (season/today))))
          :post   (guarded (fn [_]
                             (planner/api-key) ; fail fast with a clear message
                             (planner/principles)
                             (season-plan/race-date!)
                             (json-response 202 {:id (season-plan/draft! ds)})))
-         :delete (guarded (fn [_] (season-plan/delete! ds (today)) (ok-tr ds (season-plan/overview ds (today)))))}]
+         :delete (guarded (fn [_] (season-plan/delete! ds (season/today)) (ok-tr ds (season-plan/overview ds (season/today)))))}]
     ["/restore" {:post (guarded (fn [req]
                                   (season-plan/restore! ds (:id (body req)))
-                                  (ok-tr ds (season-plan/overview ds (today)))))}]]
-   ["/signals"   {:get (fn [_] (ok (adapt/signals (planner/adapt-inputs ds (today)))))}]
+                                  (ok-tr ds (season-plan/overview ds (season/today)))))}]]
+   ["/signals"   {:get (fn [_] (ok (adapt/signals (planner/adapt-inputs ds (season/today)))))}]
    ["/adjust"    {:post (guarded (fn [req]
                                    (planner/api-key)
                                    (planner/principles) ; fails without athlete info
                                    (let [note (not-empty (:note (body req)))
-                                         sigs (filter :trigger? (adapt/signals (planner/adapt-inputs ds (today))))]
+                                         sigs (filter :trigger? (adapt/signals (planner/adapt-inputs ds (season/today))))]
                                      (json-response 202 {:id (planner/propose-adjustment! ds sigs note)}))))}]
    ["/open"      {:get (fn [_] (ok (plan/open-proposals ds)))}]
    ["/proposals"
     ["" {:get  (fn [{:keys [query-params]}]
-                 (ok-tr ds (plan/latest-proposal ds (season/monday (get query-params "monday" (today)))
+                 (ok-tr ds (plan/latest-proposal ds (season/monday (get query-params "monday" (season/today)))
                                            (get query-params "kind" "week"))))
          :post (guarded (fn [req]
                           (planner/api-key) ; fail fast with a clear message
@@ -456,11 +453,11 @@
                                                   ;; the app's own score when Garmin has none
                                                   :readiness_estimate (readiness-estimate/for-date ds date))
                                      ;; suggestions for today's sessions, from this morning's readiness
-                                     (= date (today)) (assoc :readiness_check (readiness-today ds)))))))}]
+                                     (= date (season/today)) (assoc :readiness_check (readiness-today ds)))))))}]
     ;; the dashboard's coach overview (coach-dashboard-spec.md)
     ["/overview"    {:get (guarded
                            (fn [{:keys [query-params]}]
-                             (let [date (get query-params "date" (today))]
+                             (let [date (get query-params "date" (season/today))]
                                (when-not (re-matches #"\d{4}-\d{2}-\d{2}" date)
                                  (throw (ex-info (str "Not a date: " date) {})))
                                ;; the goal time and race legs come from the athlete summary:
@@ -517,7 +514,7 @@
                               (ok (analysis/activities ds {:sport sport :from from :to to
                                                            :limit (some-> limit parse-long)}))))}]
     ;; recent activities waiting for "How did it go?"
-    ["/feedback/due" {:get (fn [{:keys [query-params]}] (ok (analysis/feedback-due ds (get query-params "date" (today)))))}]
+    ["/feedback/due" {:get (fn [{:keys [query-params]}] (ok (analysis/feedback-due ds (get query-params "date" (season/today)))))}]
     ["/activities/:id/feedback"
      {:put (guarded (fn [{:keys [path-params] :as req}]
                       (analysis/save-feedback! ds (parse-long (:id path-params)) (body req))
@@ -543,7 +540,7 @@
                             (let [[from to] (date-range query-params 180)]
                               (ok (analysis/volume ds from to))))}]
     ;; wrapped, so "no ride with power" (nil) isn't mistaken for "not loaded yet"
-    ["/cycling-power" {:get (fn [_] (ok {:power (analysis/cycling-power ds (today))}))}]
+    ["/cycling-power" {:get (fn [_] (ok {:power (analysis/cycling-power ds (season/today))}))}]
     ["/thresholds"  {:get (fn [_] (ok (db/thresholds ds)))}]
     ["/ai-settings"
      ["" {:get    (fn [_] (ok (ai/overview ds)))

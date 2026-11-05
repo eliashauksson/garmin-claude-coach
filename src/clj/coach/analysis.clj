@@ -6,8 +6,8 @@
             [clojure.string :as str]
             [coach.db :as db]
             [coach.epoc :as epoc]
-            [coach.metrics :as m])
-  (:import (java.time LocalDate)))
+            [coach.metrics :as m]
+            [coach.season :as season]))
 
 ;; ---------------------------------------------------------------------------
 ;; Thresholds
@@ -66,17 +66,15 @@
         median (let [v (vec (sort (vals by)))] (when (seq v) (v (quot (count v) 2))))]
     (fn [date] (or (by date) median 50))))
 
-(defn- state-json [ds k] (some-> (db/get-state ds k) (json/read-str :key-fn keyword)))
-
 (defn load-params
   "coach.epoc constants: the last fit (coach.load-model), else the defaults."
   [ds]
-  (merge epoc/defaults (state-json ds :load_params)))
+  (merge epoc/defaults (db/state-json ds :load_params)))
 
 (defn power-cal
   "coach.epoc power calibration [a b], nil until enough rides have both."
   [ds]
-  (state-json ds :power_cal))
+  (db/state-json ds :power_cal))
 
 (defn stream-with-hr
   "The activity's stream, and where its heart rate comes from: \"watch\"
@@ -87,7 +85,7 @@
   (let [stream (db/load-stream ds id)]
     (if (or (nil? stream) (m/has-hr? stream) (not (string? start_time_local)) (< (count start_time_local) 19))
       [stream nil]
-      (let [next-day (str (.plusDays (LocalDate/parse date) 1))
+      (let [next-day (season/add-days date 1)
             filled   (m/watch-hr stream start_time_local
                                  [(:hr (db/load-intraday ds date)) (:hr (db/load-intraday ds next-day))])]
         (if filled [filled "watch"] [stream nil])))))
@@ -185,7 +183,7 @@
   [ds today]
   (let [rides (bike-power-rides ds)]
     (when (seq rides)
-      (let [day    (fn [n] (str (.minusDays (LocalDate/parse today) n)))
+      (let [day    (fn [n] (season/add-days today (- n)))
             within (fn [from to] (filter #(<= (compare from (:date %)) 0 (compare to (:date %))) rides))
             recent (within (day (dec m/eftp-window-days)) today)
             th     (thresholds-at (db/thresholds ds) today)
@@ -230,7 +228,7 @@
   "Activities from the last `feedback-days` days (today included) with no
   feedback yet and not skipped, newest first: the \"How did it go?\" list."
   [ds today]
-  (->> (activities ds {:from (str (.minusDays (LocalDate/parse today) (dec feedback-days))) :to today})
+  (->> (activities ds {:from (season/add-days today (- (dec feedback-days))) :to today})
        (filter #(nil? (:feedback_at %)))
        (mapv #(select-keys % [:id :date :start_time_local :sport :name :distance_m :duration_s :moving_s
                               :avg_hr :tss :garmin_rpe]))))
@@ -257,6 +255,11 @@
    FROM activities a
    LEFT JOIN activity_metrics m ON m.activity_id = a.id
    LEFT JOIN activity_feedback f ON f.activity_id = a.id")
+
+(defn active-secs
+  "An activity's moving time in seconds (its duration when unknown, else 0)."
+  [a]
+  (or (:moving_s a) (:duration_s a) 0))
 
 (defn activities
   "Activities with metrics, newest first. Filters: :sport :from :to."
@@ -286,7 +289,6 @@
                     :avg_hr (Math/round (/ (reduce + 0.0 hr) (count hr)))
                     :max_hr (apply max hr)})))))))
 
-(defn- today [] (str (LocalDate/now)))
 
 (defn pmc
   "CTL/ATL/TSB for [from, to]. Always computed from the first activity so
@@ -319,13 +321,12 @@
   "Rolling averages and baselines per wellness metric. Rows before `from`
   are included in the calculation so the first days have full windows."
   [ds from to]
-  (let [lead (str (.minusDays (LocalDate/parse from) m/baseline-days))
+  (let [lead (season/add-days from (- m/baseline-days))
         rows (wellness ds lead to)]
     (into {}
           (for [k trend-keys]
             [k (filterv #(>= (compare (:date %) from) 0) (m/trend rows k))]))))
 
-(defn- raw-of [row] (some-> (:raw row) (json/read-str :key-fn keyword)))
 
 (defn- num-or-nil [x] (when (number? x) x))
 
@@ -356,9 +357,9 @@
 (defn nights
   "The 7 nights ending `date`, oldest first."
   [ds date]
-  (let [from (str (.minusDays (LocalDate/parse date) 6))]
+  (let [from (season/add-days date -6)]
     (mapv (fn [r]
-            (let [x (day-extras (raw-of r))]
+            (let [x (day-extras (db/read-json (:raw r)))]
               {:date (:date r) :sleep_score (:sleep_score r) :sleep_s (:sleep_s r)
                :hrv_avg (:hrv_avg r) :hrv_low (:hrv_low x) :hrv_high (:hrv_high x)}))
           (db/query ds ["SELECT date, sleep_score, sleep_s, hrv_avg, raw FROM daily_wellness
@@ -371,9 +372,9 @@
   [ds date]
   (let [well (wellness ds date date)
         tr   (trends ds date date)
-        raw  (raw-of (first (db/query ds ["SELECT raw FROM daily_wellness WHERE date = ?" date])))]
+        raw  (db/read-json (:raw (first (db/query ds ["SELECT raw FROM daily_wellness WHERE date = ?" date]))))]
     {:date       date
-     :today      (today)
+     :today      (season/today)
      :wellness   (first well)
      :baselines  (into {} (for [[k v] tr] [k (dissoc (first v) :date :value)]))
      :load       (last (pmc ds date date))
@@ -383,4 +384,4 @@
      :intraday   (some-> (db/load-intraday ds date) (dissoc :date))
      ;; whether the day's detail was ever fetched (stored empty when Garmin had none)
      :intraday_saved (boolean (seq (db/query ds ["SELECT 1 FROM daily_intraday WHERE date = ?" date])))
-     :intraday_window_start ((requiring-resolve 'coach.sync/intraday-window-start) (today))}))
+     :intraday_window_start ((requiring-resolve 'coach.sync/intraday-window-start) (season/today))}))

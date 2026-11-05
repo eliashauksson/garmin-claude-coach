@@ -115,10 +115,20 @@
 
 (defn iso-today [] (let [d (js/Date.)] (.slice (.toISOString (js/Date. (- (.getTime d) (* 60000 (.getTimezoneOffset d))))) 0 10)))
 
-(defn days-ago [n]
-  (let [d (parse-date (iso-today))]
-    (.setDate d (- (.getDate d) n))
-    (.slice (.toISOString d) 0 10)))
+(defn add-days [iso n]
+  (let [d (parse-date iso)] (.setDate d (+ (.getDate d) n)) (.slice (.toISOString d) 0 10)))
+
+(defn days-ago [n] (add-days (iso-today) (- n)))
+
+(defn monday
+  "The Monday on or before `iso`."
+  [iso]
+  (add-days iso (- (mod (+ (.getDay (parse-date iso)) 6) 7))))
+
+(defn active-secs
+  "An activity's moving time in seconds (its duration when unknown)."
+  [a]
+  (or (:moving_s a) (:duration_s a)))
 
 (defn esc
   "Escape text for the (HTML) chart tooltips."

@@ -16,9 +16,6 @@
 
 (defn- day-month [iso] (ui/day-month (ui/parse-date iso)))
 
-(defn- add-days [iso n]
-  (let [d (ui/parse-date iso)] (.setDate d (+ (.getDate d) n)) (.slice (.toISOString d) 0 10)))
-
 (defn- phase-blocks
   "Consecutive weeks of the same phase, with their week numbers (1-based)."
   [weeks]
@@ -36,7 +33,7 @@
                   (let [i (.-dataIndex (aget ps 0))
                         {:keys [monday phase tss actual_tss cutback focus]} (nth weeks i)]
                     (c/tooltip-rows
-                     (t "Week {0} · {1} – {2}" (inc i) (day-month monday) (day-month (add-days monday 6)))
+                     (t "Week {0} · {1} – {2}" (inc i) (day-month monday) (day-month (ui/add-days monday 6)))
                      [{:value (str tss) :label (t "TSS planned") :color (c/css-var (phase-colors phase))}
                       {:value (some-> actual_tss str) :label (t "TSS done") :color ink}
                       {:value (t phase) :label (str focus (when cutback (str " · " (t "cutback"))))}])))]
@@ -73,7 +70,7 @@
       [:div.stat-value (str (apply min tss) (when (not= (apply min tss) (apply max tss)) (str "–" (apply max tss))))
        [:small "TSS"]]
       [:div.sub (str (if (= f l) (t "Week {0}" (:n f)) (t "Weeks {0}–{1}" (:n f) (:n l)))
-                     " · " (day-month (:monday f)) " – " (day-month (add-days (:monday l) 6)))]])])
+                     " · " (day-month (:monday f)) " – " (day-month (ui/add-days (:monday l) 6)))]])])
 
 (defn- usage-line [{:keys [model usage]}]
   (when usage

@@ -6,12 +6,11 @@
   (:require [clojure.data.json :as json]
             [coach.db :as db]
             [coach.garmin-mcp :as gm]
-            [coach.readiness-score :as rs])
-  (:import (java.time Duration Instant LocalDate LocalDateTime ZoneId ZoneOffset)))
+            [coach.readiness-score :as rs]
+            [coach.season :as season])
+  (:import (java.time Duration Instant LocalDateTime ZoneId ZoneOffset)))
 
-(defn- raw-of [s] (when s (try (json/read-str s :key-fn keyword) (catch Exception _ nil))))
 (defn- m [x] (when (map? x) x))
-(defn- add-days [date n] (str (.plusDays (LocalDate/parse date) n)))
 
 (defn- utc-time
   "\"2026-11-03T06:35:19.0\" (Garmin's UTC times) -> LocalDateTime."
@@ -37,7 +36,7 @@
   [ds date ^LocalDateTime wake-utc]
   (let [wake (-> wake-utc (.atZone ZoneOffset/UTC) (.withZoneSameInstant (ZoneId/systemDefault)) .toLocalDateTime)
         from (.minusHours wake 48)
-        vs   (for [d [(add-days date -2) (add-days date -1) date]
+        vs   (for [d [(season/add-days date -2) (season/add-days date -1) date]
                    :let [midnight (LocalDateTime/parse (str d "T00:00:00"))]
                    [minute v] (:stress (db/load-intraday ds d))
                    :when (and (number? v) (>= v 0))
@@ -51,8 +50,8 @@
   [ds date]
   (let [rows (into {} (map (juxt :date identity))
                    (db/query ds ["SELECT date, sleep_score, raw FROM daily_wellness WHERE date BETWEEN ? AND ?"
-                                 (add-days date -2) date]))
-        raw  (raw-of (:raw (rows date)))
+                                 (season/add-days date -2) date]))
+        raw  (db/read-json (:raw (rows date)))
         wake (wake-time date raw)
         hv   (m (:hrv raw))
         ;; Garmin's load where it has one, else ours (coach.epoc): rides from
@@ -63,13 +62,13 @@
                                   FROM activities a LEFT JOIN activity_metrics m ON m.activity_id = a.id
                                   WHERE coalesce(a.training_load, m.load_est) IS NOT NULL
                                     AND a.date BETWEEN ? AND ?"
-                                 (add-days date -61) (add-days date 1)])
+                                 (season/add-days date -61) (season/add-days date 1)])
                    :let [start (utc-time start_time_gmt)]
                    :when (and start (.isBefore start wake))]
                {:start start :end (.plusSeconds start (long (or duration_s 0))) :load (double training_load)})]
     {:date      date
      :wake      (str wake)
-     :sleep     (mapv #(:sleep_score (rows (add-days date (- %)))) [0 1 2])
+     :sleep     (mapv #(:sleep_score (rows (season/add-days date (- %)))) [0 1 2])
      :hrv_delta (when (and (number? (:weekly_avg_hrv_ms hv)) (number? (:baseline_balanced_low_ms hv)))
                   (- (:weekly_avg_hrv_ms hv) (:baseline_balanced_low_ms hv)))
      :loads     (vec (for [{:keys [start load]} acts] [(/ (hours start wake) 24.0) load]))
@@ -96,12 +95,12 @@
   "The refitted parameters, or the defaults before the first refit."
   [ds]
   (merge rs/defaults
-         (some-> (db/get-state ds :readiness_params) (json/read-str :key-fn keyword))))
+         (db/state-json ds :readiness_params)))
 
 (defn for-date
   "The rebuilt readiness for `date` when Garmin has none, else nil."
   [ds date]
-  (let [raw (raw-of (:raw (first (db/query ds ["SELECT raw FROM daily_wellness WHERE date = ?" date]))))]
+  (let [raw (db/read-json (:raw (first (db/query ds ["SELECT raw FROM daily_wellness WHERE date = ?" date]))))]
     (when (and raw (not (garmin-of raw)))
       (rs/estimate (params ds) (features ds date)))))
 
@@ -110,7 +109,7 @@
   [ds from]
   (vec (for [{:keys [date raw]} (db/query ds ["SELECT date, raw FROM daily_wellness
                                                WHERE readiness IS NOT NULL AND date >= ? ORDER BY date" from])
-             :let [g (garmin-of (raw-of raw))]
+             :let [g (garmin-of (db/read-json raw))]
              :when (= 6 (count (:factors g)))]
          {:date date :garmin g :features (features ds date)})))
 
@@ -120,7 +119,7 @@
   "Refits the parameters on the last year of Garmin's scores and keeps them
   if they match Garmin at least as well as the current ones. Returns the stats."
   [ds today]
-  (let [rows (training-rows ds (add-days today -365))]
+  (let [rows (training-rows ds (season/add-days today -365))]
     (when (>= (count rows) min-rows)
       (let [cur   (params ds)
             new   (rs/fit cur rows)
@@ -133,7 +132,7 @@
         (println "Readiness estimate refitted:" (rs/summary stats))
         stats))))
 
-(defn fit-stats [ds] (some-> (db/get-state ds :readiness_fit) (json/read-str :key-fn keyword)))
+(defn fit-stats [ds] (db/state-json ds :readiness_fit))
 
 (defn -main
   "compare [from]: Garmin's score next to the rebuilt one, per morning.
@@ -141,9 +140,9 @@
   [& [cmd from]]
   (let [ds (doto (db/datasource) db/migrate!)]
     (case (or cmd "compare")
-      "refit"   (prn (refit! ds (str (LocalDate/now))))
+      "refit"   (prn (refit! ds (season/today)))
       "compare" (let [p    (params ds)
-                      rows (training-rows ds (or from (add-days (str (LocalDate/now)) -365)))]
+                      rows (training-rows ds (or from (season/add-days (season/today) -365)))]
                   (doseq [{:keys [date garmin features]} rows
                           :let [e (rs/estimate p features)]]
                     (println date (format "Garmin %3d  rebuilt %3s  %s" (:score garmin) (or (:score e) "—")

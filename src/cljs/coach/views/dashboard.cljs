@@ -622,9 +622,6 @@
              (.setDate x (+ (.getDate x) (* 7 i)))
              (.slice (.toISOString x) 0 10))))))
 
-(defn- add-days [iso n]
-  (let [d (ui/parse-date iso)] (.setDate d (+ (.getDate d) n)) (.slice (.toISOString d) 0 10)))
-
 (defn- draw-heatmap!
   "Every day of the last 26 weeks as a square, Monday at the top."
   [cells today ^js node width first?]
@@ -638,7 +635,7 @@
         h      (+ top (* 7 (+ cell gap)))
         rects  (for [[col monday] (map-indexed vector weeks)
                      row (range 7)
-                     :let [date (add-days monday row)]
+                     :let [date (ui/add-days monday row)]
                      :when (<= (compare date today) 0)
                      :let [{:keys [load family] :as day} (get by date)
                            active (and day (pos? (or load 0)))]]

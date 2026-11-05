@@ -17,8 +17,8 @@
             [coach.db :as db]
             [coach.i18n :as i18n]
             [coach.plan :as plan]
-            [next.jdbc :as jdbc])
-  (:import (java.time LocalDate)))
+            [coach.season :as season]
+            [next.jdbc :as jdbc]))
 
 (def languages (mapv :id i18n/languages))
 
@@ -55,14 +55,14 @@
   "Claude-written texts in use now: the current season plan, the 20 newest
   proposals, sessions from two weeks ago on, the athlete overview."
   [ds]
-  (let [today (str (LocalDate/now))
+  (let [today (season/today)
         sp    (plan/latest-season-plan ds "ready")
         props (keep #(plan/proposal ds (:id %))
                     (db/query ds ["SELECT id FROM plan_proposals WHERE status <> 'failed' ORDER BY id DESC LIMIT 20"]))]
     (->> (concat (response-texts (:response sp))
                  (mapcat #(concat (response-texts (:response %)) (mapcat workout-texts (:items %))) props)
                  (mapcat workout-texts (db/query ds ["SELECT * FROM planned_workouts WHERE date >= ?"
-                                                     (str (.minusDays (LocalDate/parse today) 14))]))
+                                                     (season/add-days today -14)]))
                  (overview-texts (athlete/summary)))
          (filter translatable?)
          distinct

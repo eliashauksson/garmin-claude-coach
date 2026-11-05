@@ -11,6 +11,7 @@
             [clojure.string :as str]
             [coach.analysis :as analysis]
             [coach.db :as db]
+            [coach.season :as season]
             [coach.source :as source]
             [next.jdbc])
   (:import (java.time LocalDate LocalDateTime ZoneOffset)))
@@ -35,7 +36,6 @@
   2)
 
 (defn- d ^LocalDate [s] (LocalDate/parse s))
-(defn- today [] (str (LocalDate/now)))
 
 (defn chunks
   "Splits [start, end] (ISO dates, inclusive) into windows of at most `n` days,
@@ -102,7 +102,7 @@
                         :let [cur (current sport kind)]
                         :when (not= cur value)]
                     (db/add-threshold! ds {:sport sport :kind kind :value value :source "garmin"
-                                           :valid_from (if (nil? cur) epoch (or measured_on (today)))})))]
+                                           :valid_from (if (nil? cur) epoch (or measured_on (season/today)))})))]
     (when sex (db/set-state! ds :sex sex))
     (when weight_kg (db/set-state! ds :weight_kg weight_kg))
     (boolean (seq changed))))
@@ -280,7 +280,7 @@
 (defn incremental!
   "Syncs from shortly before the last synced date up to today."
   [src ds]
-  (let [t    (today)
+  (let [t    (season/today)
         last (db/get-state ds :synced_through)
         from (if last
                (str (.minusDays (d last) refresh-days))
@@ -440,7 +440,7 @@
     (vec
      (for [row rows
            :let [old (:id row)
-                 raw (some-> (:raw row) (json/read-str :key-fn keyword))
+                 raw (db/read-json (:raw row))
                  new (store-source-activity! ds (or (:source raw) "coros") old
                                              {:activity (-> (select-keys row db/activity-cols)
                                                             (assoc :raw raw))
@@ -464,7 +464,7 @@
   :remaining, the number of new activities not stored."
   [src ds source state-key epoch]
   (let [relinked (relink-stored! ds)
-        t      (today)
+        t      (season/today)
         last   (db/get-state ds state-key)
         from   (if last (str (.minusDays (d last) refresh-days)) epoch)
         listed (source/list-activities src from t)
@@ -510,8 +510,8 @@
   [src ds]
   (backfill! src ds)
   (when-let [from (earliest-date ds)]
-    (sync-vo2max! src ds from (today))
-    (sync-load-trend! src ds from (today)))
+    (sync-vo2max! src ds from (season/today))
+    (sync-load-trend! src ds from (season/today)))
   (sync-streams! src ds)
   (analysis/compute-metrics! ds)
   (analysis/update-eftp! ds)
@@ -536,7 +536,7 @@
   (when (:ok result) (db/set-state! ds :last_ok_sync (:finished_at result))))
 
 (defn last-result [ds]
-  (some-> (db/get-state ds :last_sync) (json/read-str :key-fn keyword)
+  (some-> (db/state-json ds :last_sync)
           (as-> r (cond-> r (:kind r) (update :kind keyword)))))
 
 (defn- run-cli-sync!
@@ -589,10 +589,10 @@
                                      (analysis/compute-metrics! ds)
                                      (analysis/update-eftp! ds))
                     "intraday"   (let [days (if n (parse-long n) 7)]
-                                   (sync-intraday! src ds (str (.minusDays (d (today)) (dec days))) (today)))
-                    "vo2max"     (sync-vo2max! src ds epoch (today))
-                    "loadtrend"  (sync-load-trend! src ds (or n epoch) (today))
-                    "overview"   (sync-overview! src ds (today))
+                                   (sync-intraday! src ds (season/add-days (season/today) (- (dec days))) (season/today)))
+                    "vo2max"     (sync-vo2max! src ds epoch (season/today))
+                    "loadtrend"  (sync-load-trend! src ds (or n epoch) (season/today))
+                    "overview"   (sync-overview! src ds (season/today))
                     "thresholds" (do (println "Changed:" (sync-thresholds! src ds))
                                      (run! prn (db/thresholds ds))))))]
         (prn (status ds))

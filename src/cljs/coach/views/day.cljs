@@ -326,12 +326,6 @@
 
 ;; ---------------------------------------------------------------------------
 
-(defn add-days [date n]
-  (let [d (ui/parse-date date)] (.setDate d (+ (.getDate d) n)) (.slice (.toISOString d) 0 10)))
-
-(defn- monday [date]
-  (add-days date (- (mod (+ (.getDay (ui/parse-date date)) 6) 7))))
-
 
 (defn view [{:keys [data errors]} url date]
   (let [d      (get data url)
@@ -355,10 +349,10 @@
        [:div.page-head
         [:div.title [:div.sub (if today? (t "Today") (ui/date-short date))] [:h1 (header-date date)]]
         [:div.seg
-         [:button {:on {:click [[:navigate (str "#/day/" (add-days date -1))]]}} (t "← Previous day")]
-         [:button {:on {:click [[:navigate (str "#/calendar?week=" (monday date))]]}} (t "Calendar")]
+         [:button {:on {:click [[:navigate (str "#/day/" (ui/add-days date -1))]]}} (t "← Previous day")]
+         [:button {:on {:click [[:navigate (str "#/calendar?week=" (ui/monday date))]]}} (t "Calendar")]
          [:button {:disabled (not (neg? (compare date today)))
-                   :on {:click [[:navigate (str "#/day/" (add-days date 1))]]}} (t "Next day →")]]]
+                   :on {:click [[:navigate (str "#/day/" (ui/add-days date 1))]]}} (t "Next day →")]]]
        (when-let [e (get errors url)] [:div.error (t "Could not load: {0}" e)])
        (when d
          (list

@@ -5,7 +5,6 @@
             [coach.i18n :refer [t]]
             [coach.ui :as ui]
             [coach.views.athlete :as athlete]
-            [coach.views.calendar :as cal]
             [coach.views.season :as season]
             [coach.views.structure :as st]))
 
@@ -17,11 +16,11 @@
 (defn- cross? [session-id] (contains? #{"HIKE" "RIDE"} session-id))
 
 (defn mondays []
-  (let [m (cal/monday (ui/iso-today))] (mapv #(cal/add-days m (* 7 %)) (range weeks-shown))))
+  (let [m (ui/monday (ui/iso-today))] (mapv #(ui/add-days m (* 7 %)) (range weeks-shown))))
 
 (defn urls []
   (let [ms (mondays)]
-    (into [(str "/api/plan?from=" (first ms) "&to=" (cal/add-days (peek ms) 6))
+    (into [(str "/api/plan?from=" (first ms) "&to=" (ui/add-days (peek ms) 6))
            "/api/plan/signals"
            (str "/api/plan/proposals?kind=adjust&monday=" (first ms))
            athlete/url
@@ -76,7 +75,7 @@
     [:div.plan-edit
      [:label (t "Day") " "
       [:select {:on {:change [(set :date)]}}
-       (for [d (map #(cal/add-days monday %) (range 7))]
+       (for [d (map #(ui/add-days monday %) (range 7))]
          [:option {:replicant/key d :value d :selected (= d (v :date))} (short-date d)])]]
      [:label (t "Slot") " "
       [:select {:on {:change [(set :slot)]}}

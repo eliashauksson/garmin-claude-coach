@@ -345,8 +345,19 @@
 (defn query [ds sqlvec]
   (jdbc/execute! ds sqlvec {:builder-fn rs/as-unqualified-lower-maps}))
 
+(defn read-json
+  "Parses JSON (a `raw` column, a state value) with keyword keys; nil for
+  nil or invalid JSON."
+  [s]
+  (when s (try (json/read-str s :key-fn keyword) (catch Exception _ nil))))
+
 (defn get-state [ds k]
   (:value (first (query ds ["SELECT value FROM sync_state WHERE key = ?" (name k)]))))
+
+(defn state-json
+  "A sync_state value stored as JSON, parsed (nil when absent or invalid)."
+  [ds k]
+  (read-json (get-state ds k)))
 
 (defn set-state! [ds k v]
   (jdbc/execute! ds ["INSERT INTO sync_state (key, value) VALUES (?, ?)

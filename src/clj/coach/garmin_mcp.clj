@@ -3,6 +3,7 @@
   Read-only is enforced twice: the server only registers the tools in
   `read-tools` (GARMIN_ENABLED_TOOLS), and `call` refuses anything else."
   (:require [clojure.string :as str]
+            [coach.fit :as fit]
             [coach.mcp :as mcp]
             [coach.paths :as paths]
             [coach.source :as source])
@@ -176,41 +177,16 @@
 
 ;; Streams: FIT "record" messages -> columnar map
 
-(def ^:private record-fields
-  "stream key -> FIT field names, first present wins."
-  {:hr      ["heart_rate"]
-   :speed   ["enhanced_speed" "speed"]
-   :alt     ["enhanced_altitude" "altitude"]
-   :dist    ["distance"]
-   :power   ["power"]
-   :cadence ["cadence"]
-   :lat     ["position_lat"]
-   :lon     ["position_long"]})
-
-(defn- semicircles->deg [v] (when (number? v) (* v (/ 180.0 2147483648.0))))
-
 (defn- epoch-s [ts]
   (when (string? ts)
     (.toEpochSecond (LocalDateTime/parse ts) ZoneOffset/UTC)))
 
 (defn records->stream
-  "Columnar stream {:t [s from start] :hr [...] ...} from FIT record messages.
-  Channels with no values at all are left out. nil if there are no records."
+  "Columnar stream from garmin_mcp's FIT record messages ({:fields [{:name :value}]}),
+  see coach.fit/records->stream."
   [messages]
-  (let [recs (->> messages
-                  (map (fn [msg] (into {} (map (juxt :name :value)) (:fields msg))))
-                  (filter #(epoch-s (get % "timestamp")))
-                  (sort-by #(epoch-s (get % "timestamp"))))]
-    (when (seq recs)
-      (let [t0  (epoch-s (get (first recs) "timestamp"))
-            field (fn [rec names] (some #(let [v (get rec %)] (when (number? v) v)) names))
-            chans (into {}
-                        (for [[k names] record-fields
-                              :let [xs (mapv #(field % names) recs)
-                                    xs (if (#{:lat :lon} k) (mapv semicircles->deg xs) xs)]
-                              :when (some some? xs)]
-                          [k xs]))]
-        (assoc chans :t (mapv #(- (epoch-s (get % "timestamp")) t0) recs))))))
+  (fit/records->stream (map (fn [msg] (into {} (map (juxt :name :value)) (:fields msg))) messages)
+                       {:ts #(epoch-s (get % "timestamp"))}))
 
 (defn thresholds-from
   "Threshold rows from get_lactate_threshold and get_heart_rate_zones."
