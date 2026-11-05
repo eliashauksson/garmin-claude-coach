@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [coach.db :as db]
             [coach.plan :as plan]
+            [coach.claude :as claude]
             [coach.planner :as planner]
             [coach.translate :as translate]
             [coach.workout :as w]))
@@ -97,9 +98,9 @@
         old   (plan/add-workout! ds (assoc base :date "2099-01-13" :session_id "THR"))
         done  (plan/add-workout! ds (assoc base :date "2099-01-14" :session_id "EASY" :goal "g" :blocks []))
         sent  (atom nil)]
-    (with-redefs [planner/principles     (constantly "K")
-                  planner/translate-soon! (fn [& _])
-                  planner/request        (fn [opts]
+    (with-redefs [claude/principles     (constantly "K")
+                  claude/translate-soon! (fn [& _])
+                  claude/request        (fn [opts]
                                            (reset! sent opts)
                                            {:response {:workouts [{:workout_id old :goal "Hold threshold" :blocks threshold-blocks}
                                                                   {:workout_id done :goal "x" :blocks []}

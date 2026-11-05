@@ -22,7 +22,7 @@
     (doto (db/datasource (str f)) db/migrate!)))
 
 (defn- fake-claude
-  "Stands in for coach.planner/request: \"[de] text\" etc. Records the calls."
+  "Stands in for coach.claude/request: \"[de] text\" etc. Records the calls."
   [calls]
   (fn [{:keys [task messages]}]
     (let [{:keys [target_languages texts]} (clojure.data.json/read-str (second (first messages)) :key-fn keyword)]

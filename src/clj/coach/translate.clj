@@ -169,7 +169,7 @@ Rules:
   "Translates every text in use that lacks a wanted language (see
   wanted-languages); a text sent for the language it's written in comes back
   unchanged. Returns how many texts were sent. `request` is
-  coach.planner/request (passed in to avoid a namespace cycle)."
+  coach.claude/request (passed in to avoid a namespace cycle)."
   [ds request]
   (let [wanted (wanted-languages (:scope (ai/for-task :translation)) @i18n/lang)
         texts  (current-texts ds)

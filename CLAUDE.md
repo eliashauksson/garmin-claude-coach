@@ -26,7 +26,8 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - epoc: pure, Garmin-style training load (peak EPOC) from HR or power, acute load · load-model: its DB glue, fitted to Garmin's loads (refit every 20 new ones), power calibration, CLI `compare`; gives rides Garmin never saw (Coros) `activity_metrics.load_est`
 - plan-rules: pure checks of a week against training-principles.md (warnings only)
 - season: date helpers + week position in the season · season-plan: Claude drafts every week to race day
-- plan: storage for weeks, proposals and accepted workouts · planner: Claude week proposals, `request` (all Claude calls)
+- plan: storage for weeks, proposals and accepted workouts · planner: Claude week proposals, adjustments, session structure
+- claude: every Claude call (`request`, half-price batches), API key, shared system prompt (`knowledge`/`principles`)
 - ai-settings: model/effort/delivery per task (`tasks`, `defaults`) · costs: per-request Claude cost log, `prices`
 - translate: translates Claude's texts once into all languages (translations table)
 - athlete: athlete.md read/save/backup · athlete-chat: editing athlete.md as a chat with Claude
@@ -40,15 +41,15 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 
 ## Data flow
 garmin-mcp (via mcp, implements source/DataSource) → sync → db → analysis/metrics → overview, readiness, adapt, plan-rules
-→ planner / season-plan (Claude; costs, ai-settings, translate) → plan → api → frontend (`js/fetch` in coach.app).
+→ planner / season-plan → claude (costs, ai-settings, translate) → plan → api → frontend (`js/fetch` in coach.app).
 coros-mcp (HTTP, coros-auth) → sync/coros! → db: new rides only, each fetched once; runs after the Garmin sync in `run-job!`, failures kept apart.
 api starts garmin-mcp via `requiring-resolve` in `run-job!`; the frontend requires coach.i18n and coach.workout from cljc.
 
 ## Where to look
-- Plan logic: planner.clj (prompt/context/Claude), plan_rules.clj, adapt.clj, readiness.clj, season_plan.clj, plan.clj; routes `/api/plan…` in api.clj
+- Plan logic: planner.clj (prompt/context), claude.clj (requests, batches), plan_rules.clj, adapt.clj, readiness.clj, season_plan.clj, plan.clj; routes `/api/plan…` in api.clj
 - UI: src/cljs/coach/views/*.cljs; shared bits in ui.cljs, charts.cljs
 - i18n: wrap text in `t` (or `tk` in data), then add the de/fr entries; i18n_test checks they exist
-- AI/cost settings: ai_settings.clj (`tasks`), costs.clj (`prices`), views/costs.cljs, views/settings.cljs
+- AI/cost settings: claude.clj (requests, key), ai_settings.clj (`tasks`), costs.clj (`prices`), views/costs.cljs, views/settings.cljs
 - Auth: auth.clj (Garmin login), `/api/garmin/login|code`, coros_auth.clj + `/api/coros/login|callback`, `/api/claude/key`
 - Metrics: metrics.clj (pure) + analysis.clj
 - Metrics docs: views/metrics.cljs explains every shown metric (entries by :id); cards and tiles link there with `:info "<id>"` / `ui/info`. A new metric shown in the UI gets an entry and a link

@@ -1,5 +1,5 @@
 (ns coach.costs
-  "A log of every Claude API request (coach.planner/request writes it), with
+  "A log of every Claude API request (coach.claude/request writes it), with
   the cost of each computed when it ran, the way the Claude platform bills it:
   token counts from the response × that model's list prices.
 

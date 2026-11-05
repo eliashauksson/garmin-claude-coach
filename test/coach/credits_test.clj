@@ -3,7 +3,7 @@
             [clojure.test :refer [deftest is testing]]
             [coach.costs :as costs]
             [coach.db :as db]
-            [coach.planner :as planner])
+            [coach.claude :as claude])
   (:import (com.anthropic.errors BadRequestException UnexpectedStatusCodeException)
            (com.anthropic.core JsonValue)
            (com.anthropic.core.http Headers)))
@@ -29,18 +29,18 @@
       (.body (body "invalid_request_error" "max_tokens: too large")) (.build)))
 
 (deftest no-credits-test
-  (is (planner/no-credits? billing-402) "the typed billing_error")
-  (is (planner/no-credits? low-balance-400) "the older 400 form")
-  (is (not (planner/no-credits? other-400)))
-  (is (not (planner/no-credits? (ex-info "boom" {})))))
+  (is (claude/no-credits? billing-402) "the typed billing_error")
+  (is (claude/no-credits? low-balance-400) "the older 400 form")
+  (is (not (claude/no-credits? other-400)))
+  (is (not (claude/no-credits? (ex-info "boom" {})))))
 
 (deftest request-without-credits-test
   (let [ds (temp-ds)]
     (try
       (costs/use-db! ds)
-      (with-redefs [planner/request* (fn [_] (throw billing-402))]
+      (with-redefs [claude/request* (fn [_] (throw billing-402))]
         (let [e (is (thrown? clojure.lang.ExceptionInfo
-                             (planner/request {:system "x" :messages [[:user "y"]] :schema {} :task :week_plan})))]
+                             (claude/request {:system "x" :messages [[:user "y"]] :schema {} :task :week_plan})))]
           (testing "a clear message with the link to add funds"
             (is (= :no-credits (:type (ex-data e))))
             (is (re-find #"credits have run out" (ex-message e)))
@@ -50,8 +50,8 @@
                (first (db/query ds ["SELECT status, error_type FROM api_calls"]))))
         (is (costs/credits-out ds)))
       (testing "an unrelated failure afterwards doesn't hide it"
-        (with-redefs [planner/request* (fn [_] (throw other-400))]
-          (is (thrown? Exception (planner/request {:system "x" :messages [[:user "y"]] :schema {} :task :test}))))
+        (with-redefs [claude/request* (fn [_] (throw other-400))]
+          (is (thrown? Exception (claude/request {:system "x" :messages [[:user "y"]] :schema {} :task :test}))))
         (is (costs/credits-out ds)))
       (testing "a successful request clears it"
         (costs/log! {:task :test :model "claude-haiku-5-5" :usage {:input_tokens 10 :output_tokens 2}

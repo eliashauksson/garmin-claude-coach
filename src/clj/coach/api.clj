@@ -17,6 +17,7 @@
             [coach.load-model :as load-model]
             [coach.overview :as overview]
             [coach.plan :as plan]
+            [coach.claude :as claude]
             [coach.planner :as planner]
             [coach.readiness :as readiness]
             [coach.readiness-estimate :as readiness-estimate]
@@ -162,7 +163,7 @@
   document and a season plan."
   [ds]
   {:garmin  (auth/connected?)
-   :claude  (planner/api-key?)
+   :claude  (claude/api-key?)
    :synced  (some? (db/get-state ds :synced_through))
    :history (sync/history-complete? ds)
    :athlete (some? (athlete/content))
@@ -174,14 +175,14 @@
   "Saves `k`, then checks it with one tiny request. A key the API rejects is
   taken out again (the previous one, if any, comes back)."
   [ds k]
-  (let [prev (try (slurp planner/*key-file*) (catch Exception _ nil))]
-    (planner/save-key! k)
+  (let [prev (try (slurp claude/*key-file*) (catch Exception _ nil))]
+    (claude/save-key! k)
     (let [{:keys [ok error] :as r} (claude-check! ds)]
-      (if (and (not ok) (planner/key-rejected? error))
-        (do (if prev (spit planner/*key-file* prev) (planner/remove-key!))
+      (if (and (not ok) (claude/key-rejected? error))
+        (do (if prev (spit claude/*key-file* prev) (claude/remove-key!))
             {:ok false :error (i18n/t "Claude didn't accept that key. Check that you copied all of it, and that it isn't deleted in the Claude Console.")
-             :key (planner/key-status)})
-        (assoc r :key (planner/key-status))))))
+             :key (claude/key-status)})
+        (assoc r :key (claude/key-status))))))
 
 (defn- load-sync-state!
   "After a restart: the last recorded result, so a failure is still shown."
@@ -224,14 +225,14 @@
   "For the banner on every page: are the Claude credits out?"
   [ds]
   (when-let [out (costs/credits-out ds)]
-    (assoc out :credits_out true :billing_url planner/billing-url :message (planner/no-credits-message))))
+    (assoc out :credits_out true :billing_url claude/billing-url :message (claude/no-credits-message))))
 
 (defn- claude-check!
   "After the athlete adds funds: one tiny request on the cheapest model
   (about $0.00003) to see whether Claude answers again."
   [ds]
   (try
-    (planner/request {:system "You test an API connection. Answer briefly."
+    (claude/request {:system "You test an API connection. Answer briefly."
                       :messages [[:user "Reply with the word ok."]]
                       :schema {"type" "object" "properties" {"reply" {"type" "string"}}
                                "required" ["reply"] "additionalProperties" false}
@@ -301,8 +302,8 @@
    ["/season"
     ["" {:get    (fn [_] (ok-tr ds (season-plan/overview ds (season/today))))
          :post   (guarded (fn [_]
-                            (planner/api-key) ; fail fast with a clear message
-                            (planner/principles)
+                            (claude/api-key) ; fail fast with a clear message
+                            (claude/principles)
                             (season-plan/race-date!)
                             (json-response 202 {:id (season-plan/draft! ds)})))
          :delete (guarded (fn [_] (season-plan/delete! ds (season/today)) (ok-tr ds (season-plan/overview ds (season/today)))))}]
@@ -311,8 +312,8 @@
                                   (ok-tr ds (season-plan/overview ds (season/today)))))}]]
    ["/signals"   {:get (fn [_] (ok (adapt/signals (planner/adapt-inputs ds (season/today)))))}]
    ["/adjust"    {:post (guarded (fn [req]
-                                   (planner/api-key)
-                                   (planner/principles) ; fails without athlete info
+                                   (claude/api-key)
+                                   (claude/principles) ; fails without athlete info
                                    (let [note (not-empty (:note (body req)))
                                          sigs (filter :trigger? (adapt/signals (planner/adapt-inputs ds (season/today))))]
                                      (json-response 202 {:id (planner/propose-adjustment! ds sigs note)}))))}]
@@ -322,8 +323,8 @@
                  (ok-tr ds (plan/latest-proposal ds (season/monday (get query-params "monday" (season/today)))
                                            (get query-params "kind" "week"))))
          :post (guarded (fn [req]
-                          (planner/api-key) ; fail fast with a clear message
-                          (planner/principles)
+                          (claude/api-key) ; fail fast with a clear message
+                          (claude/principles)
                           (json-response 202 {:id (planner/propose! ds (:monday (body req)))})))}]
     ["/:id" {:get (fn [{:keys [path-params]}]
                     (if-let [p (plan/proposal ds (parse-long (:id path-params)))]
@@ -352,21 +353,21 @@
 (defn athlete-routes [ds]
   ["/athlete"
    ["" {:get    (fn [_] (ok (athlete-tr ds (merge (athlete/status)
-                                       (when (planner/api-key?) (athlete-chat/ensure-summary!))))))
+                                       (when (claude/api-key?) (athlete-chat/ensure-summary!))))))
         :put    (guarded (fn [req]
                            (let [{:keys [content summary source]} (body req)]
                              (athlete/save! content summary source)
-                             (when summary (planner/translate-soon! (translate/overview-texts summary))) ; the chat's new overview
+                             (when summary (claude/translate-soon! (translate/overview-texts summary))) ; the chat's new overview
                              (ok (athlete-tr ds (athlete/status))))))
         :delete (guarded (fn [_] (athlete/delete!) (ok (athlete/status))))}]
    ["/chat"    {:post (guarded (fn [req]
-                                 (planner/api-key)
+                                 (claude/api-key)
                                  (try (ok (athlete-chat/chat (:messages (body req))))
                                       (catch clojure.lang.ExceptionInfo e (throw e))
                                       (catch Exception e
                                         (json-response 502 {:error (str "Claude request failed: " (ex-message e))})))))}]
    ["/summary" {:post (guarded (fn [_]
-                                 (planner/api-key)
+                                 (claude/api-key)
                                  (swap! athlete-chat/summary-job assoc :failed nil) ; manual retry
                                  (athlete-chat/summarise!)
                                  (ok (athlete/status))))}]
@@ -462,7 +463,7 @@
                                  (throw (ex-info (str "Not a date: " date) {})))
                                ;; the goal time and race legs come from the athlete summary:
                                ;; an older summary without them is rewritten in the background
-                               (let [job (when (planner/api-key?) (athlete-chat/ensure-summary!))]
+                               (let [job (when (claude/api-key?) (athlete-chat/ensure-summary!))]
                                  (ok (cond-> (overview/overview ds date)
                                        (:summarising job) (assoc :summarising true)))))))}]
     (plan-routes ds)
@@ -552,10 +553,10 @@
                             (ok (costs/overview ds (get query-params "from"))))}]
     ["/claude/check" {:post (fn [_] (ok (claude-check! ds)))}]
     ;; the Claude API key: saved in ~/.config/coach/anthropic-key, never sent back
-    ["/claude/key"   {:get    (fn [_] (ok (planner/key-status)))
+    ["/claude/key"   {:get    (fn [_] (ok (claude/key-status)))
                       :put    (guarded (fn [req] (ok (claude-key-saved! ds (:key (body req))))))
-                      :delete (fn [_] (ok (planner/remove-key!)))}]
-    ["/claude/test"  {:post (fn [_] (ok (assoc (claude-check! ds) :key (planner/key-status))))}]
+                      :delete (fn [_] (ok (claude/remove-key!)))}]
+    ["/claude/test"  {:post (fn [_] (ok (assoc (claude-check! ds) :key (claude/key-status))))}]
     ;; everything before the first sync, in the background
     ["/history"      {:post (fn [_] (json-response 202 (run-history! ds)))}]
     ;; the language of the dashboard, the server's messages and what Claude writes
@@ -567,7 +568,7 @@
                                        (db/set-state! ds :lang lang)
                                        (reset! i18n/lang lang)
                                        ;; with "selected language only", fill in the new language
-                                       (planner/translate-soon!)
+                                       (claude/translate-soon!)
                                        (ok {:lang lang}))))}]
     ["/sync"        {:get  (fn [_] (ok (assoc @sync-state :auth (auth-status ds) :claude (claude-status ds)
                                           :coros (coros-status ds)
@@ -725,7 +726,7 @@
   results that came in while the dashboard was off)."
   [ds]
   (let [ex (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
-    (.scheduleWithFixedDelay ex #(try (let [n (planner/poll-batches! ds)]
+    (.scheduleWithFixedDelay ex #(try (let [n (claude/poll-batches! ds)]
                                         (when (pos? n) (println "Collected" n "batch result(s)")))
                                       (catch Throwable e (println "Batch check failed:" (ex-message e))))
                              0 60 java.util.concurrent.TimeUnit/SECONDS)
@@ -783,8 +784,8 @@
      (let [lang (db/get-state ds :lang)]
        (reset! i18n/lang (if (i18n/language-ids lang) lang "en")))
      ;; Claude's older texts, and any translation that failed, in every language
-     (when (planner/api-key?)
-       (planner/translate-soon!)
+     (when (claude/api-key?)
+       (claude/translate-soon!)
        ;; blocks for sessions planned before sessions had them (once)
        (planner/structure-once! ds))
      (let [n (costs/import-earlier! ds)]

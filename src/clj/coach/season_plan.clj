@@ -10,6 +10,7 @@
             [coach.athlete :as athlete]
             [coach.i18n :as i18n]
             [coach.plan :as plan]
+            [coach.claude :as claude]
             [coach.planner :as planner]
             [coach.translate :as translate]
             [coach.season :as season]
@@ -129,10 +130,10 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
 (defn- finish! [ds id ctx response usage]
   (plan/finish-season-plan! ds id {:context ctx :response (validate response ctx)
                                    :warnings [] :usage usage})
-  (planner/translate-soon! (translate/response-texts response))
+  (claude/translate-soon! (translate/response-texts response))
   (planner/plan-ahead! ds))
 
-(planner/register-batch-handler!
+(claude/register-batch-handler!
  :season_plan
  {:done (fn [ds {:keys [id ctx]} response usage] (finish! ds id ctx response usage))
   :fail (fn [ds {:keys [id]} msg] (plan/fail-season-plan! ds id msg))})
@@ -147,12 +148,12 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
       (let [today  (str (LocalDate/now))
             race   (race-date!)
             batch? (ai/batch? :season_plan (or trigger :manual))
-            id     (plan/create-season-plan! ds race (season/monday today) (planner/model-for :season_plan)
+            id     (plan/create-season-plan! ds race (season/monday today) (claude/model-for :season_plan)
                                              (when batch? "batch"))]
         (future
           (try
             (let [ctx  (context ds today race)
-                  opts {:knowledge (planner/principles)
+                  opts {:knowledge (claude/principles)
                         :system    system-intro
                         :messages  [[:user (str "Draft the season plan. The athlete's data as JSON:\n\n"
                                                 (json/write-str ctx))]]
@@ -160,8 +161,8 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
                         :task      :season_plan
                         :ref       (str "season plan " id)}]
               (if batch?
-                (planner/submit-batch! ds (assoc opts :data {:id id :ctx ctx}))
-                (let [{:keys [response usage]} (planner/request opts)]
+                (claude/submit-batch! ds (assoc opts :data {:id id :ctx ctx}))
+                (let [{:keys [response usage]} (claude/request opts)]
                   (finish! ds id ctx response usage))))
             (catch Throwable e
               (plan/fail-season-plan! ds id (or (ex-message e) (str (class e)))))))

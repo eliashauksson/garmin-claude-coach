@@ -5,7 +5,7 @@
   (:require [clojure.string :as str]
             [coach.athlete :as athlete]
             [coach.i18n :as i18n]
-            [coach.planner :as planner]
+            [coach.claude :as claude]
             [coach.translate :as translate]))
 
 (def system-intro
@@ -118,7 +118,7 @@ in short fragments, never sentences:
   [messages]
   (let [doc (athlete/content)
         {:keys [response usage]}
-        (planner/request {:knowledge (planner/knowledge doc)
+        (claude/request {:knowledge (claude/knowledge doc)
                           :system   system-intro
                           ;; the next turn of the chat reads it
                           :cache?   true
@@ -143,12 +143,12 @@ empty and `edits` must be [].")
   []
   (let [doc (or (athlete/content) (throw (ex-info (i18n/t "There is no athlete document.") {})))
         {:keys [response usage]}
-        (planner/request {:knowledge (planner/knowledge doc) :system system-intro
+        (claude/request {:knowledge (claude/knowledge doc) :system system-intro
                           :messages [[:user summary-request]]
                           :schema schema
                           :task :athlete_summary})]
     (athlete/save-summary-only! (tidy (:summary response)))
-    (planner/translate-soon! (translate/overview-texts (tidy (:summary response))))
+    (claude/translate-soon! (translate/overview-texts (tidy (:summary response))))
     {:summary (tidy (:summary response)) :usage usage}))
 
 ;; Automatic summary: started in the background when the file has none.

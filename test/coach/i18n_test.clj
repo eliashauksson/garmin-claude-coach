@@ -47,8 +47,8 @@
   (is (= "Monday, 19 October" (i18n/translate "en" "{0}, {1} {2}" ["Monday" 19 "October"]))))
 
 (deftest claude-language-test
-  (require 'coach.planner)
-  (let [with-language (resolve 'coach.planner/with-language)]
+  (require 'coach.claude)
+  (let [with-language (resolve 'coach.claude/with-language)]
     (is (= "Plan the week." (with-language "Plan the week.")) "English: unchanged")
     (try
       (reset! i18n/lang "de")
