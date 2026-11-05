@@ -302,11 +302,17 @@
           new-ids  (sync-streams! src ds)
           missing  (map :id (db/query ds ["SELECT a.id FROM activities a
                                            LEFT JOIN activity_metrics m ON m.activity_id = a.id
-                                           WHERE m.activity_id IS NULL"]))]
+                                           WHERE m.activity_id IS NULL"]))
+          ;; activities without their own heart rate borrow the watch's all-day
+          ;; heart rate, which keeps coming in for recent days: score them again
+          no-hr    (map :id (db/query ds ["SELECT a.id FROM activities a
+                                           JOIN activity_metrics m ON m.activity_id = a.id
+                                           WHERE a.avg_hr IS NULL AND (m.tss IS NULL OR a.date >= ?)"
+                                          (str (.minusDays (d t) (inc intraday-days)))]))]
       ;; new thresholds change every score; otherwise only score what's new
       (if changed?
         (analysis/compute-metrics! ds)
-        (analysis/compute-metrics! ds (distinct (concat new-ids missing))))
+        (analysis/compute-metrics! ds (distinct (concat new-ids missing no-hr))))
       (analysis/update-eftp! ds))
     :ok))
 

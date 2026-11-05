@@ -210,6 +210,47 @@
         (when (and ef1 ef2 (pos? ef1))
           (* 100.0 (/ (- ef1 ef2) ef1)))))))
 
+(defn has-hr? [stream] (boolean (some #(and (number? %) (pos? %)) (:hr stream))))
+
+(def watch-hr-max-gap-min
+  "All-day heart rate comes every ~2 minutes; a gap longer than this is
+  left empty (watch off the wrist)."
+  5)
+
+(defn watch-hr
+  "A stream without heart rate, filled from the watch's all-day heart rate:
+  `start-local` the activity's local start (\"2026-09-26T12:38:05\"),
+  `days` [[minute-of-day bpm] …] of its date and the day after. Values are
+  interpolated between the watch's samples. nil when it covers less than
+  half the activity."
+  [{:keys [t] :as stream} start-local [day0 day1]]
+  (let [pts (->> (concat (for [[m v] day0] [(double m) v]) (for [[m v] day1] [(+ 1440.0 m) v]))
+                 (filter (fn [[_ v]] (and (number? v) (pos? v))))
+                 (sort-by first)
+                 vec)
+        t0  (/ (+ (* 3600 (parse-long (subs start-local 11 13)))
+                  (* 60 (parse-long (subs start-local 14 16)))
+                  (parse-long (subs start-local 17 19)))
+               60.0)
+        n   (count pts)
+        at  (fn [m]
+              ;; index of the first point at or after minute m
+              (let [i (loop [lo 0 hi n]
+                        (if (< lo hi)
+                          (let [mid (quot (+ lo hi) 2)]
+                            (if (< (first (pts mid)) m) (recur (inc mid) hi) (recur lo mid)))
+                          lo))
+                    [ma va] (when (pos? i) (pts (dec i)))
+                    [mb vb] (when (< i n) (pts i))]
+                (cond
+                  (and ma mb (<= (- mb ma) watch-hr-max-gap-min))
+                  (if (= ma mb) vb (+ va (* (- vb va) (/ (- m ma) (- mb ma)))))
+                  (and mb (<= (- mb m) 1.0)) vb
+                  (and ma (<= (- m ma) 1.0)) va)))
+        hr  (when (pos? n) (mapv #(some-> % (/ 60.0) (+ t0) at double Math/round) t))]
+    (when (and hr (>= (count (keep identity hr)) (* 0.5 (count t))))
+      (assoc stream :hr hr))))
+
 (defn activity-metrics
   "Metrics for one activity.
   `activity`   row from the activities table (:sport, :moving_s, :duration_s, :avg_hr)

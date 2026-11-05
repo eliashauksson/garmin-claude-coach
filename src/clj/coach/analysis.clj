@@ -78,6 +78,20 @@
   [ds]
   (state-json ds :power_cal))
 
+(defn stream-with-hr
+  "The activity's stream, and where its heart rate comes from: \"watch\"
+  when the activity has none of its own (a ride recorded without a strap)
+  and the watch's all-day heart rate covers it (coach.metrics/watch-hr).
+  [stream source-or-nil]."
+  [ds {:keys [id date start_time_local]}]
+  (let [stream (db/load-stream ds id)]
+    (if (or (nil? stream) (m/has-hr? stream) (not (string? start_time_local)) (< (count start_time_local) 19))
+      [stream nil]
+      (let [next-day (str (.plusDays (LocalDate/parse date) 1))
+            filled   (m/watch-hr stream start_time_local
+                                 [(:hr (db/load-intraday ds date)) (:hr (db/load-intraday ds next-day))])]
+        (if filled [filled "watch"] [stream nil])))))
+
 (defn compute-metrics!
   "Computes and stores metrics. `ids` limits it to those activities;
   without it, every activity is (re)computed."
@@ -98,11 +112,13 @@
         ds
         (for [a batch]
           (let [th     (assoc (thresholds-at rows (:date a)) :rest_hr (rest-hr (:date a)) :sex sex)
-                stream (db/load-stream ds (:id a))]
+                [stream hr-src] (stream-with-hr ds a)
+                load   (when stream (epoc/activity-load lp cal th (= :bike (m/sport-family (:sport a))) stream))]
             (merge (m/activity-metrics a stream th)
-                   (when stream (epoc/activity-load lp cal th (= :bike (m/sport-family (:sport a))) stream))
+                   (cond-> load
+                     (and hr-src (= "hr" (:load_method load))) (assoc :load_method "hr-watch"))
                    {:activity_id (:id a)
-                    :inputs th
+                    :inputs (cond-> th hr-src (assoc :hr_source hr-src))
                     :route (route-thumb stream)})))))
      (count acts))))
 
@@ -258,9 +274,17 @@
 
 (defn activity [ds id]
   (when-let [a (first (db/query ds [(str activity-select " WHERE a.id = ?") id]))]
-    (-> (parse-json-cols a [:hr_zones_s :peaks :route])
-        (assoc :thresholds (some-> (:inputs (first (db/query ds ["SELECT inputs FROM activity_metrics WHERE activity_id = ?" id])))
-                                   (json/read-str :key-fn keyword))))))
+    (let [th (some-> (:inputs (first (db/query ds ["SELECT inputs FROM activity_metrics WHERE activity_id = ?" id])))
+                     (json/read-str :key-fn keyword))]
+      (cond-> (assoc (parse-json-cols a [:hr_zones_s :peaks :route]) :thresholds th)
+        ;; heart rate borrowed from the watch: shown like the activity's own
+        (= "watch" (:hr_source th))
+        (merge (let [[s src] (stream-with-hr ds a)
+                     hr (when src (filter number? (:hr s)))]
+                 (when (seq hr)
+                   {:hr_source "watch"
+                    :avg_hr (Math/round (/ (reduce + 0.0 hr) (count hr)))
+                    :max_hr (apply max hr)})))))))
 
 (defn- today [] (str (LocalDate/now)))
 

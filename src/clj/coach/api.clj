@@ -523,7 +523,8 @@
              (let [id (parse-long (:id path-params))]
                (if-let [a (analysis/activity ds id)]
                  (ok (cond-> a
-                       (= "true" (get query-params "streams")) (assoc :streams (db/load-stream ds id))))
+                       ;; with the watch's all-day heart rate where the activity has none
+                       (= "true" (get query-params "streams")) (assoc :streams (first (analysis/stream-with-hr ds a)))))
                  (json-response 404 {:error "not found"}))))}]
     ["/wellness"    {:get (fn [{:keys [query-params]}]
                             (let [[from to] (date-range query-params 90)]

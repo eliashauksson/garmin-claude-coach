@@ -174,3 +174,25 @@
 (deftest cycling-vo2max-test
   (is (= 50.2 (m/cycling-vo2max 300.0 75.0)) "10.8 × 4 W/kg + 7")
   (is (nil? (m/cycling-vo2max 300.0 nil))))
+
+(deftest watch-hr-test
+  (let [ride {:t (vec (range 0 600 10)) :speed (vec (repeat 60 8.0))}   ; 10 min from 12:00:00
+        day  [[718 100] [720 120] [722 140] [724 130] [726 150] [728 150] [730 110]]]
+    (testing "the watch's samples, interpolated between them"
+      (let [hr (:hr (m/watch-hr ride "2026-09-26T12:00:00" [day nil]))]
+        (is (= 60 (count hr)))
+        (is (= 120 (first hr)) "12:00 = minute 720")
+        (is (= 130 (nth hr 6)) "12:01, halfway from 120 to 140")
+        (is (= 150 (nth hr 48)) "12:08")
+        (is (= 130 (nth hr 54)) "12:09, between 150 and 110")))
+    (testing "a ride past midnight reads the next day"
+      (is (= 120 (first (:hr (m/watch-hr ride "2026-09-26T23:59:00" [[[1438 110]] [[0 130] [2 130] [4 130] [6 130] [8 130] [10 130]]]))))))
+    (testing "gaps over 5 minutes stay empty; under half covered gives nil"
+      (is (nil? (m/watch-hr ride "2026-09-26T12:00:00" [[[700 100] [740 120]] nil])))
+      (is (nil? (m/watch-hr ride "2026-09-26T12:00:00" [nil nil]))))
+    (testing "scored as hrTSS once filled"
+      (let [long-ride {:t (vec (range 0 1800 10)) :speed (vec (repeat 180 8.0))}
+            s (m/watch-hr long-ride "2026-09-26T12:00:00" [(for [mm (range 716 754 2)] [mm 140]) nil])]
+        (is (m/has-hr? s))
+        (is (not (m/has-hr? ride)))
+        (is (#{"hrTSS"} (:tss_method (m/activity-metrics {:sport "road_biking" :moving_s 1800} s thresholds))))))))

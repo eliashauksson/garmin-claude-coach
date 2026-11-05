@@ -93,7 +93,9 @@
        (tile (t "Avg pace") (ui/pace mps) "/km" (some->> (:ngp_mps a) ui/pace (str "NGP ")) (when (:ngp_mps a) "ngp"))
        (tile (t "Avg speed") (ui/kmh mps) "km/h" nil))
      (tile (t "Elevation gain") (some-> (:elev_gain_m a) js/Math.round) "m" nil)
-     (tile (t "Heart rate") (some-> (:avg_hr a) js/Math.round) "bpm" (some->> (:max_hr a) js/Math.round (t "max {0}")))
+     (tile (t "Heart rate") (some-> (:avg_hr a) js/Math.round) "bpm"
+           (not-empty (str/join " · " (remove nil? [(some->> (:max_hr a) js/Math.round (t "max {0}"))
+                                                    (when (= "watch" (:hr_source a)) (t "from the watch's all-day heart rate"))]))))
      (tile (t "Training stress") (some-> (:tss a) js/Math.round) (:tss_method a)
               (str/join " · " (remove nil? [(some->> (ui/fixed (:intensity a) 2) (str "IF "))
                                             (some-> (:tss_per_hour a) js/Math.round (str " TSS/h"))]))
@@ -111,6 +113,7 @@
              (case (:load_method a)
                "hr+power" (t "from heart rate and power")
                "power"    (t "from power")
+               "hr-watch" (t "from the watch's all-day heart rate")
                (t "from heart rate"))
              "load-estimate"))])]
     (into [:div.row]
