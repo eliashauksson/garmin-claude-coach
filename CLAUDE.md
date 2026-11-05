@@ -35,7 +35,7 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 
 ## Namespaces (src/cljs, src/cljc)
 - app: state, routing, `fetch!` of /api URLs · ui: formatters + shared components · charts: ECharts/Leaflet mount
-- views/: dashboard (start page), calendar, day, activity, feedback, load, plan, season, athlete, settings, costs, metrics (explains every metric), status (error banner), workout (a planned session's card), structure (block profile/list, planned vs actual bits)
+- views/: dashboard (start page; its sections in views/dashboard/), calendar, day, activity, feedback, load, plan, season, athlete, settings, costs, metrics (explains every metric), status (error banner), workout (a planned session's card), structure (block profile/list, planned vs actual bits)
 - cljc i18n: `t`/`tk`, language from server · i18n-de / i18n-fr: dictionaries keyed by English text
 - cljc workout: pure, a planned session's blocks (steps with hr/pace/power targets): expand, total time, compare with an activity stream
 
