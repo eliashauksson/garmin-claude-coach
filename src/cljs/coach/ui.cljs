@@ -10,7 +10,7 @@
 (defn token-qs
   "\"?token=…\" for a link the browser can't add a header to, else \"\"."
   []
-  (if-let [t @token] (str "?token=" (js/encodeURIComponent t)) ""))
+  (if-let [tok @token] (str "?token=" (js/encodeURIComponent tok)) ""))
 
 ;; ---------------------------------------------------------------------------
 ;; Formatting
@@ -78,11 +78,14 @@
 
 (defn kmh [mps] (when (num? mps) (fixed (* mps 3.6) 1)))
 
-(def month-names [(tk "Jan") (tk "Feb") (tk "Mar") (tk "Apr") (tk "May") (tk "Jun") (tk "Jul") (tk "Aug") (tk "Sep") (tk "Oct") (tk "Nov") (tk "Dec")])
+(def month-names [(tk "Jan") (tk "Feb") (tk "Mar") (tk "Apr") (tk "May") (tk "Jun") (tk "Jul") (tk "Aug") (tk "Sep")
+                  (tk "Oct") (tk "Nov") (tk "Dec")])
 (def weekday-names [(tk "Sun") (tk "Mon") (tk "Tue") (tk "Wed") (tk "Thu") (tk "Fri") (tk "Sat")])
-(def long-month-names [(tk "January") (tk "February") (tk "March") (tk "April") (tk "May") (tk "June") (tk "July") (tk "August")
+(def long-month-names [(tk "January") (tk "February") (tk "March") (tk "April") (tk "May") (tk "June") (tk "July")
+                       (tk "August")
                        (tk "September") (tk "October") (tk "November") (tk "December")])
-(def long-weekday-names [(tk "Sunday") (tk "Monday") (tk "Tuesday") (tk "Wednesday") (tk "Thursday") (tk "Friday") (tk "Saturday")])
+(def long-weekday-names [(tk "Sunday") (tk "Monday") (tk "Tuesday") (tk "Wednesday") (tk "Thursday") (tk "Friday")
+                         (tk "Saturday")])
 
 (defn months "Short month name, 0-11, in the current language." [i] (t (month-names i)))
 (defn weekdays "Short weekday name, 0 = Sunday, in the current language." [i] (t (weekday-names i)))
@@ -113,7 +116,8 @@
 
 (defn time-of [iso] (when (and (string? iso) (> (count iso) 15)) (subs iso 11 16)))
 
-(defn iso-today [] (let [d (js/Date.)] (.slice (.toISOString (js/Date. (- (.getTime d) (* 60000 (.getTimezoneOffset d))))) 0 10)))
+(defn iso-today [] (let [d (js/Date.)]
+                     (.slice (.toISOString (js/Date. (- (.getTime d) (* 60000 (.getTimezoneOffset d))))) 0 10)))
 
 (defn add-days [iso n]
   (let [d (parse-date iso)] (.setDate d (+ (.getDate d) n)) (.slice (.toISOString d) 0 10)))
@@ -145,7 +149,8 @@
   [{:id :run   :label (tk "Run")       :plural (tk "runs")     :color "--fam-run"   :re #"running"}
    {:id :bike  :label (tk "Bike")      :plural (tk "rides")    :color "--fam-bike"  :re #"cycling|biking|ride"}
    {:id :swim  :label (tk "Swim")      :plural (tk "swims")    :color "--fam-swim"  :re #"swimming"}
-   {:id :hike  :label (tk "Hike/walk") :plural (tk "hikes")    :color "--fam-hike"  :re #"hiking|walking|mountaineering"}
+   {:id :hike  :label (tk "Hike/walk") :plural (tk "hikes")    :color "--fam-hike"
+    :re #"hiking|walking|mountaineering"}
    {:id :ski   :label (tk "Ski/snow")  :plural (tk "ski days") :color "--fam-ski"   :re #"ski|snowboard"}
    {:id :strength :label (tk "Strength") :plural (tk "strength sessions") :color "--fam-strength"
     :re #"strength|fitness|cardio|hiit|yoga"}
@@ -157,9 +162,12 @@
 ;; Session library names (training-principles.md: Running › Sessions; athlete.md: Overrides & specifics)
 ;; (same IDs as coach.plan-rules/sessions)
 (def session-names-en
-  {"REC" (tk "Recovery run") "EASY" (tk "Easy run") "EASY_ST" (tk "Easy + strides") "HILL_SPRINT" (tk "Easy + hill sprints")
-   "DOWNHILL" (tk "Downhill conditioning") "LONG" (tk "Long run") "B2B" (tk "Back-to-back") "LONG_RP" (tk "Long run, race pace")
-   "RACE_PACE" (tk "Race pace") "TEMPO" (tk "Tempo") "THR" (tk "Threshold") "VO2" (tk "VO2max") "HILL_REP" (tk "Hill repeats")
+  {"REC" (tk "Recovery run") "EASY" (tk "Easy run") "EASY_ST" (tk "Easy + strides")
+   "HILL_SPRINT" (tk "Easy + hill sprints")
+   "DOWNHILL" (tk "Downhill conditioning") "LONG" (tk "Long run") "B2B" (tk "Back-to-back")
+   "LONG_RP" (tk "Long run, race pace")
+   "RACE_PACE" (tk "Race pace") "TEMPO" (tk "Tempo") "THR" (tk "Threshold") "VO2" (tk "VO2max")
+   "HILL_REP" (tk "Hill repeats")
    "RACE_SIM" (tk "Race simulation") "AET_TEST" (tk "AeT drift test") "LT_TEST" (tk "LT test")
    "HIKE" (tk "Hike") "RIDE" (tk "Ride")
    "GYM_LOWER" (tk "Gym: lower body") "GYM_UPPER" (tk "Gym: upper body") "GYM_MAINT" (tk "Gym: maintenance")
@@ -178,7 +186,8 @@
    :battery    [[:rect {:x 2 :y 7 :width 18 :height 10 :rx 2}] [:path {:d "M22 11v2"}]]
    :moon       [[:path {:d "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"}]]
    :sun        [[:circle {:cx 12 :cy 12 :r 4}]
-                [:path {:d "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"}]]
+                [:path
+                 {:d "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"}]]
    :heart      [[:path {:d "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"}]]
    :pulse      [[:path {:d "M3 12h4l3-8 4 16 3-8h4"}]]
    :footprints [[:path {:d "M4 16v-2.4C4 11.5 3 10.5 3 8c0-2.7 1.5-6 4.5-6C9.4 2 10 3.8 10 5.5c0 3.1-2 5.7-2 8.7V16a2 2 0 1 1-4 0z"}]
@@ -202,7 +211,8 @@
   ([text] (pill nil text))
   ([dot-color text]
    [:span.pill (when dot-color
-                 [:span.dot {:style {:background (if (.startsWith dot-color "--") (str "var(" dot-color ")") dot-color)}}])
+                 [:span.dot
+                  {:style {:background (if (.startsWith dot-color "--") (str "var(" dot-color ")") dot-color)}}])
     text]))
 
 (defn pills [& items] (into [:div.pills] (remove nil? items)))

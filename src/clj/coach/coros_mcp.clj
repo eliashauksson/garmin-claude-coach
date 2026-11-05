@@ -79,7 +79,8 @@
         blocks (str/split text #"(?m)^(?=[ \t]*\d+\.\s)")
         recs   (vec (keep record-block blocks))]
     (when (and (empty? recs) (not (re-find #"(?i)^\s*no sport records" text)))
-      (throw (ex-info (t "Coros's activity list couldn't be read.") {:kind :coros :answer (subs text 0 (min 300 (count text)))})))
+      (throw (ex-info (t "Coros's activity list couldn't be read.")
+                      {:kind :coros :answer (subs text 0 (min 300 (count text)))})))
     recs))
 
 (defn fit-url
@@ -207,7 +208,8 @@
                                                "limit" list-limit}))]
                 (if (and (>= (count recs) split-at-count) (not= s e))
                   (let [sd  (LocalDate/parse s)
-                        mid (.plusDays sd (quot (.between java.time.temporal.ChronoUnit/DAYS sd (LocalDate/parse e)) 2))]
+                        mid (.plusDays sd
+                                       (quot (.between java.time.temporal.ChronoUnit/DAYS sd (LocalDate/parse e)) 2))]
                     (into (fetch s (str mid)) (fetch (str (.plusDays mid 1)) e)))
                   recs)))]
       (->> (dates-between start-date end-date)

@@ -122,9 +122,11 @@
   (testing "messages the server really returns (captured with no valid tokens)"
     (is (= :auth (gm/error-kind "Error retrieving stats: Garmin login failed. Run 'garmin-mcp-auth' to authenticate, then restart the server.")))
     (is (= :auth (gm/error-kind "Error retrieving HRV data: Garmin authentication failed: 401 Client Error. Re-run 'garmin-mcp-auth' to refresh your tokens and restart the server."))))
-  (is (= :rate-limit (gm/error-kind "Error retrieving stats: Garmin rate limit hit: 429. Wait a few minutes before retrying.")))
+  (is (= :rate-limit
+         (gm/error-kind "Error retrieving stats: Garmin rate limit hit: 429. Wait a few minutes before retrying.")))
   (is (= :unreachable (gm/error-kind "Error retrieving stats: Garmin Connect request failed: Max retries. Garmin Connect may be unreachable; check your network connection or try again later.")))
-  (is (= :timeout (gm/error-kind "Error retrieving stats: Garmin request 'get_stats' did not return within 60s and was abandoned.")))
+  (is (= :timeout
+         (gm/error-kind "Error retrieving stats: Garmin request 'get_stats' did not return within 60s and was abandoned.")))
   (is (= :timeout (gm/error-kind "MCP request timed out")))
   (is (= :garmin (gm/error-kind "Error retrieving stats: Garmin Connect server error: 503. Garmin returned a server error; try again later.")))
   (is (= :server (gm/error-kind "MCP error: MCP server exited")))

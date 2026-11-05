@@ -29,7 +29,8 @@
         session-of #(:session_id (planned-by-act (:id %)))
         easy-run?  #(and (run? %) (or (some-> (session-of %) rules/sessions :easy?)
                                       (and (nil? (session-of %)) (< (analysis/active-secs %) (* 75 60)))))
-        long-run?  #(and (run? %) (or (some-> (session-of %) rules/sessions :long?) (>= (analysis/active-secs %) (* 75 60))))
+        long-run?  #(and (run? %)
+                         (or (some-> (session-of %) rules/sessions :long?) (>= (analysis/active-secs %) (* 75 60))))
         recent     (filter #(>= (compare (:date %) (season/add-days today -7)) 0) acts)
         steady-hr  (:steady_hr settings)
         too-hard   (filter #(and steady-hr (easy-run? %) (:avg_hr %) (> (:avg_hr %) steady-hr)) week-acts)
@@ -67,16 +68,19 @@
           :principle "Monitoring"
           :message (if (= 1 (count too-hard))
                      (t "1 easy run this week averaged above {0} bpm (that's steady, not easy)" steady-hr)
-                     (t "{0} easy runs this week averaged above {1} bpm (that's steady, not easy)" (count too-hard) steady-hr))}])
+                     (t "{0} easy runs this week averaged above {1} bpm (that's steady, not easy)" (count too-hard)
+                        steady-hr))}])
       (when (and last-long (:decoupling last-long) (> (:decoupling last-long) drift-max))
         [{:key (str "drift:" (:id last-long)) :id :long-drift :severity :warn
-          :trigger? (boolean (some #(> (or (:distance_km %) 0) (/ (or (:distance_m last-long) 0) 1000.0)) upcoming-long))
+          :trigger? (boolean (some #(> (or (:distance_km %) 0) (/ (or (:distance_m last-long) 0) 1000.0))
+                                   upcoming-long))
           :principle "Monitoring"
           :message (t "Long run on {0} drifted {1}% in the second half: don't lengthen the next long run"
                       (:date last-long) (format "%.1f" (double (:decoupling last-long))))}])
       (for [a high-rpe]
         {:key (str "rpe-high:" (:id a)) :id :rpe-high :severity :warn :trigger? true :principle "Monitoring"
-         :message (t "RPE {0} on an easy/long run ({1}): fatigue signal" (Math/round (double (analysis/effective-rpe a))) (:date a))})
+         :message (t "RPE {0} on an easy/long run ({1}): fatigue signal"
+                     (Math/round (double (analysis/effective-rpe a))) (:date a))})
       (when (= 2 (count low-rpe-keys))
         [{:key (str "rpe-low:" (clojure.string/join "," (map :id low-rpe-keys))) :id :too-easy :severity :info
           :trigger? true :principle "Load & recovery"
@@ -86,7 +90,8 @@
          :message (t "Pain reported after {0} ({1}){2} - stop what provokes it, use a pain-free low-impact substitute; see a professional if it lasts over a week"
                      (:name a) (:date a) (or (some->> (:pain_location a) (str ": ")) ""))})
       (when hrv-bad
-        [{:key (str "hrv:" (:date (last last2))) :id :hrv-unbalanced :severity :warn :trigger? true :principle "Monitoring"
+        [{:key (str "hrv:" (:date (last last2))) :id :hrv-unbalanced :severity :warn :trigger? true
+          :principle "Monitoring"
           :message (t "HRV unbalanced or low for 2 days: rest of the week as recovery, plan next week lower")}])
       (when rhr-bad
         [{:key (str "rhr:" (:date (last last2))) :id :rhr-high :severity :warn :trigger? true :principle "Monitoring"

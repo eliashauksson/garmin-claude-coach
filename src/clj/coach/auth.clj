@@ -8,8 +8,8 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [coach.db :as db]
-            [coach.i18n :refer [t]]
-            [coach.garmin-mcp :as gm])
+            [coach.garmin-mcp :as gm]
+            [coach.i18n :refer [t]])
   (:import (java.time LocalDate)
            (java.time.temporal ChronoUnit)))
 
@@ -132,7 +132,8 @@
   (case outcome
     :mfa     {:status "mfa"}
     :timeout (do (.destroyForcibly ^Process (:proc job)) (reset! login-job nil)
-                 {:status "error" :error (t "Garmin didn't answer in time. Check the internet connection and try again.")})
+                 {:status "error"
+                  :error (t "Garmin didn't answer in time. Check the internet connection and try again.")})
     :exited  (do (reset! login-job nil)
                  (if (zero? (.exitValue ^Process (:proc job)))
                    (do (record-login! ds (str (LocalDate/now))) {:status "ok"})

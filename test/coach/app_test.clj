@@ -17,7 +17,8 @@
   (is (not (app/newer? nil "v1.0.0"))))
 
 (defn- temp-dir []
-  (doto (.toFile (java.nio.file.Files/createTempDirectory "coach-app" (make-array java.nio.file.attribute.FileAttribute 0)))
+  (doto (.toFile (java.nio.file.Files/createTempDirectory "coach-app"
+                                                          (make-array java.nio.file.attribute.FileAttribute 0)))
     .deleteOnExit))
 
 (deftest check-data-dir-test

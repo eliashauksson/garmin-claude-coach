@@ -1,4 +1,35 @@
-;; clj-kondo settings for `make lint`. Defaults otherwise.
-{:config-in-ns
- ;; the test stubs implement only the DataSource methods each test calls
- {coach.sync-test {:linters {:missing-protocol-method {:level :off}}}}}
+;; clj-kondo settings for `make lint` (also run by the git pre-commit hook).
+{:ns-groups
+ ;; Pure namespaces: no database, files, network or Claude. Glue lives in
+ ;; analysis, load-model, readiness-estimate and the like.
+ [{:pattern "^coach\\.(metrics|epoc|readiness|readiness-score|plan-rules|season|workout)$"
+   :name pure}]
+
+ :linters
+ {;; Lines up to 120 characters, except a line with a string literal of 70+
+  ;; characters (a text marked with `t` must stay one literal: it is the
+  ;; dictionary key) and the dictionaries' "English" "translation" lines.
+  :line-length {:level :warning :max-line-length 120
+                :exclude-pattern "\"[^\"]{70,}\"|^\\s*\"(?:[^\"\\\\]|\\\\.)*\"\\s+\""}
+  ;; a local named t would hide coach.i18n/t, and (t "…") would call the local
+  :shadowed-var {:level :warning :include [t]}
+  :unsorted-required-namespaces {:level :warning}
+  :redundant-fn-wrapper {:level :warning}
+  :redundant-str-call {:level :warning}
+  :equals-true {:level :warning}
+  :docstring-leading-trailing-whitespace {:level :warning}}
+
+ :config-in-ns
+ {pure {:linters {:discouraged-namespace
+                  {coach.db {:message "Pure namespace: database access belongs in the glue namespaces"}
+                   next.jdbc {:message "Pure namespace: database access belongs in the glue namespaces"}
+                   coach.analysis {:message "Pure namespace: no DB glue"}
+                   coach.claude {:message "Pure namespace: no Claude calls"}
+                   coach.planner {:message "Pure namespace: no Claude calls"}
+                   coach.paths {:message "Pure namespace: no files"}
+                   clojure.java.io {:message "Pure namespace: no files"}
+                   coach.mcp {:message "Pure namespace: no network"}
+                   coach.garmin-mcp {:message "Pure namespace: no network"}
+                   coach.coros-mcp {:message "Pure namespace: no network"}}}}
+  ;; the test stubs implement only the DataSource methods each test calls
+  coach.sync-test {:linters {:missing-protocol-method {:level :off}}}}}

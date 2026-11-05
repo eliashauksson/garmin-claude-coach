@@ -3,7 +3,8 @@
   (:require [coach.charts :as c]
             [coach.i18n :refer [t tk]]
             [coach.ui :as ui]
-            [coach.views.dashboard.common :refer [cat-base chart-card day-label empty-line off-grid-ends padded-range rows-tip]]))
+            [coach.views.dashboard.common :refer
+             [cat-base chart-card day-label empty-line off-grid-ends padded-range rows-tip]]))
 
 (defn- hrv-chart [nights]
   (let [dates (mapv :date nights)
@@ -20,17 +21,26 @@
                                   :y-fmt (fn [v] (str v " ms"))
                                   :tooltip-fmt (rows-tip nights
                                                          (fn [n] [(day-label (:date n))
-                                                                  [{:label (t "overnight") :value (some-> (:hrv_night n) (str " ms")) :color teal}
-                                                                   {:label (t "7-day average") :value (some-> (:hrv_weekly n) (str " ms"))}
+                                                                  [{:label (t "overnight")
+                                                                    :value (some-> (:hrv_night n) (str " ms"))
+                                                                    :color teal}
+                                                                   {:label (t "7-day average")
+                                                                    :value (some-> (:hrv_weekly n) (str " ms"))}
                                                                    {:label (t "balanced range")
-                                                                    :value (when (:hrv_balanced_low n) (str (:hrv_balanced_low n) "–" (:hrv_balanced_up n) " ms"))}
-                                                                   {:label (t "status") :value (ui/enum (:hrv_status n))}]]))}))
+                                                                    :value (when (:hrv_balanced_low n)
+                                                                             (str (:hrv_balanced_low n) "–"
+                                                                                  (:hrv_balanced_up n) " ms"))}
+                                                                   {:label (t "status")
+                                                                    :value (ui/enum (:hrv_status n))}]]))}))
                  {:series
-                  [{:type "line" :stack "band" :symbol "none" :silent true :lineStyle {:opacity 0} :tooltip {:show false}
+                  [{:type "line" :stack "band" :symbol "none" :silent true :lineStyle {:opacity 0}
+                    :tooltip {:show false}
                     :data (mapv :hrv_balanced_low nights)}
-                   {:type "line" :stack "band" :symbol "none" :silent true :lineStyle {:opacity 0} :tooltip {:show false}
+                   {:type "line" :stack "band" :symbol "none" :silent true :lineStyle {:opacity 0}
+                    :tooltip {:show false}
                     :areaStyle {:color teal :opacity 0.13}
-                    :data (mapv #(when (and (:hrv_balanced_low %) (:hrv_balanced_up %)) (- (:hrv_balanced_up %) (:hrv_balanced_low %))) nights)}
+                    :data (mapv #(when (and (:hrv_balanced_low %) (:hrv_balanced_up %))
+                                   (- (:hrv_balanced_up %) (:hrv_balanced_low %))) nights)}
                    {:type "line" :name (t "7-day average") :data (mapv :hrv_weekly nights) :showSymbol false
                     :lineStyle {:width 1.5 :type "dashed" :color (c/css-var "--text-3")} :emphasis {:disabled true}}
                    {:type "line" :name (t "Overnight") :showSymbol true :symbolSize 7 :connectNulls false
@@ -38,13 +48,17 @@
                     :data (mapv (fn [{:keys [hrv_night hrv_low_up hrv_balanced_low]}]
                                   {:value hrv_night
                                    :itemStyle {:borderColor (c/css-var "--surface") :borderWidth 2
-                                               :color (cond (and hrv_night hrv_low_up (< hrv_night hrv_low_up)) (c/css-var "--red")
-                                                            (and hrv_night hrv_balanced_low (< hrv_night hrv_balanced_low)) (c/css-var "--amber")
-                                                            :else teal)}})
+                                               :color (cond
+                                                        (and hrv_night hrv_low_up
+                                                             (< hrv_night hrv_low_up)) (c/css-var "--red")
+                                                        (and hrv_night hrv_balanced_low
+                                                             (< hrv_night hrv_balanced_low)) (c/css-var "--amber")
+                                                        :else teal)}})
                                 nights)}]}))}))))
 
 (def stage-series
-  [[:deep_s (tk "Deep") "--deep"] [:light_s (tk "Light") "--purple-2"] [:rem_s (tk "REM") "--pink"] [:awake_s (tk "Awake") "--amber"]])
+  [[:deep_s (tk "Deep") "--deep"] [:light_s (tk "Light") "--purple-2"] [:rem_s (tk "REM") "--pink"]
+   [:awake_s (tk "Awake") "--amber"]])
 
 (defn- sleep-chart [nights]
   (let [dates (mapv :date nights)
@@ -64,11 +78,18 @@
                                    :tooltip-fmt (rows-tip nights
                                                           (fn [n] [(day-label (:date n))
                                                                    (concat
-                                                                    [{:label (t "sleep score") :value (some-> (:sleep_score n) (str (some->> (:quality n) ui/enum (str " · "))))}
-                                                                     {:label (t "asleep") :value (ui/h-mm (:total_s n))}]
+                                                                    [{:label (t "sleep score")
+                                                                      :value (some-> (:sleep_score n)
+                                                                                     (str (some->> (:quality n) ui/enum
+                                                                                                   (str " · "))))}
+                                                                     {:label (t "asleep")
+                                                                      :value (ui/h-mm (:total_s n))}]
                                                                     (for [[k label color] stage-series]
-                                                                      {:label (t label) :value (ui/h-mm (get n k)) :color (c/css-var color)})
-                                                                    [{:label (t "sleep need") :value (some-> (:need_min n) (* 60) ui/h-mm)}])]))})
+                                                                      {:label (t label) :value (ui/h-mm (get n k))
+                                                                       :color (c/css-var color)})
+                                                                    [{:label (t "sleep need")
+                                                                      :value (some-> (:need_min n) (* 60)
+                                                                                     ui/h-mm)}])]))})
                   {:series
                    (concat
                     (c/stacked 3
@@ -100,10 +121,15 @@
           (merge (cat-base dates {:y-min 0 :y-max 100
                                   :tooltip-fmt (rows-tip days
                                                          (fn [d] [(day-label (:date d))
-                                                                  [{:label (t "range") :value (when (:bb_min d) (str (:bb_min d) "–" (:bb_max d))) :color blue}
+                                                                  [{:label (t "range")
+                                                                    :value (when (:bb_min d)
+                                                                             (str (:bb_min d) "–" (:bb_max d)))
+                                                                    :color blue}
                                                                    {:label (t "end of day") :value (:bb_latest d)}
-                                                                   {:label (t "charged") :value (some->> (:bb_charged d) (str "+"))}
-                                                                   {:label (t "drained") :value (some->> (:bb_drained d) (str "−"))}]]))})
+                                                                   {:label (t "charged")
+                                                                    :value (some->> (:bb_charged d) (str "+"))}
+                                                                   {:label (t "drained")
+                                                                    :value (some->> (:bb_drained d) (str "−"))}]]))})
                  {:series
                   [{:type "bar" :stack "bb" :silent true :itemStyle {:color "transparent"} :tooltip {:show false}
                     :data (mapv :bb_min days) :barMaxWidth 14}
@@ -133,14 +159,16 @@
                  (cat-base (mapv :date rows)
                           {:y-min lo :y-max hi
                            :tooltip-fmt (rows-tip rows (fn [r] [(day-label (:date r))
-                                                                [{:label (t "resting HR") :value (some-> (:rhr r) (str " bpm"))
+                                                                [{:label (t "resting HR")
+                                                                  :value (some-> (:rhr r) (str " bpm"))
                                                                   :color (c/css-var "--red")}]]))}))
                 (assoc-in [:grid :right] pad)
                 (merge {:series [(c/line (t "Resting heart rate") "--red" (mapv :rhr rows)
                                          :lineStyle {:width 2.2} :connectNulls true :sampling nil
                                          :areaStyle {:color (c/fade "--red" 0.26)})
                                  {:type "scatter" :silent true :symbolSize 8 :tooltip {:show false}
-                                  :itemStyle {:color (c/css-var "--red") :borderColor (c/css-var "--surface") :borderWidth 2}
+                                  :itemStyle {:color (c/css-var "--red") :borderColor (c/css-var "--surface")
+                                              :borderWidth 2}
                                   :label (assoc label :position "right")
                                   :data [[i lastv]]}]})))})))))
 
@@ -156,7 +184,8 @@
                            {:y-min 0 :y-max (max 60 (apply max vs))
                             :tooltip-fmt (rows-tip days (fn [d] [(day-label (:date d))
                                                                  [{:label (t "average stress") :value (:stress_avg d)}
-                                                                  {:label (t "steps") :value (ui/thousands (:steps d))}]]))})
+                                                                  {:label (t "steps")
+                                                                   :value (ui/thousands (:steps d))}]]))})
                  {:series [(c/bars (t "Average stress") "--blue"
                                    (mapv (fn [{:keys [stress_avg]}]
                                            {:value stress_avg

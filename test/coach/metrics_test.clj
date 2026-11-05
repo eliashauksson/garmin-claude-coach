@@ -126,7 +126,8 @@
   (is (= [{:week "2026-W43" :week_start "2026-10-19" :sport "running" :count 2 :duration_s 3600.0
            :distance_m 10000.0 :elev_gain_m 50.0 :tss 120.0}]
          (m/weekly-volume [{:date "2026-10-19" :sport "running" :moving_s 1800 :distance_m 5000 :elev_gain_m 25 :tss 60}
-                           {:date "2026-10-20" :sport "running" :moving_s 1800 :distance_m 5000 :elev_gain_m 25 :tss 60}]))))
+                           {:date "2026-10-20" :sport "running" :moving_s 1800 :distance_m 5000 :elev_gain_m 25
+                            :tss 60}]))))
 
 (deftest trend-test
   (let [rows (mapv (fn [i] {:date (str "d" i) :rhr (when-not (= i 2) (+ 50 i))}) (range 10))
@@ -186,7 +187,9 @@
         (is (= 150 (nth hr 48)) "12:08")
         (is (= 130 (nth hr 54)) "12:09, between 150 and 110")))
     (testing "a ride past midnight reads the next day"
-      (is (= 120 (first (:hr (m/watch-hr ride "2026-09-26T23:59:00" [[[1438 110]] [[0 130] [2 130] [4 130] [6 130] [8 130] [10 130]]]))))))
+      (is (= 120
+             (first (:hr (m/watch-hr ride "2026-09-26T23:59:00"
+                                     [[[1438 110]] [[0 130] [2 130] [4 130] [6 130] [8 130] [10 130]]]))))))
     (testing "gaps over 5 minutes stay empty; under half covered gives nil"
       (is (nil? (m/watch-hr ride "2026-09-26T12:00:00" [[[700 100] [740 120]] nil])))
       (is (nil? (m/watch-hr ride "2026-09-26T12:00:00" [nil nil]))))

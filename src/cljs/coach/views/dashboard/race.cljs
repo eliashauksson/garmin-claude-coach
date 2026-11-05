@@ -76,7 +76,8 @@
   [:section.card.race-hero {:replicant/key "hero"}
    (if-not name
      (list [:div.eyebrow {:replicant/key "e"} (t "Goal race")]
-           [:div.empty {:replicant/key "x"} (t "No goal race in the athlete information yet. Add it on the Plan page.")])
+           [:div.empty {:replicant/key "x"}
+            (t "No goal race in the athlete information yet. Add it on the Plan page.")])
      (list
       [:div.eyebrow {:replicant/key "e"}
        (str/join " · " (remove nil? [(t "Goal race") name (some-> date ui/date-short)]))]
@@ -89,7 +90,8 @@
 
 (defn prediction-cards [{:keys [now trend]}]
   [:div.predictions
-   (for [[leg k label] [["10k" :t10k (tk "10K")] ["half" :thalf (tk "Half marathon")] ["marathon" :tmar (tk "Marathon")]]
+   (for [[leg k label] [["10k" :t10k (tk "10K")] ["half" :thalf (tk "Half marathon")]
+                        ["marathon" :tmar (tk "Marathon")]]
          :let [values (mapv k trend)]]
      [:section.card.prediction {:replicant/key leg}
       [:div.lab (t label) (ui/info "race-predictions")]

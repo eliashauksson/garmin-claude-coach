@@ -234,21 +234,30 @@
                             (frange 0.05 0.4 0.005) (frange 100 260 5))
         ;; recovery: the curve from Garmin's hours, then hours per workout
         rr     (filter #(number? (get-in % [:garmin :recovery_h])) rows)
-        [_ ra rp] (grid-best (fn [a p] (mae (map #(vector (- 100 (* a (Math/pow (get-in % [:garmin :recovery_h]) p))) (g :recovery_time %)) rr)))
+        [_ ra rp] (grid-best (fn [a p]
+                               (mae (map #(vector (- 100 (* a (Math/pow (get-in % [:garmin :recovery_h]) p)))
+                                                  (g :recovery_time %))
+                                         rr)))
                              (frange 0.5 6.0 0.05) (frange 0.7 1.4 0.02))
-        [_ wa wq] (grid-best (fn [a q] (mae (map #(vector (recovery-hours {:recovery [a q]} (get-in % [:features :workouts]))
-                                                        (get-in % [:garmin :recovery_h])) rr)))
-                             (frange 0.05 2.0 0.01) (frange 0.5 1.2 0.05))
+        [_ wa
+         wq] (grid-best (fn [a q] (mae (map #(vector (recovery-hours {:recovery [a q]} (get-in % [:features :workouts]))
+                                                   (get-in % [:garmin :recovery_h])) rr)))
+                        (frange 0.05 2.0 0.01) (frange 0.5 1.2 0.05))
         p1 (cond-> (assoc params :load [k a0] :recovery-pct [ra rp] :recovery [wa wq])
              (and sh (>= (count shr) 20)) (assoc :sleep-history sh)
              (and hv (>= (count hr) 20))  (assoc :hrv [(second hv) (first hv) cap])
              (and sv (>= (count sr) 20))  (assoc :stress [(first sv) (second sv)]))
         ;; step A on Garmin's own factors
         full   (filter #(every? (fn [k] (g k %)) factor-keys) rows)
-        x0     (vec (concat (map #(get-in p1 [:combine :w %]) factor-keys) (map #(get-in p1 [:combine :p %]) factor-keys)))
+        x0     (vec (concat (map #(get-in p1 [:combine :w %]) factor-keys)
+                            (map #(get-in p1 [:combine :p %]) factor-keys)))
         unpack (fn [x] {:w (zipmap factor-keys (subvec x 0 6)) :p (zipmap factor-keys (subvec x 6 12))})
         loss   (fn [x] (let [pp {:combine (unpack x)}]
-                         (reduce + (for [r full :let [d (- (combine pp (get-in r [:garmin :factors])) (get-in r [:garmin :score]))]] (* d d)))))
+                         (reduce +
+                                 (for [r full
+                                       :let [d
+                                             (- (combine pp (get-in r [:garmin :factors]))
+                                                (get-in r [:garmin :score]))]] (* d d)))))
         x      (if (>= (count full) 20) (nelder-mead loss (nelder-mead loss x0 1500) 1500) x0)]
     (assoc p1 :combine (unpack (vec x)))))
 
@@ -256,4 +265,5 @@
   "One line for logs and the CLI."
   [{:keys [n mae same_level within_one]}]
   (str/join ", " [(str n " mornings") (format "%.1f points off on average" (double mae))
-                  (format "same level %.0f%%" (* 100 same_level)) (format "within one level %.0f%%" (* 100 within_one))]))
+                  (format "same level %.0f%%" (* 100 same_level))
+                  (format "within one level %.0f%%" (* 100 within_one))]))

@@ -4,8 +4,8 @@
   athlete applies them (coach.athlete/save!)."
   (:require [clojure.string :as str]
             [coach.athlete :as athlete]
-            [coach.i18n :as i18n]
             [coach.claude :as claude]
+            [coach.i18n :as i18n]
             [coach.translate :as translate]))
 
 (def system-intro
@@ -74,7 +74,8 @@ in short fragments, never sentences:
                         "required" ["old_text" "new_text"]
                         "properties" {"old_text" {"type" "string"} "new_text" {"type" "string"}}}}
     "summary" {"type" "object" "additionalProperties" false
-               "required" ["race" "race_date" "race_detail" "race_goal" "race_legs" "athlete" "stats" "focus" "settings"]
+               "required" ["race" "race_date" "race_detail" "race_goal" "race_legs" "athlete" "stats" "focus"
+                           "settings"]
                "properties" {"race" {"type" "string"}
                              "race_date" {"type" "string"}
                              "race_detail" {"type" "string"}

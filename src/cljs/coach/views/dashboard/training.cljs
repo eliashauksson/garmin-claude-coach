@@ -77,7 +77,8 @@
                            ;; and room for the label before the right edge (else "Nov" is cut)
                            (if (and (<= (.getDate d) 7) (>= (- x last-x) 30)
                                     (<= (+ x 24) (+ left (* 26 (+ cell gap)))))
-                             (recur more x (conj acc (c/el :svg/text {:x x :y 11 :class "hm-lab"} (ui/months (.getMonth d)))))
+                             (recur more x
+                                    (conj acc (c/el :svg/text {:x x :y 11 :class "hm-lab"} (ui/months (.getMonth d)))))
                              (recur more last-x acc)))))
         day-labels (for [[row i] [[0 1] [2 3] [4 5] [6 0]]]
                      (c/el :svg/text {:x 0 :y (+ top (* row (+ cell gap)) (* 0.75 cell)) :class "hm-lab"}
@@ -132,19 +133,25 @@
                                                     (t "Week of {0}" (axis-date wk))
                                                     (concat
                                                      [{:label (t "total load") :value (reduce + 0 (keep :load rows))}]
-                                                     (for [f fams :let [r (some #(when (= f (:family %)) %) rows)] :when r]
-                                                       {:label (t (:label (fam f))) :value (str (:load r) " · " (:hours r) " h")
+                                                     (for [f fams :let [r (some #(when (= f (:family %)) %) rows)]
+                                                           :when r]
+                                                       {:label (t (:label (fam f)))
+                                                        :value (str (:load r) " · " (:hours r) " h")
                                                         :color (c/css-var (:color (fam f)))})))))})
-                       (assoc-in [:tooltip :axisPointer] {:type "shadow" :shadowStyle {:color (c/alpha "--text-3" 0.12)}})
+                       (assoc-in [:tooltip :axisPointer]
+                                 {:type "shadow" :shadowStyle {:color (c/alpha "--text-3" 0.12)}})
                        (merge {:series (c/stacked 5
                                                   (for [f fams :let [x (fam f)]]
                                                     (c/bars (t (:label x)) (:color x)
-                                                            (vec (for [wk weeks] (:load (some #(when (= f (:family %)) %) (get by wk)))))
+                                                            (vec (for [wk weeks]
+                                                                   (:load (some #(when (= f (:family %)) %)
+                                                                                (get by wk)))))
                                                             :stack "load" :barMaxWidth 22
                                                             :itemStyle {:color (c/css-var (:color x))})))})))})))})))
 
 (defn- focus-card [{:keys [status]}]
-  (let [{:keys [aer_low aer_low_min aer_low_max aer_high aer_high_min aer_high_max anaer anaer_min anaer_max balance]} status
+  (let [{:keys [aer_low aer_low_min aer_low_max aer_high aer_high_min aer_high_max anaer anaer_min anaer_max
+                balance]} status
         rows  [[(t "Low aerobic") "--blue" aer_low aer_low_min aer_low_max]
                [(t "High aerobic") "--amber" aer_high aer_high_min aer_high_max]
                [(t "Anaerobic") "--pink" anaer anaer_min anaer_max]]
@@ -193,10 +200,12 @@
                  [:div.acwr-mark.chronic {:style {:left (pct chronic)}}]
                  (when acute
                    [:div.acwr-mark.acute {:style {:left (pct acute)
-                                                  :background (if (= "HIGH" acwr_status) "var(--red)" "var(--text)")}}])]
+                                                  :background (if (= "HIGH" acwr_status) "var(--red)"
+                                                                "var(--text)")}}])]
                 [:div.acwr-lab.below {:class (edge chronic) :style {:left (pct chronic)}} (t "Chronic {0}" chronic)]]
                [:div.sub {:replicant/key "foot"}
-                (str/join " · " (remove nil? [(when acwr (t "Ratio {0}" (.toFixed acwr 1))) (ui/enum acwr_status)]))]))})))
+                (str/join " · "
+                          (remove nil? [(when acwr (t "Ratio {0}" (.toFixed acwr 1))) (ui/enum acwr_status)]))]))})))
 
 (def zone-colors {"Z1" "--fam-other" "Z2" "--blue" "Z3" "--green" "Z4" "--amber" "Z5" "--red"})
 

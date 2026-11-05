@@ -235,7 +235,8 @@
   [:div {:style {:display "contents"}}
    [:div.page-head [:div [:h1 (t "Metrics")]]]
    (ui/card {}
-            [:p (t "What each number in the app means, where it comes from and how to read it. Values marked \"From Garmin\" are Garmin's own, shown as they come. Values marked \"Calculated by the app\" are worked out here from your activities, including rides from Coros.")]
+            [:p
+             (t "What each number in the app means, where it comes from and how to read it. Values marked \"From Garmin\" are Garmin's own, shown as they come. Values marked \"Calculated by the app\" are worked out here from your activities, including rides from Coros.")]
             (into [:div.pills]
                   (for [g groups]
                     [:button.pill {:replicant/key (:id g) :on {:click [[:scroll-to (str "g-" (:id g))]]}}

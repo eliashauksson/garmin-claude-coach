@@ -2,12 +2,12 @@
   "Glue between the DB and coach.metrics: per-activity metric computation
   and the queries behind the API."
   (:require [clojure.data.json :as json]
-            [next.jdbc]
             [clojure.string :as str]
             [coach.db :as db]
             [coach.epoc :as epoc]
             [coach.metrics :as m]
-            [coach.season :as season]))
+            [coach.season :as season]
+            [next.jdbc]))
 
 ;; ---------------------------------------------------------------------------
 ;; Thresholds
@@ -215,11 +215,13 @@
     (throw (ex-info "RPE must be 1-10" {:rpe rpe})))
   (let [note (some-> note str/trim not-empty)
         loc  (when pain (some-> pain_location str/trim not-empty))]
-    (next.jdbc/execute! ds ["INSERT INTO activity_feedback (activity_id, rpe, pain, pain_location, note, skipped, updated_at)
-                             VALUES (?, ?, ?, ?, ?, ?, ?)
-                             ON CONFLICT(activity_id) DO UPDATE SET rpe = excluded.rpe, pain = excluded.pain,
-                               pain_location = excluded.pain_location, note = excluded.note,
-                               skipped = excluded.skipped, updated_at = excluded.updated_at"
+    (next.jdbc/execute! ds
+                        ["INSERT INTO activity_feedback
+                            (activity_id, rpe, pain, pain_location, note, skipped, updated_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?)
+                          ON CONFLICT(activity_id) DO UPDATE SET rpe = excluded.rpe, pain = excluded.pain,
+                            pain_location = excluded.pain_location, note = excluded.note,
+                            skipped = excluded.skipped, updated_at = excluded.updated_at"
                             activity-id rpe (if pain 1 0) loc note (if skipped 1 0) (str (java.time.Instant/now))])))
 
 (def feedback-days "Activities from this many days back are asked about." 7)

@@ -86,7 +86,8 @@
             (t "Plans, adjustments and the athlete chat need credits. Since {0}, requests to Claude are refused, and the automatic planning after each sync is paused."
                (or (when-str since) (t "the last request")))
             [:span (t "Add funds on the") " "
-             [:a {:href billing_url :target "_blank" :rel "noopener noreferrer"} (t "billing page of the Claude Console")]
+             [:a {:href billing_url :target "_blank" :rel "noopener noreferrer"}
+              (t "billing page of the Claude Console")]
              (t ", then check again.")]
             [:span {:style {:display "inline-flex" :gap "10px" :align-items "center" :margin-top "6px"}}
              [:button.pill {:disabled checking :on {:click [[:claude-check]]}}

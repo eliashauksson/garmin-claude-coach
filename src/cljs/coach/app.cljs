@@ -2,16 +2,16 @@
   (:require [clojure.string :as str]
             [coach.i18n :as i18n :refer [t]]
             [coach.ui :as ui]
-            [coach.views.athlete :as athlete]
             [coach.views.activity :as activity]
+            [coach.views.athlete :as athlete]
             [coach.views.calendar :as calendar]
             [coach.views.costs :as costs]
             [coach.views.dashboard :as dashboard]
-            [coach.views.settings :as settings]
-            [coach.views.plan :as plan]
-            [coach.views.status :as status]
             [coach.views.day :as day]
             [coach.views.metrics :as metrics]
+            [coach.views.plan :as plan]
+            [coach.views.settings :as settings]
+            [coach.views.status :as status]
             [coach.views.workout :as workout]
             [replicant.dom :as r]))
 
@@ -226,9 +226,11 @@
           (.then (fn [text]
                    (put! (cond
                            (str/includes? text "\u0000")
-                           {:error (t "{0} doesn't look like a text file. Upload Markdown (.md) or plain text (.txt)." (.-name f))}
+                           {:error (t "{0} doesn't look like a text file. Upload Markdown (.md) or plain text (.txt)."
+                                      (.-name f))}
                            (str/blank? text)  {:error (t "{0} is empty." (.-name f))}
-                           (> (count text) max-upload-chars) {:error (t "{0} is too long (over 200,000 characters)." (.-name f))}
+                           (> (count text)
+                              max-upload-chars) {:error (t "{0} is too long (over 200,000 characters)." (.-name f))}
                            :else {:name (.-name f) :content text}))))
           (.catch #(put! {:error (t "Could not read the file: {0}" (.-message %))}))))))
 
@@ -338,7 +340,8 @@
                                               (if ok nil {:checking false :result error
                                                           :still-out (boolean (:credits_out claude))}))
                                        (poll-sync!))))
-                            (.catch #(swap! state assoc-in [:ui :claude-check] {:checking false :result (.-message %)}))))
+                            (.catch #(swap! state assoc-in [:ui :claude-check]
+                                            {:checking false :result (.-message %)}))))
       :claude-key   (let [op   (first args)
                           path [:ui :claude-key]
                           [method url body] (case op
@@ -402,12 +405,16 @@
       :restore      (when (js/confirm (t "Restore the backup from {0}? The current state is backed up first, and the app restarts." (second args)))
                       (app-request! :restore "POST" (str status/backup-url "/restore") {:name (first args)}))
       :restore-file (let [file (some-> ^js (first args) .-target .-files (aget 0))]
-                      (when (and file (js/confirm (t "Restore the backup {0}? The current state is backed up first, and the app restarts." (.-name file))))
+                      (when (and file
+                                 (js/confirm (t "Restore the backup {0}? The current state is backed up first, and the app restarts." (.-name file))))
                         (swap! state update-in [:ui :restore] assoc :busy true :error nil)
-                        (-> (js/fetch (str status/backup-url "/restore-upload") #js {:method "POST" :body file :headers #js {"Content-Type" "application/zip"}})
+                        (-> (js/fetch (str status/backup-url "/restore-upload")
+                                      #js {:method "POST" :body file :headers #js {"Content-Type" "application/zip"}})
                             (.then (fn [res] (.then (.json res) #(if (.-ok res) % (throw (js/Error. (.-error %)))))))
                             (.then (fn [_] (swap! state assoc-in [:ui :restore :busy] false) (restarting! :restore)))
-                            (.catch (fn [e] (swap! state update-in [:ui :restore] assoc :busy false :error (.-message e)))))))
+                            (.catch (fn [e]
+                                      (swap! state update-in [:ui :restore] assoc
+                                             :busy false :error (.-message e)))))))
       :quit         (-> (js/fetch "/api/quit" #js {:method "POST"})
                         (.then #(swap! state assoc :quit true :server-down true)))
       :load-history (-> (js/fetch "/api/history" #js {:method "POST"})

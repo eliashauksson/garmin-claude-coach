@@ -111,7 +111,8 @@
                        (ui/thousands (count content)))
                     " "
                     (when exists?
-                      (str (t "This replaces the current athlete information; the current version is kept as a backup.") " "))
+                      (str (t "This replaces the current athlete information; the current version is kept as a backup.")
+                           " "))
                     (t "Claude then writes the summary. To reshape the file, use Edit with Claude afterwards."))]
      [:div.plan-footer
       [:button.btn-ink {:on {:click [[:api "PUT" url {:content content :source "upload"}] [:set-ui :athlete nil]]}}
@@ -148,7 +149,8 @@
                                       [:button.btn-ink {:on {:click [[:set-in-ui :athlete :chat {:messages []}]]}}
                                        (if (:exists athlete) (t "Edit with Claude") (t "Add with Claude"))]
                                       [:button.pill {:on {:click [[:set-in-ui :athlete :editor
-                                                                   {:text (:content athlete) :original (:content athlete)}]]}}
+                                                                   {:text (:content athlete)
+                                                                    :original (:content athlete)}]]}}
                                        (if (:exists athlete) (t "Edit file") (t "Write file"))]
                                       (upload-button)
                                       (when (:exists athlete)

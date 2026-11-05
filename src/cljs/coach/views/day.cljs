@@ -152,17 +152,27 @@
                            :option-fn #(day-series-option
                                         {:y-min 0 :y-max 100 :tip (t "stress")
                                          :series [(c/bars "Rest" "--blue" (filterv (fn [[_ v]] (<= 0 v 25)) st)
-                                                          :barWidth 2 :barMaxWidth nil :itemStyle {:color (c/css-var "--blue") :borderRadius 1})
+                                                          :barWidth 2 :barMaxWidth nil
+                                                          :itemStyle {:color (c/css-var "--blue") :borderRadius 1})
                                                   (c/bars "Stress" "--amber" (filterv (fn [[_ v]] (> v 25)) st)
                                                           :barWidth 2 :barMaxWidth nil :barGap "-100%"
-                                                          :itemStyle {:color (c/css-var "--amber") :borderRadius 1})]})})
+                                                          :itemStyle {:color (c/css-var "--amber")
+                                                                      :borderRadius 1})]})})
                 day-axis]
                (no-detail))
       :footer (when (pos? n)
                 (into [:div.pills]
                       (for [[label pred] stress-buckets]
                         (ui/pill (when (= label "Rest") "--blue")
-                                 (str (t label) " " (js/Math.round (* 100 (/ (count (filter #(pred (second %)) st)) n))) "%")))))})))
+                                 (str (t label) " " (js/Math.round (* 100 (/ (count (filter #(pred (second %)) st)) n)))
+                                      "%")))))})))
+
+(defn- steps-tip
+  "Tooltip of the hourly steps chart: the hour and its steps."
+  [params]
+  (let [p (first params)]
+    (c/tooltip-rows (str (.padStart (str (.-dataIndex p)) 2 "0") ":00")
+                    [{:label (t "steps") :value (ui/thousands (or (.-value p) 0))}])))
 
 (defn- steps-card [w day intraday]
   (let [steps (:steps intraday)
@@ -174,7 +184,8 @@
                [:div.big (or (ui/thousands total) "—")]
                [:div.sub {:style {:margin-top "8px"}}
                 (str/join " · " (remove nil? [(when (and total goal (pos? goal))
-                                                (t "{0}% of {1}" (js/Math.round (* 100 (/ total goal))) (ui/thousands goal)))
+                                                (t "{0}% of {1}" (js/Math.round (* 100 (/ total goal)))
+                                                   (ui/thousands goal)))
                                               (some-> (:distance_m day) ui/km (str " km"))
                                               (some->> (:floors day) js/Math.round (t "{0} floors"))]))]]
       :chart (if (seq steps)
@@ -182,15 +193,13 @@
                 (c/echart {:key "steps" :class "h90"
                            :option-fn (fn []
                                         (-> (c/base {:x-type "category"
-                                                     :tooltip-fmt (fn [params]
-                                                                    (let [p (first params)]
-                                                                      (c/tooltip-rows (str (.padStart (str (.-dataIndex p)) 2 "0") ":00")
-                                                                                      [{:label (t "steps") :value (ui/thousands (or (.-value p) 0))}])))})
+                                                     :tooltip-fmt steps-tip})
                                             (assoc :grid {:left 0 :right 0 :top 4 :bottom 0})
                                             (assoc :xAxis {:type "category" :show false :data (vec (range 24))})
                                             (assoc :yAxis {:type "value" :show false :min 0})
                                             (assoc :series [(c/bars "Steps" "--green" (mapv #(when (pos? %) %) steps)
-                                                                    :barMaxWidth nil :barCategoryGap "15%" :barMinHeight 4)])))})
+                                                                    :barMaxWidth nil :barCategoryGap "15%"
+                                                                    :barMinHeight 4)])))})
                 [:div.ax [:span "00"] [:span "06"] [:span "12"] [:span "18"] [:span "24"]]]
                (no-detail))})))
 
@@ -285,9 +294,11 @@
             [:div {:style {:display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap"}}
              [:span.sub (t "Readiness suggests: {0}"
                            (cond (= "REST" (:to c)) (t "rest instead")
-                                 :else (str/join ", " (remove nil? [(some->> (:to c) plan/session-names (t "change to {0}"))
-                                                                    (when (:slot c) (t "move to the evening"))]))))]
-             [:button.pill {:on {:click [[:api "PATCH" (str "/api/plan/workouts/" (:id w)) (apply-change c)]]}} (t "Apply")]])])
+                                 :else (str/join ", "
+                                                 (remove nil? [(some->> (:to c) plan/session-names (t "change to {0}"))
+                                                               (when (:slot c) (t "move to the evening"))]))))]
+             [:button.pill {:on {:click [[:api "PATCH" (str "/api/plan/workouts/" (:id w)) (apply-change c)]]}}
+              (t "Apply")]])])
        [:div.sub (t "Nothing planned today.")])
      (when (seq signals)
        [:div.sub {:style {:color (if (= "rest" (name level)) "var(--red)" "var(--text-2)")}}
@@ -315,7 +326,9 @@
            (if (seq acts)
              (for [a acts]
                [:div {:replicant/key (:id a) :style {:display "flex" :flex-direction "column" :gap "6px"}}
-                [:a {:href (str "#/activities/" (:id a)) :style {:font-size "20px" :font-weight 800 :text-decoration "none"}}
+                [:a
+                 {:href (str "#/activities/" (:id a))
+                  :style {:font-size "20px" :font-weight 800 :text-decoration "none"}}
                  (:name a)]
                 (ui/pills (some-> (ui/km (:distance_m a)) (str " km") ui/pill)
                           (some-> (ui/hm (or (:moving_s a) (:duration_s a))) ui/pill)

@@ -2,7 +2,8 @@
   "Fitness over the last 6 months: VO2 max and the endurance score."
   (:require [coach.charts :as c]
             [coach.i18n :refer [t tk]]
-            [coach.views.dashboard.common :refer [axis-date chart-card day-label empty-line fit-labels off-grid-ends padded-range]]))
+            [coach.views.dashboard.common :refer
+             [axis-date chart-card day-label empty-line fit-labels off-grid-ends padded-range]]))
 
 (defn- end-line
   "A line on a time axis with an area fade and a labelled end point (VO2 max)."
@@ -22,12 +23,15 @@
                          :x-fmt (fn [v] (axis-date (.toISOString (js/Date. v))))
                          :tooltip-fmt (fn [params]
                                         (let [[d v] (js->clj (.-value (first params)))]
-                                          (c/tooltip-rows (day-label d) [{:label "VO₂ max" :value (fmt v) :color (c/css-var color)}])))}))
+                                          (c/tooltip-rows (day-label d)
+                                                          [{:label "VO₂ max" :value (fmt v)
+                                                            :color (c/css-var color)}])))}))
                 (assoc-in [:grid :right] pad)
                 (merge {:series [(c/line "VO₂ max" color points :lineStyle {:width 2.2} :sampling nil
                                          :areaStyle {:color (c/fade color 0.26)})
                                  {:type "scatter" :silent true :symbolSize 8 :tooltip {:show false}
-                                  :itemStyle {:color (c/css-var color) :borderColor (c/css-var "--surface") :borderWidth 2}
+                                  :itemStyle {:color (c/css-var color) :borderColor (c/css-var "--surface")
+                                              :borderWidth 2}
                                   :label (assoc label :position "right")
                                   :data [end]}]})))})))))
 

@@ -159,9 +159,11 @@
   `scope-end` (kind \"adjust\", with the signals that triggered it)."
   ([ds monday model] (create-proposal! ds monday model {}))
   ([ds monday model {:keys [kind scope-end signals delivery] :or {kind "week"}}]
-   (:id (exec! ds ["INSERT INTO plan_proposals (monday, status, model, kind, scope_end, signals, delivery, created_at, updated_at)
-                    VALUES (?, 'running', ?, ?, ?, ?, ?, ?, ?) RETURNING id"
-                   monday model kind scope-end (some-> signals json/write-str) delivery (now) (now)]))))
+   (:id (exec! ds
+               ["INSERT INTO plan_proposals
+                   (monday, status, model, kind, scope_end, signals, delivery, created_at, updated_at)
+                 VALUES (?, 'running', ?, ?, ?, ?, ?, ?, ?) RETURNING id"
+                monday model kind scope-end (some-> signals json/write-str) delivery (now) (now)]))))
 
 (defn set-delivery!
   "\"batch\" (sent to the half-price batch), \"queued\" (waits for the previous
@@ -179,20 +181,25 @@
   (jdbc/with-transaction [tx ds]
     ;; only a running proposal: one withdrawn meanwhile (season plan deleted) stays withdrawn
     (when (pos? (:next.jdbc/update-count
-                 (jdbc/execute-one! tx ["UPDATE plan_proposals SET status = 'open', context = ?, response = ?, warnings = ?,
-                                           usage = ?, updated_at = ? WHERE id = ? AND status = 'running'"
-                                        (json/write-str context) (json/write-str (dissoc response :workouts))
-                                        (json/write-str warnings) (json/write-str usage) (now) id])))
-     (doseq [[i w] (map-indexed vector (or (:changes response) (:workouts response)))]
-      (jdbc/execute! tx (into ["INSERT INTO proposal_items (proposal_id, idx, date, slot, session_id, title,
-                                  duration_min, distance_km, intensity, description, reason, goal, blocks, op, target_id)
+                 (jdbc/execute-one! tx
+                                    ["UPDATE plan_proposals
+                                        SET status = 'open', context = ?, response = ?, warnings = ?, usage = ?,
+                                            updated_at = ?
+                                      WHERE id = ? AND status = 'running'"
+                                     (json/write-str context) (json/write-str (dissoc response :workouts))
+                                     (json/write-str warnings) (json/write-str usage) (now) id])))
+    (doseq [[i w] (map-indexed vector (or (:changes response) (:workouts response)))]
+      (jdbc/execute! tx (into ["INSERT INTO proposal_items
+                                  (proposal_id, idx, date, slot, session_id, title, duration_min, distance_km,
+                                   intensity, description, reason, goal, blocks, op, target_id)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"]
                               (concat [id i] (map (encode-blocks w) workout-cols)
                                       [(or (:op w) "add") (when (pos? (or (:workout_id w) 0)) (:workout_id w))])))))))
 
 (defn proposal [ds id]
   (when-let [p (first (db/query ds ["SELECT id, monday, status, model, kind, scope_end, signals, response, warnings,
-                                            error, usage, delivery, created_at, updated_at FROM plan_proposals WHERE id = ?" id]))]
+                                            error, usage, delivery, created_at, updated_at
+                                       FROM plan_proposals WHERE id = ?" id]))]
     (let [items   (db/query ds ["SELECT * FROM proposal_items WHERE proposal_id = ? ORDER BY date, slot, idx" id])
           targets (into {} (for [t (keep :target_id items)]
                              [t (first (db/query ds ["SELECT * FROM planned_workouts WHERE id = ?" t]))]))]
@@ -327,7 +334,8 @@
   (mapv (fn [p] (let [weeks (get-in p [:response :weeks])]
                   (-> (dissoc p :response :warnings :usage :error)
                       (assoc :weeks (count weeks)
-                             :peak_tss (some->> (seq (remove #(= "Race week" (:phase %)) weeks)) (map :tss) (apply max))))))
+                             :peak_tss
+                             (some->> (seq (remove #(= "Race week" (:phase %)) weeks)) (map :tss) (apply max))))))
         (map #(parse % :response)
              (db/query ds [(str "SELECT " season-cols " FROM season_plans WHERE status = 'archived'
                                  ORDER BY archived_at DESC, id DESC")]))))
@@ -363,8 +371,9 @@
         (jdbc/execute! tx ["UPDATE planned_workouts SET status = 'cancelled', updated_at = ? WHERE id = ?" (now) id]))
       (jdbc/execute! tx ["UPDATE proposal_items SET decision = 'rejected' WHERE decision = 'pending' AND proposal_id IN
                             (SELECT id FROM plan_proposals WHERE status IN ('running', 'open'))"])
-      (jdbc/execute! tx ["UPDATE plan_proposals SET status = 'withdrawn', updated_at = ? WHERE status IN ('running', 'open')"
-                         (now)]))
+      (jdbc/execute! tx
+                     ["UPDATE plan_proposals SET status = 'withdrawn', updated_at = ? WHERE status IN ('running', 'open')"
+                      (now)]))
     (count ids)))
 
 (defn season-target

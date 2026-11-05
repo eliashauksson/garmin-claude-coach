@@ -5,7 +5,8 @@
 (def good-key "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789-a1b2")
 
 (deftest key-file-test
-  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "coach-key" (make-array java.nio.file.attribute.FileAttribute 0)))
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "coach-key"
+                                                              (make-array java.nio.file.attribute.FileAttribute 0)))
         f   (str dir "/coach/anthropic-key")]
     (binding [claude/*key-file* f]
       (testing "a malformed key is refused and nothing is written"
@@ -16,9 +17,11 @@
           (is (= {:connected true :source "file" :hint "sk-ant-…a1b2"} (select-keys st [:connected :source :hint])))
           (is (= good-key (slurp f)))
           (is (= "rw-------" (java.nio.file.attribute.PosixFilePermissions/toString
-                              (java.nio.file.Files/getPosixFilePermissions (.toPath (java.io.File. f)) (make-array java.nio.file.LinkOption 0)))))
+                              (java.nio.file.Files/getPosixFilePermissions (.toPath (java.io.File. f))
+                                                                           (make-array java.nio.file.LinkOption 0)))))
           (is (= "rwx------" (java.nio.file.attribute.PosixFilePermissions/toString
-                              (java.nio.file.Files/getPosixFilePermissions (.toPath (.getParentFile (java.io.File. f))) (make-array java.nio.file.LinkOption 0)))))))
+                              (java.nio.file.Files/getPosixFilePermissions (.toPath (.getParentFile (java.io.File. f)))
+                                                                           (make-array java.nio.file.LinkOption 0)))))))
       (testing "removing it"
         (claude/remove-key!)
         (is (not (.exists (java.io.File. f))))

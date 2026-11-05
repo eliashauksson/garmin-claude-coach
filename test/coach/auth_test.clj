@@ -23,7 +23,8 @@
     (is (= st (auth/with-sync-result st {:ok true} nil)))))
 
 (deftest connected-test
-  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "garmin-tokens" (make-array java.nio.file.attribute.FileAttribute 0)))]
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "garmin-tokens"
+                                                              (make-array java.nio.file.attribute.FileAttribute 0)))]
     (is (false? (auth/connected? (str dir))) "an empty folder: never logged in")
     (is (false? (auth/connected? (str dir "/missing"))) "no folder at all")
     (spit (java.io.File. dir "garmin_tokens.json") "{}")

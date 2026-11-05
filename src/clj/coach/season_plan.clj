@@ -8,12 +8,12 @@
             [coach.ai-settings :as ai]
             [coach.analysis :as analysis]
             [coach.athlete :as athlete]
+            [coach.claude :as claude]
             [coach.i18n :as i18n]
             [coach.plan :as plan]
-            [coach.claude :as claude]
             [coach.planner :as planner]
-            [coach.translate :as translate]
             [coach.season :as season]
+            [coach.translate :as translate]
             [malli.core :as m]
             [malli.error :as me])
   (:import (java.time LocalDate)))
@@ -119,7 +119,8 @@ target weekly TSS. Weekly sessions are planned later, one week at a time, aiming
   "Schema check, and one entry per week to plan, in order."
   [response ctx]
   (when-let [err (m/explain Response response)]
-    (throw (ex-info (i18n/t "Invalid season plan from the model: {0}" (pr-str (me/humanize err))) {:response response})))
+    (throw (ex-info (i18n/t "Invalid season plan from the model: {0}" (pr-str (me/humanize err)))
+                    {:response response})))
   (when (not= (:weeks_to_plan ctx) (mapv :monday (:weeks response)))
     (throw (ex-info (i18n/t "The model's season plan does not cover every week to race day exactly once.")
                     {:expected (:weeks_to_plan ctx) :got (mapv :monday (:weeks response))})))

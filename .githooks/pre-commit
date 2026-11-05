@@ -1,0 +1,9 @@
+#!/bin/sh
+# Lints before each commit (make lint, clj-kondo) when Clojure files are staged.
+# Installed with `make hooks`. Skip once with: git commit --no-verify
+git diff --cached --name-only --diff-filter=ACMR | grep -qE '\.(clj|cljs|cljc|edn)$' || exit 0
+if ! make -s lint; then
+  echo
+  echo "pre-commit: clj-kondo found problems (above). Fix them, or commit with --no-verify."
+  exit 1
+fi

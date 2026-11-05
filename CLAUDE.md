@@ -7,7 +7,7 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - `make run`: dashboard on http://127.0.0.1:8081/, syncs on start and every 2 h (8080 is the installed app's port)
 - `make offline`: port 8090, no sync · `make watch`: shadow-cljs watch (reload the page) · `make build`: `npm run release`
 - `make test`: `clojure -M:test` (cognitect test-runner; one ns: `clojure -M:test -n coach.plan-test`)
-- `make lint`: clj-kondo over src + test (`.clj-kondo/config.edn`); keep it at 0 warnings
+- `make lint`: clj-kondo over src + test (`.clj-kondo/config.edn`); keep it at 0 warnings · `make hooks`: runs it before every commit (.githooks/pre-commit)
 - `make app`: frontend release + `clojure -T:build uber` → target/garmin-coach.jar (installer/)
 - `make sync` / `make status` (coach.sync CLI) · `make backup` / `backups` / `restore FILE=…` (coach.backup CLI)
 - Data folder: `$COACH_DATA_DIR`, else config.edn, else data/ (coach.paths)
@@ -60,7 +60,8 @@ i18n_de.cljc, i18n_fr.cljc (~1000 lines each), resources/public/css/app.css, doc
 Specs by path: coach-dashboard-spec.md (dashboard), training-principles.md (coaching rules the planner/rules cite), garmin-coach-plan.md (original project plan).
 
 ## Conventions
-- `!` suffix for side effects (`start!`, `save!`, `daily!`, `incremental!`); pure namespaces say "Pure" in the ns docstring
+- `!` suffix for side effects (`start!`, `save!`, `daily!`, `incremental!`); pure namespaces say "Pure" in the ns docstring and are listed in the `pure` ns-group of .clj-kondo/config.edn (lint rejects db/files/network/Claude requires there)
+- Lines up to 120 characters; a long string (a `t` text is one literal, the dictionary key) may run over on its own line. Requires sorted; no local named `t` where `t` (i18n) is referred
 - Errors: `(throw (ex-info (i18n/t "User-facing message {0}" …) {:data …}))`; background jobs catch Throwable, `println` and record the result
 - Claude never changes anything by itself: proposals/edits are stored and applied only when the athlete accepts
 - UI text: English is the key; German is Swiss ("ss", never "ß", "du"), French is Swiss ("tu")

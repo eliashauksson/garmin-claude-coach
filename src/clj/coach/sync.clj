@@ -445,10 +445,12 @@
                                              {:activity (-> (select-keys row db/activity-cols)
                                                             (assoc :raw raw))
                                               :stream   (db/load-stream ds old)})]]
-       (do (next.jdbc/execute! ds ["UPDATE OR IGNORE activity_feedback SET activity_id = ? WHERE activity_id = ?" new old])
-           (next.jdbc/execute! ds ["DELETE FROM activity_feedback WHERE activity_id = ?" old])
-           (drop-activity! ds old)
-           new)))))
+       (do
+         (next.jdbc/execute! ds
+                             ["UPDATE OR IGNORE activity_feedback SET activity_id = ? WHERE activity_id = ?" new old])
+         (next.jdbc/execute! ds ["DELETE FROM activity_feedback WHERE activity_id = ?" old])
+         (drop-activity! ds old)
+         new)))))
 
 (defn garmin-duplicate?
   "Whether a Garmin activity is a ride already stored from an activity-only
@@ -557,7 +559,8 @@
 (defn status [ds]
   (merge
    (first (db/query ds ["SELECT count(*) AS streams, sum(samples = 0) AS streams_missing FROM activity_streams"]))
-   (first (db/query ds ["SELECT count(*) AS scored, round(sum(tss)) AS total_tss FROM activity_metrics WHERE tss IS NOT NULL"]))
+   (first (db/query ds
+                    ["SELECT count(*) AS scored, round(sum(tss)) AS total_tss FROM activity_metrics WHERE tss IS NOT NULL"]))
    (first (db/query ds ["SELECT count(*) AS activities, min(date) AS first_activity,
                                 max(date) AS last_activity FROM activities"]))
    (first (db/query ds ["SELECT count(*) AS wellness_days, min(date) AS first_day,
@@ -576,7 +579,8 @@
       "status"  (prn (status ds))
       "metrics" (do (println "Scored" (analysis/compute-metrics! ds) "activities")
                     (analysis/update-eftp! ds))
-      (let [_ (when-not (#{"sync" "backfill" "history" "streams" "intraday" "vo2max" "loadtrend" "thresholds" "overview"} (or cmd "sync"))
+      (let [_ (when-not (#{"sync" "backfill" "history" "streams" "intraday" "vo2max" "loadtrend" "thresholds"
+                           "overview"} (or cmd "sync"))
                 (println "Unknown command:" cmd) (System/exit 2))
             {:keys [ok]}
             (run-cli-sync!
@@ -589,7 +593,8 @@
                                      (analysis/compute-metrics! ds)
                                      (analysis/update-eftp! ds))
                     "intraday"   (let [days (if n (parse-long n) 7)]
-                                   (sync-intraday! src ds (season/add-days (season/today) (- (dec days))) (season/today)))
+                                   (sync-intraday! src ds (season/add-days (season/today) (- (dec days)))
+                                                   (season/today)))
                     "vo2max"     (sync-vo2max! src ds epoch (season/today))
                     "loadtrend"  (sync-load-trend! src ds (or n epoch) (season/today))
                     "overview"   (sync-overview! src ds (season/today))

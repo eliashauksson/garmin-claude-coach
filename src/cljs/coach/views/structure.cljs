@@ -47,10 +47,14 @@
         total (max 1 (w/total-s blocks))]
     (when (seq segs)
       [:div.wk-profile {:role "img" :style (when height {:height height})
-                        :aria-label (str/join ", " (for [s segs] (str (kind-label (:kind s)) " " (dur (- (:end s) (:start s))))))}
+                        :aria-label (str/join ", "
+                                              (for [s segs]
+                                                (str (kind-label (:kind s)) " " (dur (- (:end s) (:start s))))))}
        (for [[i s] (map-indexed vector segs)]
          [:div {:replicant/key i :class (:kind s)
-                :title (str/join " · " (remove str/blank? [(kind-label (:kind s)) (dur (- (:end s) (:start s))) (target-str s)]))
+                :title (str/join " · "
+                                 (remove str/blank?
+                                         [(kind-label (:kind s)) (dur (- (:end s) (:start s))) (target-str s)]))
                 :style {:flex (str (/ (- (:end s) (:start s)) total) " 1 0")}}])])))
 
 (defn- step-line [s]

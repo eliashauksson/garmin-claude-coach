@@ -140,7 +140,8 @@ Rules:
         out (:translations response)]
     (when-not (and (= (count out) (count texts))
                    (every? (fn [o] (every? #(not (str/blank? (get o (keyword %)))) targets)) out))
-      (throw (ex-info "The translation didn't match the texts sent; nothing stored." {:sent (count texts) :got (count out)})))
+      (throw (ex-info "The translation didn't match the texts sent; nothing stored."
+                      {:sent (count texts) :got (count out)})))
     (doseq [l targets]
       (store! ds l (map vector texts (map #(get % (keyword l)) out))))
     (count texts)))

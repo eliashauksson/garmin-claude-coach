@@ -24,7 +24,8 @@
   "The installed layout: <app folder>/app/garmin-coach.jar."
   []
   (try
-    (let [f (some-> (Class/forName "coach.paths__init") .getProtectionDomain .getCodeSource .getLocation .toURI io/file)]
+    (let [f (some-> (Class/forName "coach.paths__init") .getProtectionDomain .getCodeSource .getLocation .toURI
+                    io/file)]
       (when (and f (.isFile f) (= "app" (some-> f .getParentFile .getName)))
         (-> f .getParentFile .getParentFile)))
     (catch Throwable _ nil)))
@@ -171,7 +172,8 @@
            (.write out (.getBytes (str "[" (java.time.LocalDateTime/now) ": older lines removed]\n") "UTF-8"))
            (.write out ^bytes tail))
          (java.nio.file.Files/move (.toPath tmp) (.toPath f)
-                                   (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+                                   (into-array java.nio.file.CopyOption
+                                               [java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
          true)))))
 
 (defn unlock-data-dir! []

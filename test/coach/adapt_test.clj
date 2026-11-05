@@ -20,8 +20,9 @@
   (is (= [] (adapt/signals calm)))
   (testing "one easy run too hard is noted, three trigger"
     (let [one   (adapt/signals (assoc calm :acts [(run 1 "2027-01-11" 45 :avg_hr 158)]))
-          three (adapt/signals (assoc calm :acts (for [[i d] (map-indexed vector ["2027-01-11" "2027-01-12" "2027-01-13"])]
-                                                   (run i d 45 :avg_hr 155))))]
+          three (adapt/signals (assoc calm :acts
+                                      (for [[i d] (map-indexed vector ["2027-01-11" "2027-01-12" "2027-01-13"])]
+                                        (run i d 45 :avg_hr 155))))]
       (is (= [:info false] ((juxt :severity :trigger?) (by one :easy-too-hard))))
       (is (= [:warn true] ((juxt :severity :trigger?) (by three :easy-too-hard))))
       (is (not= (:key (by one :easy-too-hard)) (:key (by three :easy-too-hard))))))
@@ -34,13 +35,15 @@
   (testing "RPE: watch value or in-app; pain"
     (is (contains? (ids (adapt/signals (assoc calm :acts [(run 3 "2027-01-13" 40 :garmin_rpe 8.0)]))) :rpe-high))
     (is (contains? (ids (adapt/signals (assoc calm :acts [(run 3 "2027-01-13" 40 :rpe 9)]))) :rpe-high))
-    (is (= :high (:severity (by (adapt/signals (assoc calm :acts [(run 3 "2027-01-13" 40 :pain 1 :pain_location "Achilles")]))
-                                :pain)))))
+    (is (= :high
+           (:severity (by (adapt/signals (assoc calm :acts [(run 3 "2027-01-13" 40 :pain 1 :pain_location "Achilles")]))
+                          :pain)))))
   (testing "wellness two days in a row"
     (is (contains? (ids (adapt/signals (assoc calm :wellness [{:date "2027-01-13" :hrv_status "UNBALANCED"}
                                                               {:date "2027-01-14" :hrv_status "LOW"}])))
                    :hrv-unbalanced))
-    (is (not (contains? (ids (adapt/signals (assoc calm :wellness [{:date "2027-01-13" :rhr 52} {:date "2027-01-14" :rhr 58}])))
+    (is (not (contains? (ids (adapt/signals (assoc calm :wellness
+                                                   [{:date "2027-01-13" :rhr 52} {:date "2027-01-14" :rhr 58}])))
                         :rhr-high))))
   (testing "missed long run and missed volume"
     (let [ws [{:id 1 :date "2027-01-11" :session_id "EASY" :status "missed" :duration_min 45}
@@ -51,7 +54,8 @@
       (is (contains? (ids s) :missed-volume))))
   (testing "fitter: easy-run efficiency up, never triggers a proposal"
     (let [s (adapt/signals (assoc calm :acts (concat (for [i (range 3)] (run i (str "2026-12-0" (+ 3 i)) 40 :ef 1.20))
-                                                     (for [i (range 3)] (run (+ 10 i) (str "2027-01-0" (+ 5 i)) 40 :ef 1.30)))))]
+                                                     (for [i (range 3)]
+                                                       (run (+ 10 i) (str "2027-01-0" (+ 5 i)) 40 :ef 1.30)))))]
       (is (= [:info false] ((juxt :severity :trigger?) (by s :fitter)))))))
 
 (defn- temp-ds []
@@ -66,12 +70,16 @@
   (let [ds  (temp-ds)
         w1  (plan/add-workout! ds (assoc base-w :date "2027-01-15" :session_id "THR"))
         w2  (plan/add-workout! ds (assoc base-w :date "2027-01-16" :session_id "LONG" :distance_km 24))
-        pid (plan/create-proposal! ds "2027-01-11" "test" {:kind "adjust" :scope-end "2027-01-24" :signals [{:id "x"}]})]
+        pid (plan/create-proposal! ds "2027-01-11" "test"
+                                   {:kind "adjust" :scope-end "2027-01-24" :signals [{:id "x"}]})]
     (plan/finish-proposal! ds pid {:context {} :warnings [] :usage {}
                                    :response {:summary "s" :warnings []
-                                              :changes [(assoc base-w :op "change" :workout_id w1 :date "2027-01-15" :session_id "EASY")
-                                                        (assoc base-w :op "remove" :workout_id w2 :date "2027-01-16" :session_id "LONG")
-                                                        (assoc base-w :op "add" :workout_id 0 :date "2027-01-17" :session_id "REC")]}})
+                                              :changes [(assoc base-w :op "change" :workout_id w1 :date "2027-01-15"
+                                                               :session_id "EASY")
+                                                        (assoc base-w :op "remove" :workout_id w2 :date "2027-01-16"
+                                                               :session_id "LONG")
+                                                        (assoc base-w :op "add" :workout_id 0 :date "2027-01-17"
+                                                               :session_id "REC")]}})
     (is (= ["change" "remove" "add"] (map :op (:items (plan/proposal ds pid)))))
     (is (= "THR" (get-in (plan/proposal ds pid) [:items 0 :current :session_id])) "shows what it changes")
     (doseq [i [0 1 2]] (plan/decide-item! ds pid i "accepted" nil))
@@ -87,12 +95,16 @@
         w1  (plan/add-workout! ds (assoc base-w :date "2027-01-15" :session_id "THR"))
         w2  (plan/add-workout! ds (assoc base-w :date "2027-01-16" :session_id "LONG" :distance_km 24))
         _   (plan/add-workout! ds (assoc base-w :date "2027-01-12" :session_id "EASY"))
-        pid (plan/create-proposal! ds "2027-01-11" "test" {:kind "adjust" :scope-end "2027-01-24" :signals [{:id "x"}]})]
+        pid (plan/create-proposal! ds "2027-01-11" "test"
+                                   {:kind "adjust" :scope-end "2027-01-24" :signals [{:id "x"}]})]
     (plan/finish-proposal! ds pid {:context {} :warnings [] :usage {}
                                    :response {:summary "s" :warnings []
-                                              :changes [(assoc base-w :op "change" :workout_id w1 :date "2027-01-15" :session_id "EASY")
-                                                        (assoc base-w :op "remove" :workout_id w2 :date "2027-01-16" :session_id "LONG")
-                                                        (assoc base-w :op "add" :workout_id 0 :date "2027-01-17" :session_id "REC")]}})
+                                              :changes [(assoc base-w :op "change" :workout_id w1 :date "2027-01-15"
+                                                               :session_id "EASY")
+                                                        (assoc base-w :op "remove" :workout_id w2 :date "2027-01-16"
+                                                               :session_id "LONG")
+                                                        (assoc base-w :op "add" :workout_id 0 :date "2027-01-17"
+                                                               :session_id "REC")]}})
     (plan/accept-all! ds pid true)
     (is (= [["2027-01-12" "EASY"] ["2027-01-15" "EASY"] ["2027-01-17" "REC"]]
            (map (juxt :date :session_id) (plan/workouts ds "2027-01-11" "2027-01-24")))

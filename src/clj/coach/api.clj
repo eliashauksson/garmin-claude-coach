@@ -1,23 +1,25 @@
 (ns coach.api
   "Local JSON API for the dashboard. Binds to 127.0.0.1 only."
   (:require [clojure.data.json :as json]
-            [coach.analysis :as analysis]
-            [coach.app :as coach-app]
-            [coach.paths :as paths]
-            [coach.auth :as auth]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
             [coach.adapt :as adapt]
             [coach.ai-settings :as ai]
+            [coach.analysis :as analysis]
+            [coach.app :as coach-app]
             [coach.athlete :as athlete]
             [coach.athlete-chat :as athlete-chat]
+            [coach.auth :as auth]
             [coach.backup :as backup]
+            [coach.claude :as claude]
             [coach.coros-auth :as coros-auth]
             [coach.costs :as costs]
             [coach.db :as db]
             [coach.i18n :as i18n]
             [coach.load-model :as load-model]
             [coach.overview :as overview]
+            [coach.paths :as paths]
             [coach.plan :as plan]
-            [coach.claude :as claude]
             [coach.planner :as planner]
             [coach.readiness :as readiness]
             [coach.readiness-estimate :as readiness-estimate]
@@ -26,8 +28,6 @@
             [coach.sync :as sync]
             [coach.token :as token]
             [coach.translate :as translate]
-            [clojure.java.io :as io]
-            [clojure.string :as str]
             [reitit.ring :as ring]
             [ring.adapter.jetty :as jetty]
             [ring.middleware.not-modified :refer [wrap-not-modified]]
@@ -306,7 +306,9 @@
                             (claude/principles)
                             (season-plan/race-date!)
                             (json-response 202 {:id (season-plan/draft! ds)})))
-         :delete (guarded (fn [_] (season-plan/delete! ds (season/today)) (ok-tr ds (season-plan/overview ds (season/today)))))}]
+         :delete (guarded (fn [_]
+                            (season-plan/delete! ds (season/today))
+                            (ok-tr ds (season-plan/overview ds (season/today)))))}]
     ["/restore" {:post (guarded (fn [req]
                                   (season-plan/restore! ds (:id (body req)))
                                   (ok-tr ds (season-plan/overview ds (season/today)))))}]]
@@ -315,7 +317,8 @@
                                    (claude/api-key)
                                    (claude/principles) ; fails without athlete info
                                    (let [note (not-empty (:note (body req)))
-                                         sigs (filter :trigger? (adapt/signals (planner/adapt-inputs ds (season/today))))]
+                                         sigs (filter :trigger?
+                                                      (adapt/signals (planner/adapt-inputs ds (season/today))))]
                                      (json-response 202 {:id (planner/propose-adjustment! ds sigs note)}))))}]
    ["/open"      {:get (fn [_] (ok (plan/open-proposals ds)))}]
    ["/proposals"
@@ -357,7 +360,8 @@
         :put    (guarded (fn [req]
                            (let [{:keys [content summary source]} (body req)]
                              (athlete/save! content summary source)
-                             (when summary (claude/translate-soon! (translate/overview-texts summary))) ; the chat's new overview
+                             (when summary
+                               (claude/translate-soon! (translate/overview-texts summary))) ; the chat's new overview
                              (ok (athlete-tr ds (athlete/status))))))
         :delete (guarded (fn [_] (athlete/delete!) (ok (athlete/status))))}]
    ["/chat"    {:post (guarded (fn [req]
@@ -365,7 +369,8 @@
                                  (try (ok (athlete-chat/chat (:messages (body req))))
                                       (catch clojure.lang.ExceptionInfo e (throw e))
                                       (catch Exception e
-                                        (json-response 502 {:error (str "Claude request failed: " (ex-message e))})))))}]
+                                        (json-response 502
+                                                       {:error (str "Claude request failed: " (ex-message e))})))))}]
    ["/summary" {:post (guarded (fn [_]
                                  (claude/api-key)
                                  (swap! athlete-chat/summary-job assoc :failed nil) ; manual retry
@@ -515,7 +520,8 @@
                               (ok (analysis/activities ds {:sport sport :from from :to to
                                                            :limit (some-> limit parse-long)}))))}]
     ;; recent activities waiting for "How did it go?"
-    ["/feedback/due" {:get (fn [{:keys [query-params]}] (ok (analysis/feedback-due ds (get query-params "date" (season/today)))))}]
+    ["/feedback/due"
+     {:get (fn [{:keys [query-params]}] (ok (analysis/feedback-due ds (get query-params "date" (season/today)))))}]
     ["/activities/:id/feedback"
      {:put (guarded (fn [{:keys [path-params] :as req}]
                       (analysis/save-feedback! ds (parse-long (:id path-params)) (body req))
@@ -598,8 +604,9 @@
                                          (do (coach-app/set-pending! {:restore (str f) :delete-after true})
                                              (restart-soon!)
                                              (ok {:restarting true}))
-                                         (do (.delete f)
-                                             (json-response 400 {:error (i18n/t "That file isn't a Garmin Coach backup.")}))))))}]
+                                         (let [msg (i18n/t "That file isn't a Garmin Coach backup.")]
+                                           (.delete f)
+                                           (json-response 400 {:error msg}))))))}]
      ["/download" {:get (token-guard
                          (fn [_]
                           ;; a fresh backup, kept in data/backups like the others
@@ -741,7 +748,8 @@
   is trimmed."
   []
   (let [ex (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
-    (.scheduleAtFixedRate ex #(coach-app/check-for-update!) 0 12 java.util.concurrent.TimeUnit/HOURS) ; installed app only
+    (.scheduleAtFixedRate ex #(coach-app/check-for-update!) 0 12
+                          java.util.concurrent.TimeUnit/HOURS) ; installed app only
     ;; app.log stays open while the app runs: reopen it, trimmed
     (.scheduleAtFixedRate ex #(when @log-stream (try (log-to-file!) (catch Throwable _)))
                           12 12 java.util.concurrent.TimeUnit/HOURS)
@@ -817,8 +825,9 @@
   "Whether the dashboard already answers on `port`."
   [port]
   (try
-    (let [c (doto ^java.net.HttpURLConnection (.openConnection (java.net.URL. (str "http://127.0.0.1:" port "/api/lang")))
-              (.setConnectTimeout 1000) (.setReadTimeout 3000))]
+    (let [url (java.net.URL. (str "http://127.0.0.1:" port "/api/lang"))
+          c   (doto ^java.net.HttpURLConnection (.openConnection url)
+                (.setConnectTimeout 1000) (.setReadTimeout 3000))]
       (= 200 (.getResponseCode c)))
     (catch Exception _ false)))
 
@@ -846,7 +855,8 @@
   pending (restore, move the data), then starts the dashboard."
   [opts log?]
   (when-not (paths/lock-data-dir! 30000)
-    (throw (ex-info (str "The data folder " (paths/data-dir) " is in use by another Garmin Coach. Quit that one first.") {})))
+    (throw (ex-info (str "The data folder " (paths/data-dir) " is in use by another Garmin Coach. Quit that one first.")
+                    {})))
   (coach-app/apply-pending! (fn [f] (backup/restore! (doto (db/datasource) db/migrate!) f))
                             {:after-switch (when log? log-to-file!)})
   (start! opts))

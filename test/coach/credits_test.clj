@@ -1,9 +1,9 @@
 (ns coach.credits-test
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is testing]]
+            [coach.claude :as claude]
             [coach.costs :as costs]
-            [coach.db :as db]
-            [coach.claude :as claude])
+            [coach.db :as db])
   (:import (com.anthropic.errors BadRequestException UnexpectedStatusCodeException)
            (com.anthropic.core JsonValue)
            (com.anthropic.core.http Headers)))

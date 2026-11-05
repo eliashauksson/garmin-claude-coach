@@ -105,7 +105,8 @@
         [:div.cal-total {:replicant/key "t"} (ui/hm (sum ui/active-secs))]
         [:div.sub {:replicant/key "s"}
          (str/join " · " (remove nil? [(if (= 1 (count acts)) (t "1 activity") (t "{0} activities" (count acts)))
-                                       (let [km (/ (sum :distance_m) 1000)] (when (pos? km) (str (js/Math.round km) " km")))
+                                       (let [km (/ (sum :distance_m) 1000)]
+                                         (when (pos? km) (str (js/Math.round km) " km")))
                                        (let [tss (sum :tss)] (when (pos? tss) (str (js/Math.round tss) " TSS")))]))]
         [:div.cal-fams {:replicant/key "f"}
          (for [[f s] fams]
@@ -125,7 +126,8 @@
                       :class (remove nil? [(when (= d today) "today") (when (pos? (compare d today)) "future")])}
         (if (pos? (compare d today))
           [:div.cal-date [:span.cal-dow ((day-names) i)] (day-label d)]
-          [:a.cal-date {:href (str "#/day/" d) :title (t "Open the day")} [:span.cal-dow ((day-names) i)] (day-label d)])
+          [:a.cal-date {:href (str "#/day/" d) :title (t "Open the day")} [:span.cal-dow ((day-names) i)]
+           (day-label d)])
         (health-item d (well-by-date d))
         (map activity-item (acts-by-date d))
         (map planned-item (remove #(= "done" (:status %)) (plan-by-date d)))])]))

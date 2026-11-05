@@ -37,7 +37,8 @@
 (defn- appearance-card [theme-choice]
   (ui/card {:flex "1 1 320px"}
            [:div.lab (t "Appearance")]
-           (choice theme-choice [["light" (t "Light theme")] ["dark" (t "Dark theme")] ["system" (t "Like the system")]] [:set-theme])))
+           (choice theme-choice [["light" (t "Light theme")] ["dark" (t "Dark theme")] ["system" (t "Like the system")]]
+                   [:set-theme])))
 
 (defn- backup-time
   "\"2 Nov, 07:41\" from a backup's created stamp (2026-11-02-074100)."
@@ -138,7 +139,8 @@
            [:div.lab "Garmin" [:span.sp] (connected-pill (not (false? (:garmin setup))))]
            (if (false? (:garmin setup))
              (list
-              [:div {:replicant/key "t"} (t "The app reads your Garmin data through Garmin Connect. Log in once with your Garmin account:")]
+              [:div {:replicant/key "t"}
+               (t "The app reads your Garmin data through Garmin Connect. Log in once with your Garmin account:")]
               (garmin-login login)
               [:div.sub {:replicant/key "n"} (t "Your password is passed to Garmin and not stored. The login stays on this computer and lasts about 6 months; the app reminds you before it runs out. Nothing is ever written to Garmin.")])
              (list
@@ -147,7 +149,8 @@
                  "expired" (t "Garmin login expired")
                  "unknown" (t "Garmin login not recorded")
                  (if (:days_left auth)
-                   (t "Garmin login: about {0} days left (until about {1})" (:days_left auth) (ui/date-short (:expires_on auth)))
+                   (t "Garmin login: about {0} days left (until about {1})" (:days_left auth)
+                      (ui/date-short (:expires_on auth)))
                    "—"))]
               (when-let [w (status/when-str last_ok)]
                 [:div.sub {:replicant/key "l"} (t "Last successful sync: {0}" w)])
@@ -176,7 +179,8 @@
              [:div.lab "Coros" [:span.sp] (connected-pill connected)]
              (if-not connected
                (list
-                [:div {:replicant/key "t"} (t "For rides recorded on a Coros bike computer. Sign in once on the Coros page:")]
+                [:div {:replicant/key "t"}
+                 (t "For rides recorded on a Coros bike computer. Sign in once on the Coros page:")]
                 [:div.connect-row {:replicant/key "b"} (coros-connect-button busy (t "Connect Coros"))]
                 [:div.sub {:replicant/key "n"} (t "Every sync then fetches your new rides, with their per-second data. The login stays on this computer. Nothing is ever written to Coros.")])
                (list
@@ -186,7 +190,8 @@
                    (if-let [w (status/when-str connected_at)] (t "Connected since {0}" w) "—"))]
                 (if (:ok last_sync)
                   [:div.sub {:replicant/key "l"}
-                   (t "Last Coros sync: {0}, {1} new activities" (status/when-str (:finished_at last_sync)) (:new last_sync))]
+                   (t "Last Coros sync: {0}, {1} new activities" (status/when-str (:finished_at last_sync))
+                      (:new last_sync))]
                   (when-let [w (status/when-str (:last_ok last_sync))]
                     [:div.sub {:replicant/key "l"} (t "Last successful sync: {0}" w)]))
                 (cond
@@ -238,7 +243,8 @@
                [:div.sub {:replicant/key "u"} (t "This is the newest version.")])
              (when-let [e (get-in ui-state [:app-update :error])] [:div.error e])
              (if server
-               [:div.sub {:replicant/key "srv"} (t "Runs on a server: it is always on and syncs every 2 hours by itself.")]
+               [:div.sub {:replicant/key "srv"}
+                (t "Runs on a server: it is always on and syncs every 2 hours by itself.")]
                (list
                 [:div.lab {:replicant/key "asl" :style {:margin-top "6px"}} (t "Start with the computer")]
                 (if installed
@@ -269,7 +275,8 @@
                 (t "Move the data here")]]
               (when existing
                 [:div {:replicant/key "ex"}
-                 [:div (t "That folder already has Garmin Coach data. Use it instead? The current data stays where it is.")]
+                 [:div
+                  (t "That folder already has Garmin Coach data. Use it instead? The current data stays where it is.")]
                  [:div.connect-row
                   [:button.btn-ink {:disabled busy :on {:click [[:data-dir :use]]}} (t "Use that data")]
                   [:button.pill {:on {:click [[:data-dir-cancel]]}} (t "Cancel")]]])
@@ -289,7 +296,8 @@
                 [:div {:replicant/key "t"} (t "The coach plans with Claude, through your own API key (you pay Anthropic per request; see Claude & API costs).")]
                 [:ol.steps {:replicant/key "s"}
                  [:li [:span (t "Create a key in the Claude Console, and add some credit under Billing:") " "
-                       [:a {:href "https://platform.claude.com/settings/keys" :target "_blank" :rel "noopener noreferrer"}
+                       [:a
+                        {:href "https://platform.claude.com/settings/keys" :target "_blank" :rel "noopener noreferrer"}
                         "platform.claude.com/settings/keys"]]]
                  [:li (t "Paste it here:")]]
                 [:div.connect-row {:replicant/key "f"} field save])
@@ -319,8 +327,10 @@
      (if (= "claude" tb)
        (costs/view s (first (urls route)))
        (list
-        [:div.row {:replicant/key "r0"} (garmin-card sync (get-in s [:ui :garmin-login])) (claude-card (get data key-url) (get-in s [:ui :claude-key]))]
+        [:div.row {:replicant/key "r0"} (garmin-card sync (get-in s [:ui :garmin-login]))
+         (claude-card (get data key-url) (get-in s [:ui :claude-key]))]
         [:div.row {:replicant/key "rc"} (coros-card sync (get-in s [:ui :coros]))]
         [:div.row {:replicant/key "r1"} (language-card) (appearance-card theme-choice)]
-        [:div.row {:replicant/key "r2"} (app-card (get data app-url) (:ui s)) (data-card (get data app-url) (get-in s [:ui :data-dir]))]
+        [:div.row {:replicant/key "r2"} (app-card (get data app-url) (:ui s))
+         (data-card (get data app-url) (get-in s [:ui :data-dir]))]
         [:div.row {:replicant/key "r3"} (backup-card (get data status/backup-url) (get-in s [:ui :restore]))]))]))

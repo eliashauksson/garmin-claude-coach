@@ -58,7 +58,10 @@
         (is (< (Math/abs (- a 0.35)) 0.02))
         (is (< (Math/abs (- b 0.5)) 0.03))))
     (testing "too little data, no calibration"
-      (is (nil? (epoc/power-calibration (take 1 (map #(update-in % [:hr :i] (fn [a] (java.util.Arrays/copyOf ^doubles a 20))) rides))))))
+      (is (nil? (epoc/power-calibration (take 1
+                                              (map #(update-in % [:hr :i]
+                                                               (fn [a] (java.util.Arrays/copyOf ^doubles a 20)))
+                                                   rides))))))
     (testing "which signal a ride's load comes from"
       (let [th {:max_hr 196 :ftp ftp} cal [0.35 0.5]]
         (is (= "hr+power" (:load_method (epoc/activity-load p cal th true (ride 3600)))))

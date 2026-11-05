@@ -61,7 +61,8 @@
 (defn readiness-card [{:keys [feedback estimate] :as r}]
   [:section.card.readiness {:replicant/key "readiness"}
    (ui/label-row {:icon :bolt :accent (tone-var (tone (:level r)) "--text-3")
-                  :tint (case (tone (:level r)) :good "--tint-green" :warn "--tint-amber" :bad "--tint-red" "--surface-2")
+                  :tint (case (tone (:level r)) :good "--tint-green" :warn "--tint-amber" :bad "--tint-red"
+                          "--surface-2")
                   :soft? true :label (t "Training readiness") :info (if estimate "readiness-estimate" "readiness")
                   :right (cond estimate (ui/pill (t "Estimate"))
                                feedback (ui/pill (ui/enum feedback)))})
@@ -82,7 +83,8 @@
 (defn- stage-bar [{:keys [deep_s light_s rem_s awake_s]}]
   (when (some ui/num? [deep_s light_s rem_s awake_s])
     [:div.stages
-     (for [[k v color] [[:deep deep_s "--deep"] [:light light_s "--purple-2"] [:rem rem_s "--pink"] [:awake awake_s "--amber"]]
+     (for [[k v color] [[:deep deep_s "--deep"] [:light light_s "--purple-2"] [:rem rem_s "--pink"]
+                        [:awake awake_s "--amber"]]
            :when (and (ui/num? v) (pos? v))]
        [:div {:replicant/key k :style {:flex v :background (str "var(" color ")")}}])]))
 
@@ -114,8 +116,9 @@
      (vital {:key "rhr" :info "rhr" :tint "red" :tint-var "--tint-red" :icon :heart :accent "--red"
              :label (t "Resting heart rate") :value rhr :unit "bpm"
              :sub (when rhr_delta
-                    [:span [:b {:style {:color (cond (pos? rhr_delta) "var(--red)" (neg? rhr_delta) "var(--green-ink)")}}
-                            (ui/signed rhr_delta)]
+                    [:span
+                     [:b {:style {:color (cond (pos? rhr_delta) "var(--red)" (neg? rhr_delta) "var(--green-ink)")}}
+                      (ui/signed rhr_delta)]
                      " " (t "vs the 7 days before ({0})" rhr_7d)])
              :visual (when (some :rhr d14)
                        (c/spark "spark-rhr" "h44" {:color "--red" :values (mapv :rhr d14)}))})

@@ -31,7 +31,8 @@
   (let [d (ui/parse-date iso)] (str (ui/weekdays (.getDay d)) " " (ui/day-month d))))
 
 (defn session-chip [session-id]
-  [:span.chip {:class (if (or (strength? session-id) (cross? session-id)) "other" "run")} [:span.dot] (session-names session-id session-id)])
+  [:span.chip {:class (if (or (strength? session-id) (cross? session-id)) "other" "run")} [:span.dot]
+   (session-names session-id session-id)])
 
 (defn- amount [{:keys [duration_min distance_km]}]
   (str/join " · " (remove nil? [(when (and duration_min (pos? duration_min)) (str duration_min " min"))
@@ -46,7 +47,9 @@
    [:div.plan-what
     [:div (session-chip session_id) " " [:a.plain {:href (str "#/workouts/" id)} [:b title]]]
     [:div.sub (str/join " · " (remove str/blank? [(amount w) intensity]))]]
-   (let [patch (fn [k label body] [:button.pill {:replicant/key k :on {:click [[:api "PATCH" (str "/api/plan/workouts/" id) body]]}} label])]
+   (let [patch (fn [k label body] [:button.pill
+                                   {:replicant/key k :on {:click [[:api "PATCH" (str "/api/plan/workouts/" id) body]]}}
+                                   label])]
      [:div.plan-actions
       (case status
         "done"    (if (:activity_id w)
@@ -56,7 +59,8 @@
         "missed"  (list [:span.pill.missed {:replicant/key "s"} (t "missed")]
                         (patch "m" (t "Mark done") {:status "done"}) (patch "k" (t "Skip") {:status "skipped"}))
         (list (patch "m" (t "Mark done") {:status "done"}) (patch "k" (t "Skip") {:status "skipped"})
-              [:button.pill {:replicant/key "d" :on {:click [[:api "DELETE" (str "/api/plan/workouts/" id) nil]]}} (t "Remove")]))])])
+              [:button.pill {:replicant/key "d" :on {:click [[:api "DELETE" (str "/api/plan/workouts/" id) nil]]}}
+               (t "Remove")]))])])
 
 ;; ---------------------------------------------------------------------------
 ;; Proposal review
@@ -80,8 +84,10 @@
      [:label (t "Slot") " "
       [:select {:on {:change [(set :slot)]}}
        (for [s ["AM" "PM"]] [:option {:replicant/key s :value s :selected (= s (v :slot))} s])]]
-     [:label (t "Minutes") " " [:input {:type "number" :min 0 :value (v :duration_min) :on {:input [(set :duration_min)]}}]]
-     [:label "km " [:input {:type "number" :min 0 :step 0.5 :value (v :distance_km) :on {:input [(set :distance_km)]}}]]]))
+     [:label (t "Minutes") " "
+      [:input {:type "number" :min 0 :value (v :duration_min) :on {:input [(set :duration_min)]}}]]
+     [:label "km "
+      [:input {:type "number" :min 0 :step 0.5 :value (v :distance_km) :on {:input [(set :distance_km)]}}]]]))
 
 (defn- clean-edits [edits]
   (cond-> edits
@@ -99,8 +105,9 @@
       [:div (session-chip session_id) " " [:b title] " "
        (case (:op item)
          "change" (let [c (:current item)]
-                    [:span.pill (t "changes {0}" (str (session-names (:session_id c)) " " (short-date (:date c)) " " (:slot c)
-                                                      (some->> (amount c) not-empty (str ", "))))])
+                    [:span.pill
+                     (t "changes {0}" (str (session-names (:session_id c)) " " (short-date (:date c)) " " (:slot c)
+                                           (some->> (amount c) not-empty (str ", "))))])
          "remove" [:span.pill.missed (t "remove")]
          (diff-badge item existing))]
       [:div.sub (str/join " · " (remove str/blank? [(amount item) intensity]))]
@@ -121,7 +128,9 @@
           (if editing (t "Cancel edit") (t "Edit"))]
          [:button.pill {:replicant/key "r" :on {:click [[:api "POST" url {:decision "rejected"}]]}} (t "Reject")])
         (list
-         [:span.pill {:replicant/key "d"} (case decision "accepted" (t "✓ accepted") "edited" (t "✓ accepted (edited)") "rejected" (t "✗ rejected") decision)]
+         [:span.pill {:replicant/key "d"}
+          (case decision "accepted" (t "✓ accepted") "edited" (t "✓ accepted (edited)") "rejected" (t "✗ rejected")
+            decision)]
          [:button.pill {:replicant/key "u"
                         :on {:click [[:api "POST" url {:decision (if (= decision "rejected") "accepted" "rejected")}]]}}
           (if (= decision "rejected") (t "Accept instead") (t "Undo"))]))]]))
@@ -141,12 +150,14 @@
       "running" [:div.proposal [:div.sub (waiting-text delivery)]]
       "failed"  [:div.proposal [:div.error (t "Planning failed: {0}" error)]]
       [:div.proposal
-       [:div.lab (if (= "adjust" (:kind p)) (t "Suggested adjustments") (t "Proposal")) [:span.sp] [:span.sub (str "#" id)]]
+       [:div.lab (if (= "adjust" (:kind p)) (t "Suggested adjustments") (t "Proposal")) [:span.sp]
+        [:span.sub (str "#" id)]]
        (when (seq (:signals p))
          [:div.sub (t "Triggered by: {0}" (str/join " · " (keep :message (:signals p))))])
        [:div (:summary response)]
        (when-let [tg (:targets response)]
-         (ui/pills (ui/pill (if (:run_min tg) (t "Target {0} min running" (:run_min tg)) (t "Target {0} km running" (:run_km tg))))
+         (ui/pills (ui/pill (if (:run_min tg) (t "Target {0} min running" (:run_min tg))
+                              (t "Target {0} km running" (:run_km tg))))
                    (ui/pill (t "Longest: {0}" (:longest_run tg)))
                    (ui/pill (t "Quality: {0}" (:quality tg)))))
        (let [all (concat (:warnings response) warnings)]
@@ -157,7 +168,8 @@
        (when pending?
          (if (= "adjust" (:kind p))
            [:div.plan-footer
-            [:button.btn-ink {:on {:click [[:api "POST" (str "/api/plan/proposals/" id "/accept-all") {:replace false}]]}}
+            [:button.btn-ink
+             {:on {:click [[:api "POST" (str "/api/plan/proposals/" id "/accept-all") {:replace false}]]}}
              (t "Accept all remaining")]]
            [:div.plan-footer
             [:button.btn-ink {:on {:click [[:api "POST" (str "/api/plan/proposals/" id "/accept-all")
@@ -169,11 +181,14 @@
              " " (t "replace sessions already planned this week")]]))
        (when usage
          [:div.sub (str/join " · " (remove nil? [(t "Model {0}" (:model p))
-                                                 (when (:cost_chf usage) (t "cost ≈ CHF {0}" (.toFixed (:cost_chf usage) 2)))
+                                                 (when (:cost_chf usage)
+                                                   (t "cost ≈ CHF {0}" (.toFixed (:cost_chf usage) 2)))
                                                  (t "{0} in / {1} out tokens (incl. thinking)"
-                                                    (ui/thousands (:input_tokens usage)) (ui/thousands (:output_tokens usage)))
+                                                    (ui/thousands (:input_tokens usage))
+                                                    (ui/thousands (:output_tokens usage)))
                                                  (when (pos? (:cache_read usage))
-                                                   (t "{0} read from cache" (ui/thousands (:cache_read usage))))]))])])))
+                                                   (t "{0} read from cache"
+                                                      (ui/thousands (:cache_read usage))))]))])])))
 
 ;; ---------------------------------------------------------------------------
 
@@ -222,8 +237,9 @@
                 (for [s signals]
                   [:div.signal {:replicant/key (:key s)}
                    [:span.dot {:style {:background (severity-color (name (:severity s)))}}]
-                   [:span (:message s) [:span.sub (str " · " (:principle s) ; a section heading of training-principles.md, as written there
-                                                       (when (:trigger? s) (str " · " (t "asks for a change"))))]]])]
+                   [:span (:message s)
+                    [:span.sub (str " · " (:principle s) ; a section heading of training-principles.md, as written there
+                                    (when (:trigger? s) (str " · " (t "asks for a change"))))]]])]
                [:div.sub (t "No signals - training is going as planned.")])
              [:div.plan-footer
               [:input.note {:type "text" :placeholder (t "Anything the coach should know? (e.g. sick since yesterday)")
@@ -236,7 +252,8 @@
                      running? (t "Adjusting…") :else (t "Re-plan rest of week"))]]
              (when open? (proposal-panel adjust workouts ui-state (:monday adjust))))))
 
-(defn view [{:keys [data errors flash] ui-state :ui} [plan-url signals-url adjust-url athlete-url season-url & proposal-urls]]
+(defn view [{:keys [data errors flash] ui-state :ui}
+            [plan-url signals-url adjust-url athlete-url season-url & proposal-urls]]
   (let [p     (get data plan-url)
         props (map #(get data %) proposal-urls)]
     [:div {:style {:display "contents"}}

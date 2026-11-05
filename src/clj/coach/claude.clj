@@ -19,6 +19,8 @@
                                                BetaJsonOutputFormat$Schema BetaOutputConfig
                                                BetaOutputConfig$Effort BetaTextBlockParam
                                                BetaThinkingConfigAdaptive MessageCreateParams)
+           (com.anthropic.models.beta.messages.batches BatchCreateParams BatchCreateParams$Request
+                                                       BatchCreateParams$Request$Params BetaMessageBatchResult)
            (java.time Duration)))
 
 (defn model-for
@@ -51,7 +53,8 @@
   "knowledge for the planning tasks, which need athlete.md."
   []
   (knowledge (or (athlete/content)
-                 (throw (ex-info (t "No athlete information yet. Add it on the Plan page first.") {:type :no-athlete})))))
+                 (throw (ex-info (t "No athlete information yet. Add it on the Plan page first.")
+                                 {:type :no-athlete})))))
 (def key-file (str (System/getProperty "user.home") "/.config/coach/anthropic-key"))
 
 (def ^:dynamic *key-file* key-file)
@@ -86,7 +89,8 @@
   [k]
   (let [k (str/trim (str k))]
     (when-not (valid-key-format? k)
-      (throw (ex-info (t "That doesn't look like a Claude API key. It starts with sk-ant- (Claude Console → API keys).") {})))
+      (throw (ex-info (t "That doesn't look like a Claude API key. It starts with sk-ant- (Claude Console → API keys).")
+                      {})))
     (paths/secure-spit! *key-file* k)
     (key-status)))
 
@@ -285,7 +289,7 @@
   (let [mapper (ObjectMappers/jsonMapper)]
     (.readValue mapper
                 (.writeValueAsString mapper (._body ^MessageCreateParams (message-params (assoc opts :batch? true))))
-                com.anthropic.models.beta.messages.batches.BatchCreateParams$Request$Params)))
+                BatchCreateParams$Request$Params)))
 
 (defn- now-str [] (str (java.time.Instant/now)))
 
@@ -300,16 +304,17 @@
         opts   (assoc opts :model model :effort effort)
         cid    (str (name task) "-" (System/currentTimeMillis) "-" (rand-int 100000))]
     (try
-      (let [batch (.create (.batches (.messages (.beta (client))))
-                           (-> (com.anthropic.models.beta.messages.batches.BatchCreateParams/builder)
-                               (.addRequest (-> (com.anthropic.models.beta.messages.batches.BatchCreateParams$Request/builder)
-                                                (.customId cid)
-                                                (.params (batch-request-params opts))
-                                                (.build)))
-                               (.build)))]
-        (next.jdbc/execute! ds ["INSERT INTO claude_batches (custom_id, batch_id, task, ref, model, effort, data, status, submitted_at)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)"
-                                cid (.id batch) (name task) ref model effort (json/write-str data) (now-str)])
+      (let [request (-> (BatchCreateParams$Request/builder)
+                        (.customId cid)
+                        (.params (batch-request-params opts))
+                        (.build))
+            batch   (.create (.batches (.messages (.beta (client))))
+                             (-> (BatchCreateParams/builder) (.addRequest request) (.build)))]
+        (next.jdbc/execute! ds
+                            ["INSERT INTO claude_batches
+                                (custom_id, batch_id, task, ref, model, effort, data, status, submitted_at)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)"
+                             cid (.id batch) (name task) ref model effort (json/write-str data) (now-str)])
         cid)
       (catch Throwable e
         (let [credits? (no-credits? e)]
@@ -350,11 +355,12 @@
                (catch Throwable e (failed! (or (ex-message e) (str (class e))))))))
       "errored"
       (do (log {:error error :error_type (when (= "billing_error" error-type) "no_credits")})
-          (failed! (if (= "billing_error" error-type) (no-credits-message) (t "Claude couldn't process it: {0}" error))))
+          (failed! (if (= "billing_error" error-type) (no-credits-message)
+                     (t "Claude couldn't process it: {0}" error))))
       ;; expired / canceled: not billed
       (failed! (t "The half-price batch didn't finish within 24 hours (not billed). Try again.")))))
 
-(defn- batch-result->map [^com.anthropic.models.beta.messages.batches.BetaMessageBatchResult r]
+(defn- batch-result->map [^BetaMessageBatchResult r]
   (cond
     (.isSucceeded r) {:type "succeeded" :message (.message (.asSucceeded r))}
     (.isErrored r)   (let [err (.error (.error (.asErrored r)))

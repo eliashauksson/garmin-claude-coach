@@ -37,7 +37,8 @@
                         :title (t "RPE {0} of 10" n)
                         :on {:click [(put :rpe (when-not (= n rpe) n))]}}
           n])]
-      [:span.sub (case rpe nil (t "optional") (1 2 3) (t "easy") (4 5 6) (t "moderate") (7 8) (t "hard") (t "very hard"))]]
+      [:span.sub
+       (case rpe nil (t "optional") (1 2 3) (t "easy") (4 5 6) (t "moderate") (7 8) (t "hard") (t "very hard"))]]
      [:div.fb-row
       [:button.pill {:type "button" :class (when pain "pain-on") :on {:click [(put :pain (not pain))]}}
        (if pain (t "✓ Pain or niggle") (t "Pain or niggle?"))]

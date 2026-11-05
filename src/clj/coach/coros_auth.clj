@@ -10,8 +10,8 @@
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [coach.paths :as paths]
-            [coach.i18n :refer [t]])
+            [coach.i18n :refer [t]]
+            [coach.paths :as paths])
   (:import (java.net URI URLEncoder)
            (java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers)
            (java.nio.charset StandardCharsets)

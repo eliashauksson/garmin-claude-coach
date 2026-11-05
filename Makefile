@@ -1,4 +1,4 @@
-.PHONY: run start offline watch build app sync status test lint backup backups restore
+.PHONY: run start offline watch build app sync status test lint hooks backup backups restore
 
 # Dashboard on http://127.0.0.1:8081/, syncs on start and every 2 h.
 # (8080 is the installed app's.) Data: data/, or COACH_DATA_DIR=… make run
@@ -34,6 +34,10 @@ test:
 # Static checks with clj-kondo (.clj-kondo/config.edn); should print no warnings
 lint:
 	clojure -M:lint --lint src test --parallel
+
+# Git runs `make lint` before each commit (.githooks/pre-commit)
+hooks:
+	git config core.hooksPath .githooks
 
 # Snapshot of the database and athlete document into data/backups/
 backup:

@@ -148,7 +148,8 @@
   (if (db/get-state ds :api_calls_imported)
     0
     (let [rows (concat
-                (for [p (db/query ds ["SELECT id, kind, model, usage, created_at FROM plan_proposals WHERE usage IS NOT NULL"])]
+                (for [p (db/query ds
+                                  ["SELECT id, kind, model, usage, created_at FROM plan_proposals WHERE usage IS NOT NULL"])]
                   (assoc p :task (if (= "adjust" (:kind p)) "adjust" "week_plan") :ref (str "proposal " (:id p))))
                 (for [p (db/query ds ["SELECT id, model, usage, created_at FROM season_plans WHERE usage IS NOT NULL"])]
                   (assoc p :task "season_plan" :ref (str "season plan " (:id p)))))]

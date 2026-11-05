@@ -1,8 +1,8 @@
 (ns coach.workout-test
   (:require [clojure.test :refer [deftest is testing]]
+            [coach.claude :as claude]
             [coach.db :as db]
             [coach.plan :as plan]
-            [coach.claude :as claude]
             [coach.planner :as planner]
             [coach.translate :as translate]
             [coach.workout :as w]))
@@ -102,7 +102,8 @@
                   claude/translate-soon! (fn [& _])
                   claude/request        (fn [opts]
                                            (reset! sent opts)
-                                           {:response {:workouts [{:workout_id old :goal "Hold threshold" :blocks threshold-blocks}
+                                           {:response {:workouts [{:workout_id old :goal "Hold threshold"
+                                                                   :blocks threshold-blocks}
                                                                   {:workout_id done :goal "x" :blocks []}
                                                                   {:workout_id 999 :goal "x" :blocks []}]}})]
       (is (= [old] (map :id (planner/unstructured ds "2099-01-01"))))

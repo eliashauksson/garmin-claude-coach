@@ -75,14 +75,16 @@
 (defn- usage-line [{:keys [model usage]}]
   (when usage
     [:div.sub (str/join " · " (remove nil? [(t "Model {0}" model)
-                                            (when (:cost_chf usage) (t "cost ≈ CHF {0}" (.toFixed (:cost_chf usage) 2)))]))]))
+                                            (when (:cost_chf usage)
+                                              (t "cost ≈ CHF {0}" (.toFixed (:cost_chf usage) 2)))]))]))
 
 (defn- when-text [iso]
   (let [d (js/Date. iso)]
     (str (ui/day-month d) " "
          (.padStart (str (.getHours d)) 2 "0") ":" (.padStart (str (.getMinutes d)) 2 "0"))))
 
-(def reason-label {"redraft" (tk "replaced by a redraft") "delete" (tk "deleted") "restore" (tk "swapped out by a restore")})
+(def reason-label {"redraft" (tk "replaced by a redraft") "delete" (tk "deleted")
+                   "restore" (tk "swapped out by a restore")})
 
 (defn- confirm-box
   "A red confirm banner: title, explanation, then Yes / Cancel."
@@ -122,9 +124,11 @@
                 (ui/pill (t "{0} weeks · {1} days to race day" (count weeks) days_to_race))
                 (when this-wk (ui/pill (phase-colors (:phase this-wk))
                                        (str (t "This week: {0} TSS target" (:tss this-wk))
-                                            (when (:actual_tss this-wk) (str " · " (t "{0} done" (:actual_tss this-wk)))))))
+                                            (when (:actual_tss this-wk)
+                                              (str " · " (t "{0} done" (:actual_tss this-wk)))))))
                 (when peak (ui/pill (t "Peak {0} TSS · week of {1}" (:tss peak) (day-month (:monday peak)))))))
-             (when (seq weeks) (ui/legend (for [p (distinct (map :phase weeks))] {:label (t p) :color (phase-colors p)})))
+             (when (seq weeks)
+               (ui/legend (for [p (distinct (map :phase weeks))] {:label (t p) :color (phase-colors p)})))
              (when (seq weeks) (c/echart {:key "season" :class "h240" :option-fn #(chart-option weeks current_monday)}))
              (when (seq weeks) (phase-summary weeks current_monday))
              (cond

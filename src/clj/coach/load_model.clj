@@ -92,7 +92,8 @@
         cal   (when (>= (count rides) min-power-rides) (epoc/power-calibration rides))]
     (when (and cal (not= cal (analysis/power-cal ds)))
       (db/set-state! ds :power_cal (json/write-str cal))
-      (println (format "Power calibrated on %d rides: intensity = %.2f + %.2f x P/FTP" (count rides) (first cal) (second cal)))
+      (println (format "Power calibrated on %d rides: intensity = %.2f + %.2f x P/FTP" (count rides) (first cal)
+                       (second cal)))
       (analysis/compute-metrics! ds (map :id rides)))
     cal))
 
@@ -142,9 +143,11 @@
   [daily trend]
   (apply min-key #(:mae (acute-error % daily trend))
          (for [w (range 6 15)]
-           (let [x (rs/nelder-mead (fn [[s t]] (:mae (acute-error {:scale (Math/abs (double s)) :tau (max 0.5 (Math/abs (double t))) :window w}
-                                                                  daily trend)))
-                                   [(:scale epoc/acute-defaults) (:tau epoc/acute-defaults)] 200)]
+           (let [err (fn [[s t]]
+                       (:mae (acute-error {:scale (Math/abs (double s))
+                                           :tau (max 0.5 (Math/abs (double t))) :window w}
+                                          daily trend)))
+                 x   (rs/nelder-mead err [(:scale epoc/acute-defaults) (:tau epoc/acute-defaults)] 200)]
              {:scale (Math/abs (double (x 0))) :tau (max 0.5 (Math/abs (double (x 1)))) :window w}))))
 
 (defn- compare! [ds]
@@ -173,7 +176,8 @@
               ours   (daily-loads ds "CASE WHEN a.training_load > 0 THEN m.load_est END")
               ap     (fit-acute garmin trend)]
           (println (format "\nAcute load against Garmin's, %d days (%s to %s); Garmin's mean %.0f:"
-                           (count trend) (ffirst trend) (first (last trend)) (/ (reduce + (map second trend)) (count trend))))
+                           (count trend) (ffirst trend) (first (last trend))
+                           (/ (reduce + (map second trend)) (count trend))))
           (println (format "  aggregation fitted on Garmin's own loads: scale %.3f, tau %.2f d, window %d d"
                            (:scale ap) (:tau ap) (:window ap)))
           (doseq [[label daily] [["from Garmin's activity loads" garmin]
@@ -185,7 +189,8 @@
           (let [days   (map first trend)
                 rebuilt (mapv #(vector % (epoc/acute-load ap garmin %)) days)
                 {:keys [mae rel]} (acute-error ap ours (filter #(pos? (second %)) rebuilt))]
-            (println (format "  %-28s MAE %5.1f  (%4.1f%% of its mean)" "ours vs Garmin's loads summed" mae (* 100 rel)))))))
+            (println (format "  %-28s MAE %5.1f  (%4.1f%% of its mean)" "ours vs Garmin's loads summed" mae
+                             (* 100 rel)))))))
     (when-let [f (fit-stats ds)] (println "\nLast fit:" (pr-str f)))
     (when-let [c (analysis/power-cal ds)] (println "Power calibration:" (pr-str c)))))
 

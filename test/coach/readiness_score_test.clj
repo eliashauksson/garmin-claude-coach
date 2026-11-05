@@ -27,7 +27,8 @@
 
 (deftest score
   (testing "Garmin's own factors on 3 Nov 2026 (Garmin: 77)"
-    (is (near 77 (rs/combine p {:sleep 70 :recovery_time 99 :hrv 50 :acwr 100 :sleep_history 66 :stress_history 70}) 5)))
+    (is (near 77 (rs/combine p {:sleep 70 :recovery_time 99 :hrv 50 :acwr 100 :sleep_history 66 :stress_history 70})
+              5)))
   (testing "levels use Garmin's boundaries"
     (is (= ["POOR" "LOW" "MODERATE" "HIGH" "PRIME"] (mapv rs/level [24 25 50 75 95]))))
   (let [f {:sleep [78 80 79] :hrv_delta -6 :loads [] :workouts [] :stress48 44.0}]
@@ -46,7 +47,8 @@
 
 (deftest ols
   (is (all-near [2.0 -3.0 5.0]
-              (rs/ols [[1 0] [0 1] [1 1] [2 1] [3 5]] (map (fn [[a b]] (+ (* 2 a) (* -3 b) 5)) [[1 0] [0 1] [1 1] [2 1] [3 5]])) 1e-9)))
+              (rs/ols [[1 0] [0 1] [1 1] [2 1] [3 5]]
+                      (map (fn [[a b]] (+ (* 2 a) (* -3 b) 5)) [[1 0] [0 1] [1 1] [2 1] [3 5]])) 1e-9)))
 
 (deftest fit-recovers-known-parameters
   (let [rnd   (java.util.Random. 7)
@@ -72,4 +74,5 @@
 (deftest morning-check-says-when-it-is-an-estimate
   (let [day {:readiness 20 :readiness_estimated true}]
     (is (re-find #"(?i)estimated" (first (:signals (readiness/check [day] [] {})))))
-    (is (not (re-find #"(?i)estimated" (first (:signals (readiness/check [(dissoc day :readiness_estimated)] [] {}))))))))
+    (is (not (re-find #"(?i)estimated"
+                      (first (:signals (readiness/check [(dissoc day :readiness_estimated)] [] {}))))))))

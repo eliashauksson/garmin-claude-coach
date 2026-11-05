@@ -31,16 +31,16 @@
   "Common option: recessive hairline grid/axes, crosshair tooltip."
   [{:keys [x-type y-name y-min y-max y-inverse y-fmt x-fmt grid-left tooltip-fmt]
     :or {x-type "time" grid-left 44}}]
-  (let [t     (theme)
-        label {:color (:text-3 t) :fontSize 11 :fontWeight 500 :fontFamily font}]
+  (let [th    (theme)
+        label {:color (:text-3 th) :fontSize 11 :fontWeight 500 :fontFamily font}]
     {:animation false
      :textStyle {:fontFamily font}
      :grid {:left grid-left :right 14 :top 12 :bottom 24}
      :tooltip (cond-> {:trigger "axis"
-                       :axisPointer {:type "line" :lineStyle {:color (:text-3 t) :width 1 :opacity 0.5}}
-                       :backgroundColor (:surface t) :borderWidth 0 :borderRadius 12 :padding 10
+                       :axisPointer {:type "line" :lineStyle {:color (:text-3 th) :width 1 :opacity 0.5}}
+                       :backgroundColor (:surface th) :borderWidth 0 :borderRadius 12 :padding 10
                        :extraCssText (str "box-shadow:" (css-var "--tooltip-shadow"))
-                       :textStyle {:color (:text t) :fontSize 12 :fontFamily font}
+                       :textStyle {:color (:text th) :fontSize 12 :fontFamily font}
                        :confine true}
                 tooltip-fmt (assoc :formatter tooltip-fmt))
      :xAxis {:type x-type
@@ -53,7 +53,7 @@
                      :axisLine {:show false} :axisTick {:show false}
                      :nameTextStyle label
                      :axisLabel (cond-> label y-fmt (assoc :formatter y-fmt))
-                     :splitLine {:lineStyle {:color (:line t) :width 1}}}
+                     :splitLine {:lineStyle {:color (:line th) :width 1}}}
               (some? y-min) (assoc :min y-min :scale false)
               (some? y-max) (assoc :max y-max)
               y-inverse     (assoc :inverse true))}))
@@ -228,10 +228,10 @@
   14px right of it, flipped left near the card's edge. nil hides it."
   [^js host ^js ev lines]
   (let [^js tip (or (.-__tip host)
-                    (let [t (el :div {:class "dom-tip" :role "tooltip"})]
-                      (.appendChild host t)
-                      (set! (.-__tip host) t)
-                      t))]
+                    (let [d (el :div {:class "dom-tip" :role "tooltip"})]
+                      (.appendChild host d)
+                      (set! (.-__tip host) d)
+                      d))]
     (if (empty? lines)
       (set! (.. tip -style -display) "none")
       (let [r  (.getBoundingClientRect host)
@@ -261,8 +261,10 @@
               (.setAttribute a "aria-label" (t "Show the whole track"))
               (set! (.-innerHTML a)
                     (str "<svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\""
-                         " stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
-                         "<path d=\"M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5\"/><circle cx=\"12\" cy=\"12\" r=\"2.5\"/></svg>"))
+                         " stroke=\"currentColor\" stroke-width=\"2.2\""
+                         " stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+                         "<path d=\"M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5\"/>"
+                         "<circle cx=\"12\" cy=\"12\" r=\"2.5\"/></svg>"))
               (.disableClickPropagation (.-DomEvent L) div)
               (.on (.-DomEvent L) a "click" (fn [e] (.preventDefault e) (fit!)))
               div)))

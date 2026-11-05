@@ -76,7 +76,8 @@
                                      {:value s :itemStyle {:color (apply c/alpha color) :borderRadius [0 4 4 0]}})
                              :label {:show true :position "right" :color (c/css-var "--text-2") :fontFamily c/font
                                      :formatter (fn [p] (str (if (< (.-value p) 60) "<1m" (ui/hm (.-value p))) " · "
-                                                             (js/Math.round (* 100 (/ (.-value p) (max 1 total)))) "%"))}}])))})))
+                                                             (js/Math.round (* 100 (/ (.-value p) (max 1 total))))
+                                                             "%"))}}])))})))
 
 ;; ---------------------------------------------------------------------------
 ;; The planned session it fulfilled: planned vs actual per block
@@ -120,7 +121,9 @@
                                                        [{:label (case target "hr" "bpm" "pace" "/km" "power" "W")
                                                          :value (fmt y) :color (c/css-var color)}
                                                         (when seg
-                                                          {:label (t "plan") :value (or (st/target-str seg) (st/kind-label (:kind seg)))})])))})
+                                                          {:label (t "plan")
+                                                           :value (or (st/target-str seg)
+                                                                      (st/kind-label (:kind seg)))})])))})
              (update-in [:yAxis :axisLabel] assoc :showMinLabel false :showMaxLabel false)
              (assoc :series [(assoc (c/line (t (target-titles target)) color data)
                                     :markArea {:silent true
@@ -129,7 +132,8 @@
                                                             [{:xAxis (:start g) :yAxis (:low g)}
                                                              {:xAxis (:end g) :yAxis (:high g)}]))}
                                     :markLine {:silent true :symbol "none" :label {:show false}
-                                               :lineStyle {:color (c/css-var "--text-3") :opacity 0.25 :type "solid" :width 1}
+                                               :lineStyle {:color (c/css-var "--text-3") :opacity 0.25 :type "solid"
+                                                           :width 1}
                                                :data (vec (for [g (rest segments)] {:xAxis (:start g)}))})])))}))))
 
 (defn- planned-section
@@ -156,9 +160,13 @@
         (ui/card {}
                  [:div.lab (t "Planned vs actual") (ui/info "planned-vs-actual")]
                  (ui/table [{:label (t "Step") :render (fn [g] [:span [:span.wk-dot {:class (:kind g)}]
-                                                                (str (:label g) (when (> (:reps g) 1) (str " " (:rep g) "/" (:reps g)))
+                                                                (str (:label g)
+                                                                     (when (> (:reps g) 1)
+                                                                       (str " " (:rep g) "/" (:reps g)))
                                                                      ;; the step's kind, when the block has several
-                                                                     (when (< 1 (count (get-in blocks [(:block g) :steps])))
+                                                                     (when (< 1
+                                                                              (count (get-in blocks
+                                                                                             [(:block g) :steps])))
                                                                        (str " · " (st/kind-label (:kind g)))))])}
                             {:label (t "Time") :value #(str (st/clock (:start %)) "–" (st/clock (:end %)))}
                             {:label (t "Target") :value #(or (st/target-str %) "—")}
@@ -185,7 +193,8 @@
      (tile (t "Elevation gain") (some-> (:elev_gain_m a) js/Math.round) "m" nil)
      (tile (t "Heart rate") (some-> (:avg_hr a) js/Math.round) "bpm"
            (not-empty (str/join " · " (remove nil? [(some->> (:max_hr a) js/Math.round (t "max {0}"))
-                                                    (when (= "watch" (:hr_source a)) (t "from the watch's all-day heart rate"))]))))
+                                                    (when (= "watch" (:hr_source a))
+                                                      (t "from the watch's all-day heart rate"))]))))
      (tile (t "Training stress") (some-> (:tss a) js/Math.round) (:tss_method a)
               (str/join " · " (remove nil? [(some->> (ui/fixed (:intensity a) 2) (str "IF "))
                                             (some-> (:tss_per_hour a) js/Math.round (str " TSS/h"))]))
@@ -247,7 +256,8 @@
                               :y-inverse true :clip? true :y-fmt #(ui/hms %) :tip #(ui/hms %)
                               :data (series-data ts (map #(when (and % (> % 1.0)) (/ 1000 %)) speed))})
                (stream-chart {:key "speed" :title (t "Speed (15 s smoothed)") :unit "km/h" :color "--blue"
-                              :clip? true :tip #(ui/fixed % 1) :data (series-data ts (map #(some-> % (* 3.6)) speed))})))
+                              :clip? true :tip #(ui/fixed % 1)
+                              :data (series-data ts (map #(some-> % (* 3.6)) speed))})))
            (when (some some? (:alt s))
              (stream-chart {:key "alt" :title (t "Elevation") :unit "m" :color "--green" :area? true
                             :tip #(str (js/Math.round %)) :data (series-data ts (:alt s))}))
@@ -256,7 +266,8 @@
                             :tip #(str (js/Math.round %)) :data (series-data ts (:power s))}))])
         [:div.row {:replicant/key "zones"}
          (when (seq (:hr_zones_s a))
-           (ui/card {:flex "1 1 420px"} [:div.lab (t "Time in heart-rate zones") (ui/info "zones-28d")] (zones-chart (:hr_zones_s a))))
+           (ui/card {:flex "1 1 420px"} [:div.lab (t "Time in heart-rate zones") (ui/info "zones-28d")]
+                    (zones-chart (:hr_zones_s a))))
          (when (seq (:peaks a))
            (let [pk (:peaks a)]
              (ui/card {:flex "1 1 420px"}
@@ -264,7 +275,8 @@
               (ui/table [{:label (t "Duration") :value #(peak-labels %)}
                          {:label (t "Heart rate") :value #(some-> (get-in pk [:hr %]) js/Math.round) :align :r}
                          {:label (if run? (t "Pace") (t "Speed")) :value #(when-let [v (get-in pk [:speed %])]
-                                                                            (if run? (str (ui/pace v) " /km") (str (ui/kmh v) " km/h")))
+                                                                            (if run? (str (ui/pace v) " /km")
+                                                                              (str (ui/kmh v) " km/h")))
                           :align :r}
                          {:label (t "Power") :value #(some-> (get-in pk [:power %]) js/Math.round) :align :r}]
                         [:5 :60 :300 :1200 :3600]))))]

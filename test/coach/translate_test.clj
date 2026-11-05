@@ -11,7 +11,8 @@
 (defn- no-athlete-files
   "Keeps the tests away from the real data/athlete*.md files."
   [f]
-  (let [dir (str (java.nio.file.Files/createTempDirectory "coach-tr" (make-array java.nio.file.attribute.FileAttribute 0)))]
+  (let [dir (str (java.nio.file.Files/createTempDirectory "coach-tr"
+                                                          (make-array java.nio.file.attribute.FileAttribute 0)))]
     (binding [athlete/*doc-file* (str dir "/athlete.md")
               athlete/*summary-file* (str dir "/athlete-summary.json")
               athlete/*backup-dir* (str dir "/backups")]

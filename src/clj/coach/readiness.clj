@@ -35,7 +35,8 @@
                    unbal     (conj (i18n/t "HRV unbalanced or low for 2 days: rest of the week as recovery, plan next week lower"))
                    sleep-bad (conj (i18n/t "Short or poor sleep: move morning runs to the evening, or rest"))
                    ready-bad (conj (if (:readiness_estimated t)
-                                     (i18n/t "Estimated training readiness {0} is below 30 (Garmin has no score this morning)" (:readiness t))
+                                     (i18n/t "Estimated training readiness {0} is below 30 (Garmin has no score this morning)"
+                                             (:readiness t))
                                      (i18n/t "Training readiness {0} is below 30" (:readiness t))))
                    bb-bad    (conj (i18n/t "Body battery {0} this morning is below 30" (:body_battery_high t))))
         rest?    (and hrv-bad rhr-bad)

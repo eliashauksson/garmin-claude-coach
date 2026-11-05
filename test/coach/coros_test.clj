@@ -1,8 +1,8 @@
 (ns coach.coros-test
   (:require [clojure.test :refer [deftest is testing]]
+            [coach.analysis :as analysis]
             [coach.coros-auth :as auth]
             [coach.coros-mcp :as c]
-            [coach.analysis :as analysis]
             [coach.db :as db]
             [coach.fit :as fit]
             [coach.mcp :as mcp]
@@ -105,7 +105,9 @@
 
 (deftest sse-messages
   (is (= [{"jsonrpc" "2.0" "id" 1 "result" {"ok" true}}]
-         (mcp/sse-messages "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\ndata: \"result\":{\"ok\":true}}\n\n")))
+         (mcp/sse-messages (str "event: message\n"
+                                "data: {\"jsonrpc\":\"2.0\",\"id\":1,\n"
+                                "data: \"result\":{\"ok\":true}}\n\n"))))
   (is (= 2 (count (mcp/sse-messages "data: {\"id\":1}\r\n\r\ndata: {\"id\":2}\r\n\r\n")))))
 
 (deftest http-status-kinds
@@ -182,7 +184,8 @@
         id2     (sync/local-id "2026-10-02T10:00:00")
         id3     (sync/local-id "2026-10-03T10:00:00")]
     (testing "new rides are stored under a browser-safe id, with their stream, and scored"
-      (is (= [id1 id2] (sync/activities-only! (fake-source rides fetched nil) ds "coros" :coros_synced_through "2026-01-01")))
+      (is (= [id1 id2]
+             (sync/activities-only! (fake-source rides fetched nil) ds "coros" :coros_synced_through "2026-01-01")))
       (is (= [id1 id2] (ids ds)))
       (is (= [120 121 122] (:hr (db/load-stream ds id2))))
       (is (some? (first (db/query ds ["SELECT * FROM activity_metrics WHERE activity_id = ?" id2]))))
@@ -195,16 +198,20 @@
     (testing "a failure halfway keeps what came before and doesn't move the sync date"
       (db/set-state! ds :coros_synced_through "2026-10-01")
       (is (thrown? clojure.lang.ExceptionInfo
-                   (sync/activities-only! (fake-source (into rides [{:id (+ big 4) :date "2026-10-04"} {:id (+ big 5) :date "2026-10-05"}])
+                   (sync/activities-only! (fake-source (into rides
+                                                             [{:id (+ big 4) :date "2026-10-04"}
+                                                              {:id (+ big 5) :date "2026-10-05"}])
                                                        fetched (+ big 5))
                                           ds "coros" :coros_synced_through "2026-01-01")))
       (is (= 4 (count (ids ds))))
       (is (= "2026-10-01" (db/get-state ds :coros_synced_through))))
     (testing "the failure says how many new rides are still missing"
-      (let [e (try (sync/activities-only! (fake-source [{:id (+ big 5) :date "2026-10-05"} {:id (+ big 6) :date "2026-10-06"}]
-                                                       fetched (+ big 5))
-                                          ds "coros" :coros_synced_through "2026-01-01")
-                   (catch clojure.lang.ExceptionInfo e e))]
+      (let [e (try
+                (sync/activities-only! (fake-source [{:id (+ big 5) :date "2026-10-05"}
+                                                     {:id (+ big 6) :date "2026-10-06"}]
+                                                    fetched (+ big 5))
+                                       ds "coros" :coros_synced_through "2026-01-01")
+                (catch clojure.lang.ExceptionInfo e e))]
         (is (= {:kind :rate-limit :remaining 2} (ex-data e)))))))
 
 (def garmin-copy

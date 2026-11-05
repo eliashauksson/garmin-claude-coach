@@ -7,9 +7,9 @@
             [coach.coros-auth :as coros-auth]
             [coach.db :as db]
             [coach.paths :as paths]
-            [coach.token :as token]
             [coach.plan]
-            [coach.sync :as sync]))
+            [coach.sync :as sync]
+            [coach.token :as token]))
 
 (defn- temp-ds []
   (let [f (java.io.File/createTempFile "coach-api" ".db")]
@@ -68,7 +68,8 @@
                         :warnings []
                         :workouts [{:date "2026-11-02" :slot "AM" :session_id "EASY" :title "Easy" :duration_min 45
                                     :distance_km 7 :intensity "E" :description "d" :reason "r"}
-                                   {:date "2026-11-03" :slot "PM" :session_id "GYM_UPPER" :title "Upper" :duration_min 50
+                                   {:date "2026-11-03" :slot "PM" :session_id "GYM_UPPER" :title "Upper"
+                                    :duration_min 50
                                     :distance_km 0 :intensity "-" :description "d" :reason "r"}]}})
     (let [[_ p] (get-json app (str "/api/plan/proposals/" pid))]
       (is (= "open" (:status p)))
@@ -85,11 +86,14 @@
         (coach.plan/finish-season-plan! ds sid {:response {:summary "s" :warnings []
                                                             :weeks [{:monday "2026-11-02" :phase "Base" :tss 100
                                                                      :cutback false :focus "f"}]}})
-        (is (= [1 "Base"] ((juxt :week :phase) (first (:weeks (second (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08")))))))))
+        (is (= [1 "Base"]
+               ((juxt :week
+                      :phase) (first (:weeks (second (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08")))))))))
     (testing "a run on that day marks the planned run done"
       (db/upsert-activities! ds [{:id 9 :date "2026-11-02" :start_time_local "2026-11-02T06:00:00"
                                   :sport "running" :name "Run" :raw {}}])
-      (is (= ["done"] (map :status (:workouts (second (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08"))))))))))
+      (is (= ["done"]
+             (map :status (:workouts (second (get-json app "/api/plan" "from=2026-11-02&to=2026-11-08"))))))))))
 
 (deftest token-guard-test
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory
@@ -123,7 +127,8 @@
   (let [req (fn [method headers] {:request-method method :uri "/api/quit" :headers headers})
         foreign? #(api/foreign-request? (req %1 %2))]
     (testing "this page, the installer and curl"
-      (is (not (foreign? :post {"host" "127.0.0.1:8080" "origin" "http://127.0.0.1:8080" "sec-fetch-site" "same-origin"})))
+      (is (not (foreign? :post
+                         {"host" "127.0.0.1:8080" "origin" "http://127.0.0.1:8080" "sec-fetch-site" "same-origin"})))
       (is (not (foreign? :post {"host" "localhost:8080" "origin" "http://localhost:8080"})))
       (is (not (foreign? :get {"host" "[::1]:8080"})))
       (is (not (foreign? :post {"host" "127.0.0.1:8080"})) "curl: no Origin")
@@ -131,12 +136,14 @@
       (is (not (foreign? :get {})) "no headers at all"))
     (testing "another website"
       (is (foreign? :post {"host" "127.0.0.1:8080" "origin" "https://evil.example"}) "older browser, no Sec-Fetch-Site")
-      (is (foreign? :get {"host" "127.0.0.1:8080" "sec-fetch-site" "cross-site"}) "e.g. an <img> of /api/backup/download")
+      (is (foreign? :get {"host" "127.0.0.1:8080" "sec-fetch-site" "cross-site"})
+          "e.g. an <img> of /api/backup/download")
       (is (foreign? :post {"host" "127.0.0.1:8080" "origin" "http://127.0.0.1.evil.example"}))
       (is (foreign? :get {"host" "evil.example:8080"}) "DNS rebinding: the Host gives it away")
       (is (foreign? :get {"host" "127.0.0.1.evil.example"})))
     (testing "Coros's sign-in page sending the browser back, and only that"
-      (let [cb (fn [method headers] (api/foreign-request? {:request-method method :uri "/api/coros/callback" :headers headers}))]
+      (let [cb (fn [method headers]
+                 (api/foreign-request? {:request-method method :uri "/api/coros/callback" :headers headers}))]
         (is (not (cb :get {"host" "127.0.0.1:8090" "sec-fetch-site" "cross-site"})))
         (is (cb :post {"host" "127.0.0.1:8090" "sec-fetch-site" "cross-site"}))
         (is (cb :get {"host" "evil.example:8090" "sec-fetch-site" "cross-site"}) "still only on this computer")))))
@@ -161,10 +168,13 @@
     (with-redefs [paths/allowed-hosts (constantly #{})]
       (is (api/foreign-request? {:request-method :get :uri "/" :headers {"host" "coach.tail1.ts.net"}}))))
   (with-redefs [paths/allowed-hosts (constantly #{"coach.tail1.ts.net"})]
-    (let [foreign? (fn [method headers] (api/foreign-request? {:request-method method :uri "/api/quit" :headers headers}))]
+    (let [foreign? (fn [method headers]
+                     (api/foreign-request? {:request-method method :uri "/api/quit" :headers headers}))]
       (testing "the page opened through an allowed host (tailscale serve)"
         (is (not (foreign? :get {"host" "coach.tail1.ts.net" "sec-fetch-site" "same-origin"})))
-        (is (not (foreign? :post {"host" "COACH.tail1.ts.net" "origin" "https://coach.tail1.ts.net" "sec-fetch-site" "same-origin"})))
+        (is (not (foreign? :post
+                           {"host" "COACH.tail1.ts.net" "origin" "https://coach.tail1.ts.net"
+                            "sec-fetch-site" "same-origin"})))
         (is (not (foreign? :post {"host" "127.0.0.1:8080"})) "this computer still works"))
       (testing "everything else is still refused"
         (is (foreign? :get {"host" "evil.example"}))
@@ -178,7 +188,8 @@
       (is (= "http://127.0.0.1:8080/api/coros/callback" (url {"host" "127.0.0.1:8080"})))
       (is (= "http://127.0.0.1:8080/api/coros/callback" (url {"host" "evil.example"})) "not an allowed host")
       (is (= "http://127.0.0.1:8080/api/coros/callback" (url {})))
-      (is (= "https://coach.tail1.ts.net/api/coros/callback" (url {"host" "coach.tail1.ts.net"})) "tailscale serve: HTTPS, no port")
+      (is (= "https://coach.tail1.ts.net/api/coros/callback" (url {"host" "coach.tail1.ts.net"}))
+          "tailscale serve: HTTPS, no port")
       (is (= "http://coach.tail1.ts.net:8080/api/coros/callback" (url {"host" "coach.tail1.ts.net:8080"})))
       (is (= "https://coach.tail1.ts.net:8443/api/coros/callback"
              (url {"host" "coach.tail1.ts.net:8443" "x-forwarded-proto" "https"}))))))

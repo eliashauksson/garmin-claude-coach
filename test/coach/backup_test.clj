@@ -5,7 +5,8 @@
             [coach.db :as db]))
 
 (defn- temp-dir []
-  (doto (.toFile (java.nio.file.Files/createTempDirectory "coach-backup" (make-array java.nio.file.attribute.FileAttribute 0)))
+  (doto (.toFile (java.nio.file.Files/createTempDirectory "coach-backup"
+                                                          (make-array java.nio.file.attribute.FileAttribute 0)))
     .deleteOnExit))
 
 (deftest backup-restore-test

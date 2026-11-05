@@ -18,7 +18,8 @@
     (testing "a choice is stored per task"
       (ai/save! ds "athlete_chat" {:model "claude-haiku-5-5" :effort "medium"})
       (is (= {:model "claude-haiku-5-5" :effort "medium"} (get (ai/all ds) "athlete_chat")))
-      (is (= {:model "claude-opus-5-5" :effort "medium" :delivery "auto"} (get (ai/all ds) "week_plan")) "others unchanged"))
+      (is (= {:model "claude-opus-5-5" :effort "medium" :delivery "auto"} (get (ai/all ds) "week_plan"))
+          "others unchanged"))
     (testing "bad input is refused"
       (is (thrown? clojure.lang.ExceptionInfo (ai/save! ds "nope" {:model "claude-opus-5-5" :effort "low"})))
       (is (thrown? clojure.lang.ExceptionInfo (ai/save! ds "week_plan" {:model "gpt-9" :effort "low"})))

@@ -36,7 +36,8 @@
   (let [runs (filter run-act? acts)
         rt   (reduce + 0 (map analysis/active-secs runs))
         easy-max (:easy_hr_max (athlete/settings))
-        easy (reduce + 0 (map analysis/active-secs (filter #(and easy-max (:avg_hr %) (<= (:avg_hr %) easy-max)) runs)))]
+        easy (reduce + 0
+                     (map analysis/active-secs (filter #(and easy-max (:avg_hr %) (<= (:avg_hr %) easy-max)) runs)))]
     {:monday       monday
      :run_km       (r1 (/ (reduce + 0 (keep :distance_m runs)) 1000.0))
      :run_hours    (r1 (/ rt 3600.0))
@@ -74,7 +75,8 @@
      :recent_activities (vec (for [a (filter #(>= (compare (:date %) (season/add-days today -14)) 0) acts)]
                                (merge
                                 {:date (:date a) :sport (:sport a) :name (:name a)
-                                 :km (r1 (some-> (:distance_m a) (/ 1000.0))) :minutes (Math/round (/ (analysis/active-secs a) 60.0))
+                                 :km (r1 (some-> (:distance_m a) (/ 1000.0)))
+                                 :minutes (Math/round (/ (analysis/active-secs a) 60.0))
                                  :avg_hr (some-> (:avg_hr a) Math/round) :tss (some-> (:tss a) Math/round)}
                                 ;; how it went, in the athlete's words (coach.analysis/save-feedback!)
                                 (when-let [r (analysis/effective-rpe a)] {:rpe (Math/round (double r))})
@@ -335,7 +337,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
   [ds mondays & [trigger]]
   (let [batch? (ai/batch? :week_plan (or trigger :manual))
         ids    (vec (map-indexed (fn [i m] (plan/create-proposal! ds m (claude/model-for :week_plan)
-                                                                  {:delivery (when batch? (if (zero? i) "batch" "queued"))}))
+                                                                  {:delivery (when batch?
+                                                                               (if (zero? i) "batch" "queued"))}))
                                  mondays))
         last   (dec (count ids))]
     (future
@@ -444,7 +447,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
         after    (apply-changes (filter #(#{"planned" "done"} (:status %)) in-scope) changes)
         weeks    (distinct (map #(season/monday (:date %)) changes))]
     {:response (assoc response :changes changes)
-     :warnings (vec (distinct (mapcat (fn [m] (rules/check-week m (filter #(= m (season/monday (:date %))) after) (rule-opts (info-of m))))
+     :warnings (vec (distinct (mapcat (fn [m] (rules/check-week m (filter #(= m (season/monday (:date %))) after)
+                                                                (rule-opts (info-of m))))
                                       weeks)))}))
 
 (defn- finish-adjustment! [ds id today scope-end in-scope ctx response usage]
@@ -467,8 +471,9 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
         monday    (season/monday today)
         scope-end (season/add-days monday 13)
         batch?    (ai/batch? :adjust (or trigger :manual))
-        id        (plan/create-proposal! ds monday (claude/model-for :adjust) {:kind "adjust" :scope-end scope-end :signals signals
-                                                                        :delivery (when batch? "batch")})]
+        id        (plan/create-proposal! ds monday (claude/model-for :adjust)
+                                         {:kind "adjust" :scope-end scope-end :signals signals
+                                   :delivery (when batch? "batch")})]
     (future
       (try
         (let [in-scope (plan/workouts ds today scope-end)
@@ -478,9 +483,10 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
                               :plan_in_scope (mapv #(select-keys % [:id :date :slot :session_id :title :duration_min
                                                                      :distance_km :intensity :status])
                                                    in-scope)
-                              :recent_feedback (vec (for [a (analysis/activities ds {:from (season/add-days today -14) :to today})
-                                                          :when (or (:rpe a) (:garmin_rpe a) (pos? (or (:pain a) 0)) (:note a))]
-                                                      (select-keys a [:date :name :rpe :garmin_rpe :pain :pain_location :note]))))
+                              :recent_feedback
+                              (vec (for [a (analysis/activities ds {:from (season/add-days today -14) :to today})
+                                         :when (or (:rpe a) (:garmin_rpe a) (pos? (or (:pain a) 0)) (:note a))]
+                                     (select-keys a [:date :name :rpe :garmin_rpe :pain :pain_location :note]))))
               opts     (claude-opts (adjust-message ctx today scope-end) adjust-schema
                                     {:task :adjust :ref (str "proposal " id)})]
           (if batch?
@@ -530,11 +536,11 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
   (let [ws (unstructured ds today)]
     (if (empty? ws)
       0
-      (let [{:keys [response]} (claude/request (claude-opts (structure-message
-                                                      (mapv #(select-keys % [:id :date :session_id :title :duration_min
-                                                                             :distance_km :intensity :description :reason])
-                                                            ws))
-                                                     structure-schema {:task :structure :ref "structure"}))]
+      (let [sessions (mapv #(select-keys % [:id :date :session_id :title :duration_min
+                                            :distance_km :intensity :description :reason])
+                           ws)
+            {:keys [response]} (claude/request (claude-opts (structure-message sessions) structure-schema
+                                                            {:task :structure :ref "structure"}))]
         (when-let [err (m/explain Structure response)]
           (throw (ex-info (str "Invalid structure from the model: " (pr-str (me/humanize err))) {:response response})))
         (let [ids (set (map :id ws))
@@ -619,9 +625,11 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
         sigs    (adapt/signals (adapt-inputs ds today))
         new     (filter #(and (:trigger? %) (not (seen? ds (:key %)))) sigs)
         open    (plan/open-proposals ds)
-        adjust-today? (seq (db/query ds ["SELECT 1 FROM plan_proposals WHERE kind = 'adjust' AND substr(created_at, 1, 10) = ?" today]))
+        adjust-today? (seq (db/query ds
+                                     ["SELECT 1 FROM plan_proposals WHERE kind = 'adjust' AND substr(created_at, 1, 10) = ?" today]))
         proposed (atom [])]
-    (when (and (seq new) (claude/api-key?) (athlete/content) (not adjust-today?) (not-any? #(= "adjust" (:kind %)) open))
+    (when (and (seq new) (claude/api-key?) (athlete/content) (not adjust-today?)
+               (not-any? #(= "adjust" (:kind %)) open))
       (let [id (propose-adjustment! ds new nil :auto)]
         (doseq [s new]
           (next.jdbc/execute! ds ["INSERT OR IGNORE INTO adapt_signals (key, proposal_id, first_seen) VALUES (?, ?, ?)"

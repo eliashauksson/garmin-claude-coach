@@ -3,7 +3,8 @@
             [coach.i18n :refer [t tk]]
             [coach.ui :as ui]))
 
-(def ranges [["90" (tk "90 days")] ["180" (tk "180 days")] ["365" (tk "1 year")] ["730" (tk "2 years")] ["all" (tk "All")]])
+(def ranges [["90" (tk "90 days")] ["180" (tk "180 days")] ["365" (tk "1 year")] ["730" (tk "2 years")]
+             ["all" (tk "All")]])
 
 (def volume-metrics
   {"hours" {:label (tk "Hours") :key :duration_s :scale (/ 1 3600) :fmt #(ui/fixed % 1)}
@@ -56,10 +57,14 @@
      (when (and pmc any?)
        (list
         [:div.row {:replicant/key "kpi"}
-         (ui/tile {:info "ctl" :label (t "Fitness · CTL") :tint "blue" :size "md" :value (:ctl latest) :sub (t "42-day load")})
-         (ui/tile {:info "atl" :label (t "Fatigue · ATL") :tint "red" :size "md" :value (:atl latest) :sub (t "7-day load")})
-         (ui/tile {:info "tsb" :label (t "Form · TSB") :tint "green" :size "md" :value (:tsb latest) :sub (t "fitness − fatigue")})
-         (ui/tile {:info "ramp" :label (t "Ramp rate") :tint "amber" :size "md" :value (:ramp latest) :sub (t "CTL change / 7 days")})]
+         (ui/tile {:info "ctl" :label (t "Fitness · CTL") :tint "blue" :size "md" :value (:ctl latest)
+                   :sub (t "42-day load")})
+         (ui/tile {:info "atl" :label (t "Fatigue · ATL") :tint "red" :size "md" :value (:atl latest)
+                   :sub (t "7-day load")})
+         (ui/tile {:info "tsb" :label (t "Form · TSB") :tint "green" :size "md" :value (:tsb latest)
+                   :sub (t "fitness − fatigue")})
+         (ui/tile {:info "ramp" :label (t "Ramp rate") :tint "amber" :size "md" :value (:ramp latest)
+                   :sub (t "CTL change / 7 days")})]
         [:div {:replicant/key "pmc"}
          (ui/chart-card
           {:title (t "Fitness, fatigue and form") :info "tsb"
@@ -75,10 +80,12 @@
                                                       (c/area-wash 0.18))
                                                   (c/line (t "Fatigue (ATL)") "--red" (mapv (juxt :date :atl) pmc)
                                                           :lineStyle {:width 2.5})
-                                                  (-> (c/line (t "Form (TSB)") "--green-ink" (mapv (juxt :date :tsb) pmc)
+                                                  (-> (c/line (t "Form (TSB)") "--green-ink"
+                                                              (mapv (juxt :date :tsb) pmc)
                                                               :lineStyle {:width 2})
                                                       (assoc :markLine {:silent true :symbol "none" :label {:show false}
-                                                                        :lineStyle {:color (c/css-var "--text-3") :opacity 0.5
+                                                                        :lineStyle {:color (c/css-var "--text-3")
+                                                                                    :opacity 0.5
                                                                                     :type "solid" :width 1}
                                                                         :data [{:yAxis 0}]}))]}))})
            :footer [:div.sub (t "Above 0: fresh. −10 to −30: building fitness. Below −30: high strain.")]})]
@@ -89,9 +96,11 @@
                    {:key "tss-bars" :class "h150" :group "load"
                     :option-fn (fn []
                                  (merge (c/base {:y-min 0 :tooltip-fmt (pmc-tooltip pmc)})
-                                        {:series [(c/bars "TSS" "--amber" (mapv (juxt :date #(when (pos? (:tss %)) (:tss %))) pmc)
+                                        {:series [(c/bars "TSS" "--amber"
+                                                          (mapv (juxt :date #(when (pos? (:tss %)) (:tss %))) pmc)
                                                           :barMaxWidth 14
-                                                          :itemStyle {:color (c/css-var "--amber") :borderRadius 5})]}))})})]
+                                                          :itemStyle {:color (c/css-var "--amber")
+                                                                      :borderRadius 5})]}))})})]
         [:div {:replicant/key "vol"}
          (ui/chart-card
           {:title (t "Weekly volume") :info "volume"
@@ -107,8 +116,10 @@
                                         (let [wk (first (js->clj (.-value (first params))))
                                               row (get weeks wk)]
                                           (c/tooltip-rows (t "Week of {0}" (ui/date-short wk))
-                                                          (for [f (reverse fams) :let [v (get row (:id f))] :when (and v (pos? v))]
-                                                            {:label (t (:label f)) :value ((:fmt vm) v) :color (c/css-var (:color f))}))))})
+                                                          (for [f (reverse fams) :let [v (get row (:id f))]
+                                                                :when (and v (pos? v))]
+                                                            {:label (t (:label f)) :value ((:fmt vm) v)
+                                                             :color (c/css-var (:color f))}))))})
                              {:series (c/stacked 6
                                                  (for [f fams]
                                                    (c/bars (t (:label f)) (:color f)
@@ -160,7 +171,8 @@
                          "estimate" (t "estimated from your best 20–60 min, last 90 days")
                          "garmin"   (t "from Garmin")
                          nil)})
-        (ui/tile {:info "wkg" :label (t "Watts per kg") :tint "blue" :size "md" :value (some-> wkg (ui/fixed 2)) :unit "W/kg"
+        (ui/tile {:info "wkg" :label (t "Watts per kg") :tint "blue" :size "md" :value (some-> wkg (ui/fixed 2))
+                  :unit "W/kg"
                   :sub (if weight_kg (t "at {0} kg" weight_kg) (t "no weight in your Garmin profile"))})
         (ui/tile {:info "vo2max-cycling" :label (t "VO2 max · cycling") :tint "green" :size "md" :value vo2max_est
                   :sub (t "estimate from your best 5 minutes, last 90 days")})]

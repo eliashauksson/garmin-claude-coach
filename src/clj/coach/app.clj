@@ -261,7 +261,9 @@
     (if (.isDirectory f)
       (Files/createDirectories target (make-array java.nio.file.attribute.FileAttribute 0))
       (Files/copy (.toPath f) target
-                  ^"[Ljava.nio.file.CopyOption;" (into-array java.nio.file.CopyOption [StandardCopyOption/REPLACE_EXISTING StandardCopyOption/COPY_ATTRIBUTES])))))
+                  ^"[Ljava.nio.file.CopyOption;"
+                  (into-array java.nio.file.CopyOption
+                              [StandardCopyOption/REPLACE_EXISTING StandardCopyOption/COPY_ATTRIBUTES])))))
 
 (defn- delete-tree! [^File d]
   (doseq [^File f (reverse (file-seq d))] (.delete f)))
