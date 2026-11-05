@@ -248,8 +248,6 @@
 
 (def system-dark (js/matchMedia "(prefers-color-scheme: dark)"))
 
-(defn theme [] (.. js/document -documentElement -dataset -theme))
-
 (defn apply-theme! []
   (let [saved (.getItem js/localStorage "theme")]
     (set! (.. js/document -documentElement -dataset -theme)

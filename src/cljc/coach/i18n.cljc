@@ -45,8 +45,6 @@
   translated where it's shown, with `t`. Returns `s` unchanged."
   [s] s)
 
-(defn de? [] (= "de" @lang))
-
 (defn locale
   "For dates and numbers (Swiss formats in German and French)."
   []

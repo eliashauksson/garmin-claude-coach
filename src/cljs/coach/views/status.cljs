@@ -163,16 +163,3 @@
         (list [:span.spinner {:aria-hidden "true"}] (t "Syncing…"))
         (t "Sync now"))]]))
 
-(defn backup-link
-  "Sidebar: download a fresh backup; shows when the last one was made."
-  [{:keys [data]}]
-  (let [{:keys [latest]} (get data backup-url)]
-    [:div.backup
-     [:a.backup-link {:href (str backup-url "/download" (ui/token-qs)) :download true
-                      :title (t "Makes a backup now (database and athlete document) and downloads it")
-                      :on {:click [[:backup-started]]}}
-      (t "Download backup")]
-     [:div.backup-sub
-      (if-let [c (:created latest)]
-        (t "Last: {0}" (str (ui/date-short (subs c 0 10)) ", " (subs c 11 13) ":" (subs c 13 15)))
-        (t "No backup yet"))]]))

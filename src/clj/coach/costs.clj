@@ -167,11 +167,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Overview (what the Costs page shows)
 
-(def task-labels
-  {"week_plan" "Week plans" "adjust" "Plan adjustments" "season_plan" "Season plans"
-   "athlete_chat" "Athlete chat" "athlete_summary" "Athlete summary" "structure" "Session structure"
-   "test" "Test calls"})
-
 (defn- group-sums
   "Request rows -> per-group totals, most expensive first."
   [rows k]

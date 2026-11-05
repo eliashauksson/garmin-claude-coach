@@ -145,10 +145,6 @@ Rules:
       (store! ds l (map vector texts (map #(get % (keyword l)) out))))
     (count texts)))
 
-(def scopes
-  "What the athlete chose for the Translations task (coach.ai-settings :scope)."
-  #{"all" "selected"})
-
 (defn wanted-languages
   "Pure: the languages texts are kept in. \"all\": every dashboard language,
   so switching is instant. \"selected\": only the one in use; another is

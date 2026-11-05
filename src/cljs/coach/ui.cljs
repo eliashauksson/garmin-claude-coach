@@ -151,9 +151,6 @@
     :re #"strength|fitness|cardio|hiit|yoga"}
    {:id :other :label (tk "Other")     :plural (tk "other")    :color "--fam-other" :re #".*"}])
 
-(def singular {:run (tk "run") :bike (tk "ride") :swim (tk "swim") :hike (tk "hike") :ski (tk "ski day")
-               :strength (tk "strength session") :other (tk "other")})
-
 (defn family [sport]
   (some #(when (re-find (:re %) (str sport)) %) families))
 

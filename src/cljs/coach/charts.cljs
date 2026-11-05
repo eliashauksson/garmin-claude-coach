@@ -98,19 +98,6 @@
                                      %)))))
           series))))
 
-(defn band
-  "Normal-range band between lo and hi as two stacked series (the lower one
-  invisible). Returns two series."
-  [id color-var rows lo-key hi-key]
-  (let [x #(:date %)]
-    [{:type "line" :name (str id "-lo") :stack id :symbol "none" :silent true
-      :lineStyle {:opacity 0} :tooltip {:show false}
-      :data (mapv (fn [r] [(x r) (lo-key r)]) rows)}
-     {:type "line" :name (str id "-band") :stack id :symbol "none" :silent true
-      :lineStyle {:opacity 0} :areaStyle {:color (css-var color-var) :opacity 0.12}
-      :tooltip {:show false}
-      :data (mapv (fn [r] [(x r) (when (and (lo-key r) (hi-key r)) (- (hi-key r) (lo-key r)))]) rows)}]))
-
 (defn tooltip-rows
   "Tooltip HTML: a heading, then value-first rows keyed by a short line."
   [heading rows]

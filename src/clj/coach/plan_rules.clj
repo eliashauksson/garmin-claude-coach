@@ -49,7 +49,6 @@
 (defn run? [w] (= :run (flag w :kind)))
 (defn hard? [w] (boolean (flag w :hard?)))
 (defn long? [w] (boolean (flag w :long?)))
-(defn easy? [w] (boolean (flag w :easy?)))
 
 (defn key-session?
   "Hard, long or test sessions: they need fresh legs and are followed by an

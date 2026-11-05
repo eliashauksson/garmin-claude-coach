@@ -132,8 +132,6 @@
         (println "Readiness estimate refitted:" (rs/summary stats))
         stats))))
 
-(defn fit-stats [ds] (db/state-json ds :readiness_fit))
-
 (defn -main
   "compare [from]: Garmin's score next to the rebuilt one, per morning.
   refit: refit the parameters now."

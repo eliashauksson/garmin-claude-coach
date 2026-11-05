@@ -184,12 +184,6 @@
     (when-not (.waitFor process 5 TimeUnit/SECONDS)
       (.destroy process))))
 
-(defn list-tools [client]
-  (loop [cursor nil acc []]
-    (let [res   (request client "tools/list" (cond-> {} cursor (assoc "cursor" cursor)))
-          acc   (into acc (get res "tools"))]
-      (if-let [c (get res "nextCursor")] (recur c acc) acc))))
-
 (defn- parse-content
   "Tool results come back as text content; most Garmin tools return JSON text."
   [result]
