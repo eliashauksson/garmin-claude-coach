@@ -6,6 +6,7 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 ## Commands
 - `make run`: dashboard on http://127.0.0.1:8081/, syncs on start and every 2 h (8080 is the installed app's port)
 - `make offline`: port 8090, no sync · `make watch`: shadow-cljs watch (reload the page) · `make build`: `npm run release`
+- `make sky`: regenerates the 3D globe's stars + Milky Way (dev/sky_data.clj → resources/public/sky/)
 - `make test`: `clojure -M:test` (cognitect test-runner; one ns: `clojure -M:test -n coach.plan-test`)
 - `make lint`: clj-kondo over src + test (`.clj-kondo/config.edn`); keep it at 0 warnings · `make hooks`: runs it before every commit (.githooks/pre-commit)
 - `make app`: frontend release + `clojure -T:build uber` → target/garmin-coach.jar (installer/)
@@ -36,8 +37,11 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 
 ## Namespaces (src/cljs, src/cljc)
 - app: state, routing, `fetch!` of /api URLs · ui: formatters + shared components · charts: ECharts/Leaflet mount
-- views/: dashboard (start page; its sections in views/dashboard/), calendar, day, activity, feedback, load, plan, season, athlete, settings, costs, metrics (explains every metric), status (error banner), workout (a planned session's card), structure (block profile/list, planned vs actual bits)
+- heat: the Map tab's heatmap (canvas), 2D on Leaflet, 3D terrain on MapLibre GL 6 (not bundled: resources/public/vendor/maplibre/, copied by `npm install`, loaded on first 3D use)
+- views/: dashboard (start page; its sections in views/dashboard/), calendar, heatmap (Map tab), day, activity, feedback, load, plan, season, athlete, settings, costs, metrics (explains every metric), status (error banner), workout (a planned session's card), structure (block profile/list, planned vs actual bits)
 - cljc i18n: `t`/`tk`, language from server · i18n-de / i18n-fr: dictionaries keyed by English text
+- cljc sky: pure, the night sky behind the 3D globe (sidereal time, precession, camera frame, galactic coords); data in resources/public/sky/ (`make sky`)
+- cljc track: pure, GPS tracks for the heatmap (split, simplify, encoded polyline); stored in `activity_metrics.track`
 - cljc workout: pure, a planned session's blocks (steps with hr/pace/power targets): expand, total time, compare with an activity stream
 
 ## Data flow

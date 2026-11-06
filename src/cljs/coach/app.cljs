@@ -8,6 +8,7 @@
             [coach.views.costs :as costs]
             [coach.views.dashboard :as dashboard]
             [coach.views.day :as day]
+            [coach.views.heatmap :as heatmap]
             [coach.views.metrics :as metrics]
             [coach.views.plan :as plan]
             [coach.views.settings :as settings]
@@ -34,6 +35,7 @@
                      {:page :activity :id id}
                      {:page :dashboard :params {}})
       "calendar"   {:page :calendar :params params}
+      "map"        {:page :map :params params}
       ;; one planned session's card
       "workouts"   (if-let [id (second segs)] {:page :workout :id id} {:page :plan :params {}})
       "plan"       {:page :plan :params params}
@@ -57,6 +59,7 @@
     :activity   [(str "/api/activities/" id "?streams=true")]
     :workout    [(workout/url id)]
     :calendar   (calendar/urls route)
+    :map        [heatmap/url]
     :plan       (plan/urls)
     :dashboard  (dashboard/urls route)
     :settings   (settings/urls route)
@@ -422,6 +425,14 @@
       :backup-started (doseq [ms [3000 10000 30000]] ; the download starts once the zip is written
                         (js/setTimeout #(fetch! status/backup-url {:force true}) ms))
       :set-theme    (set-theme! (first args))
+      :heat-show    (do (.setItem js/localStorage "heat-show" (first args))
+                        (swap! state assoc-in [:ui :heat-show] (first args)))
+      :heat-dim     (do (.setItem js/localStorage "heat-dim" (first args))
+                        (swap! state assoc-in [:ui :heat-dim] (first args)))
+      :heat-base    (do (.setItem js/localStorage "heat-base" (first args))
+                        (swap! state assoc-in [:ui :heat-base] (first args)))
+      :heat-colors  (do (.setItem js/localStorage "heat-colors" (first args))
+                        (swap! state assoc-in [:ui :heat-colors] (first args)))
       :scroll-to    (some-> (js/document.getElementById (first args))
                             (.scrollIntoView #js {:behavior "smooth" :block "start"}))
       :back         (if (> (.-length js/history) 1) (.back js/history) (set! (.-hash js/location) "#/"))
@@ -447,6 +458,7 @@
 ;; Shell
 
 (def nav-items [[:dashboard "#/" (i18n/tk "Dashboard")] [:calendar "#/calendar" (i18n/tk "Calendar")]
+                [:map "#/map" (i18n/tk "Map")]
                 [:plan "#/plan" (i18n/tk "Plan")]
                 [:metrics "#/metrics" (i18n/tk "Metrics")]
                 [:settings "#/settings" (i18n/tk "Settings")]])
@@ -459,13 +471,14 @@
       [:div.brand [:span.logo] "Coach"]
       (for [[k href label] nav-items]
         [:a {:replicant/key k :href href :class (when (= k active) "active")} (t label)])]
-     [:main {:class (remove nil? [(when (seq loading) "loading") (when (= page :calendar) "wide")])}
+     [:main {:class (remove nil? [(when (seq loading) "loading") (when (#{:calendar :map} page) "wide")])}
       (status/view s)
       (case page
         :day        (day/view s (first (urls route)) (:date route))
         :activity   (activity/view s (first (urls route)))
         :workout    (workout/view s (first (urls route)))
         :calendar   (calendar/view s (urls route))
+        :map        (heatmap/view s)
         :plan       (plan/view s (urls route))
         :dashboard  (dashboard/view s)
         :settings   (settings/view s (theme-choice))

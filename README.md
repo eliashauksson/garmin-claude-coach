@@ -11,6 +11,9 @@ only ever **read**: nothing is written back to Garmin.
 - **Calendar**: activities and planned sessions per week, with a small health block per day. It
   opens the **day page**: that day's health data, including heart rate, stress, Body Battery and
   steps through the day.
+- **Map**: a heatmap of every activity with GPS, by time range and sport, in five colour schemes on a
+  dark, light or satellite map. In 3D the heat lies on the terrain; zoomed out the map becomes a globe
+  in front of the real night sky (stars, Milky Way, sun and moon where they are now).
 - **Plan**: the athlete document, the season plan to race day, and week plans drafted by Claude,
   with adjustments when training, feedback or wellness call for it.
 - **Settings**: language, appearance, backup and Garmin login (**General**), and Claude's models

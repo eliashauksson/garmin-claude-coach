@@ -1,4 +1,4 @@
-.PHONY: run start offline watch build app sync status test lint hooks backup backups restore
+.PHONY: run start offline watch build app sync status test sky lint hooks backup backups restore
 
 # Dashboard on http://127.0.0.1:8081/, syncs on start and every 2 h.
 # (8080 is the installed app's.) Data: data/, or COACH_DATA_DIR=… make run
@@ -30,6 +30,10 @@ status:
 
 test:
 	clojure -M:test
+
+# The 3D map's night sky: star catalogue + Milky Way image into resources/public/sky/ (dev/sky_data.clj)
+sky:
+	clojure -M dev/sky_data.clj
 
 # Static checks with clj-kondo (.clj-kondo/config.edn); should print no warnings
 lint:

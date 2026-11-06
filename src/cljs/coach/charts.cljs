@@ -113,7 +113,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Replicant hooks
 
-(defn- observe-resize! [^js node f]
+(defn observe-resize! [^js node f]
   (let [ro (js/ResizeObserver. (fn [_] (f)))]
     (.observe ro node)
     (set! (.-__ro node) ro)))
@@ -246,9 +246,17 @@
           (set! (.. tip -style -left) (str left "px"))
           (set! (.. tip -style -top) (str (max 0 (- y 10)) "px")))))))
 
-(defn- reset-control
+(def fit-icon
+  "The \"show everything\" icon of the map buttons."
+  (str "<svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\""
+       " stroke=\"currentColor\" stroke-width=\"2.2\""
+       " stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+       "<path d=\"M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5\"/>"
+       "<circle cx=\"12\" cy=\"12\" r=\"2.5\"/></svg>"))
+
+(defn reset-control
   "A map button under the zoom buttons that calls `fit!` to show the whole track again."
-  [fit!]
+  [fit! & [label]]
   (let [^js ctrl (L/control #js {:position "topright"})]
     (set! (.-onAdd ctrl)
           (fn [_]
@@ -257,14 +265,9 @@
                   ^js a (.create du "a" "" div)]
               (set! (.-href a) "#")
               (.setAttribute a "role" "button")
-              (.setAttribute a "title" (t "Show the whole track"))
-              (.setAttribute a "aria-label" (t "Show the whole track"))
-              (set! (.-innerHTML a)
-                    (str "<svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\""
-                         " stroke=\"currentColor\" stroke-width=\"2.2\""
-                         " stroke-linecap=\"round\" stroke-linejoin=\"round\">"
-                         "<path d=\"M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5\"/>"
-                         "<circle cx=\"12\" cy=\"12\" r=\"2.5\"/></svg>"))
+              (.setAttribute a "title" (or label (t "Show the whole track")))
+              (.setAttribute a "aria-label" (or label (t "Show the whole track")))
+              (set! (.-innerHTML a) fit-icon)
               (.disableClickPropagation (.-DomEvent L) div)
               (.on (.-DomEvent L) a "click" (fn [e] (.preventDefault e) (fit!)))
               div)))

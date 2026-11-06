@@ -285,7 +285,9 @@
    ["planned_workouts" "goal" "TEXT"]
    ["planned_workouts" "blocks" "TEXT"]
    ["proposal_items" "goal" "TEXT"]
-   ["proposal_items" "blocks" "TEXT"]])
+   ["proposal_items" "blocks" "TEXT"]
+   ;; the heatmap's track: encoded polyline segments (coach.track), "[]" without GPS
+   ["activity_metrics" "track" "TEXT"]])
 
 (defn- ensure-column! [ds [table column type]]
   (let [cols (set (map :name (jdbc/execute! ds [(str "PRAGMA table_info(" table ")")]
@@ -431,7 +433,7 @@
 
 (def metric-cols
   [:activity_id :tss :tss_method :intensity :tss_per_hour :np :ngp_mps :vi :ef
-   :decoupling :kj :hr_zones_s :peaks :inputs :route :load_est :load_method :computed_at])
+   :decoupling :kj :hr_zones_s :peaks :inputs :route :track :load_est :load_method :computed_at])
 
 (defn upsert-metrics! [ds rows]
   (when (seq rows)
@@ -442,7 +444,8 @@
           (jdbc/execute! tx (into [sql]
                                   (map (fn [c]
                                          (case c
-                                           (:hr_zones_s :peaks :inputs :route) (some-> (get row c) json/write-str)
+                                           (:hr_zones_s :peaks :inputs :route :track)
+                                           (some-> (get row c) json/write-str)
                                            :computed_at ts
                                            (get row c)))
                                        metric-cols))))))))

@@ -2,7 +2,7 @@
 {:ns-groups
  ;; Pure namespaces: no database, files, network or Claude. Glue lives in
  ;; analysis, load-model, readiness-estimate and the like.
- [{:pattern "^coach\\.(metrics|epoc|readiness|readiness-score|plan-rules|season|workout)$"
+ [{:pattern "^coach\\.(metrics|epoc|readiness|readiness-score|plan-rules|season|sky|track|workout)$"
    :name pure}]
 
  :linters

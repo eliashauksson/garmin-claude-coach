@@ -8,6 +8,7 @@ node_modules/
 resources/public/js/
 resources/public/css/leaflet.css
 resources/public/fonts/
+resources/public/vendor/
 
 # Claude Code personal settings
 .claude/settings.local.json

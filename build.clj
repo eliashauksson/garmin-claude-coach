@@ -20,6 +20,9 @@
 (defn uber [_]
   (when-not (.exists (java.io.File. "resources/public/js/main.js"))
     (throw (ex-info "Build the frontend first: npm install && npm run release" {})))
+  ;; the Map tab's 3D view (coach.heat), copied there by npm install
+  (when-not (.exists (java.io.File. "resources/public/vendor/maplibre/maplibre-gl.mjs"))
+    (throw (ex-info "MapLibre is missing: run npm install" {})))
   (clean nil)
   (let [basis (b/create-basis {:project "deps.edn"})]
     (b/copy-dir {:src-dirs ["src/clj" "src/cljc" "resources"] :target-dir class-dir})

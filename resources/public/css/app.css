@@ -202,6 +202,29 @@ select { font: inherit; font-size: 13px; font-weight: 600; color: var(--text); b
 .map .leaflet-bar a.leaflet-disabled { color: var(--text-3); background: var(--surface); opacity: .6; }
 .map .leaflet-control-zoom { margin: 12px 12px 0 0; }
 .map .map-reset { margin: 8px 12px 0 0; }
+/* Map tab: full-height heatmap on darkened tiles in both themes, so the glow reads */
+.map-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.map.heatmap { height: calc(100vh - 260px); min-height: 420px; background: #0f1115; }
+.map.heatmap .map-tiles { filter: invert(1) hue-rotate(180deg) grayscale(.7) brightness(.8) contrast(.9); }
+/* light map: OSM's colours, muted; a thin dark edge keeps the pale end of the heat visible */
+.heat-base.light .map.heatmap { background: #e8e8e4; }
+.heat-base.light .map.heatmap .map-tiles { filter: grayscale(.6) contrast(.9); }
+.heat-base.light .map .heat-canvas, .heat-base.satellite .map .heat-canvas { filter: drop-shadow(0 0 1px rgba(0,0,0,.75)); }
+.heat-base.satellite .map.heatmap .map-tiles { filter: none; }
+/* 3D (MapLibre): same box; our credit line instead of MapLibre's */
+.map.map3d { position: relative; color: var(--text-2); font: 500 13px/1.4 var(--font); }
+/* zoomed out the 3D map is a globe: space around it, whatever the ground */
+.map.map3d.heatmap { background: #05070c; }
+.map.map3d .sky-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.map.map3d .maplibregl-ctrl-group { border-radius: 12px; overflow: hidden; box-shadow: var(--tooltip-shadow); }
+.map.map3d .maplibregl-ctrl-group button { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; }
+.map3d-credit { position: absolute; right: 10px; bottom: 10px; z-index: 2; padding: 3px 9px; border-radius: 999px;
+  background: rgba(255,255,255,.8); color: #333; font: 500 12px/1.4 var(--font); }
+.map3d-credit a { color: inherit; }
+.map .heat-canvas { pointer-events: none; }
+.heat-colors button { display: inline-flex; align-items: center; gap: 7px; }
+.heat-colors .swatch { width: 22px; height: 10px; border-radius: 999px; background-color: #0f1115;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
 .map .map-reset a { display: flex; align-items: center; justify-content: center; }
 .map .leaflet-control-attribution { margin: 0 10px 10px 0; padding: 3px 9px; border-radius: 999px;
   background: color-mix(in srgb, var(--surface) 85%, transparent); color: var(--text-2); font: 500 10px/1.4 var(--font); }
@@ -736,6 +759,7 @@ a.info:hover, a.info:focus-visible { color: var(--text); }
   .athlete-chat .msg { max-width: 92%; }
   .plan-edit input { width: 64px; }
   .map { height: 280px; }
+  .map.heatmap { height: calc(100vh - 320px); min-height: 360px; }
 }
 /* fingers, not a mouse pointer: bigger targets for the small pill buttons */
 @media (pointer: coarse) {

@@ -2,7 +2,7 @@
   "name": "garmin-claude-coach",
   "private": true,
   "scripts": {
-    "postinstall": "cp node_modules/leaflet/dist/leaflet.css resources/public/css/leaflet.css && mkdir -p resources/public/fonts && for w in 400 500 600 700 800; do cp node_modules/@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-$w-normal.woff2 resources/public/fonts/; done",
+    "postinstall": "cp node_modules/leaflet/dist/leaflet.css resources/public/css/leaflet.css && mkdir -p resources/public/vendor/maplibre && cp node_modules/maplibre-gl/dist/maplibre-gl.mjs node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs node_modules/maplibre-gl/dist/maplibre-gl.css resources/public/vendor/maplibre/ && mkdir -p resources/public/fonts && for w in 400 500 600 700 800; do cp node_modules/@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-$w-normal.woff2 resources/public/fonts/; done",
     "watch": "shadow-cljs watch app",
     "release": "shadow-cljs release app"
   },
@@ -12,6 +12,7 @@
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",
     "echarts": "6.1.0",
-    "leaflet": "1.9.4"
+    "leaflet": "1.9.4",
+    "maplibre-gl": "6.16.0"
   }
 }

@@ -7,6 +7,7 @@
             [coach.epoc :as epoc]
             [coach.metrics :as m]
             [coach.season :as season]
+            [coach.track :as track]
             [next.jdbc]))
 
 ;; ---------------------------------------------------------------------------
@@ -54,6 +55,32 @@
                      (not= 0 (mod (dec n) step)) (conj (peek pts)))
             r5     #(/ (Math/round (* % 100000.0)) 100000.0)]
         (mapv (fn [[la lo]] [(r5 la) (r5 lo)]) picked)))))
+
+;; ---------------------------------------------------------------------------
+;; Heatmap tracks
+
+(defn heat-track
+  "The heatmap's track: encoded polyline segments (coach.track); [] without GPS."
+  [{:keys [lat lon]}]
+  (mapv track/encode (track/segments (map vector lat lon))))
+
+(defn ensure-tracks!
+  "Fills activity_metrics.track for activities computed before it existed,
+  one stream at a time. Returns how many were filled."
+  [ds]
+  (let [ids (map :activity_id (db/query ds ["SELECT activity_id FROM activity_metrics WHERE track IS NULL"]))]
+    (doseq [id ids]
+      (db/query ds ["UPDATE activity_metrics SET track = ? WHERE activity_id = ?"
+                    (json/write-str (heat-track (db/load-stream ds id))) id]))
+    (count ids)))
+
+(defn heatmap
+  "Every activity with a GPS track: [{:id :date :sport :track [encoded …]}], oldest first."
+  [ds]
+  (mapv #(update % :track json/read-str)
+        (db/query ds ["SELECT a.id, a.date, a.sport, m.track FROM activities a
+                       JOIN activity_metrics m ON m.activity_id = a.id
+                       WHERE m.track IS NOT NULL AND m.track <> '[]' ORDER BY a.date"])))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-activity metrics
@@ -117,7 +144,8 @@
                      (and hr-src (= "hr" (:load_method load))) (assoc :load_method "hr-watch"))
                    {:activity_id (:id a)
                     :inputs (cond-> th hr-src (assoc :hr_source hr-src))
-                    :route (route-thumb stream)})))))
+                    :route (route-thumb stream)
+                    :track (heat-track stream)})))))
      (count acts))))
 
 ;; ---------------------------------------------------------------------------

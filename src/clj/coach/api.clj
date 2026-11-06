@@ -519,6 +519,8 @@
                             (let [{:strs [sport from to limit]} query-params]
                               (ok (analysis/activities ds {:sport sport :from from :to to
                                                            :limit (some-> limit parse-long)}))))}]
+    ;; every GPS track, for the Map tab's heatmap
+    ["/heatmap"     {:get (fn [_] (ok (analysis/heatmap ds)))}]
     ;; recent activities waiting for "How did it go?"
     ["/feedback/due"
      {:get (fn [{:keys [query-params]}] (ok (analysis/feedback-due ds (get query-params "date" (season/today)))))}]
@@ -798,6 +800,10 @@
        (planner/structure-once! ds))
      (let [n (costs/import-earlier! ds)]
        (when (pos? n) (println "Imported" n "earlier Claude requests into the cost log")))
+     ;; heatmap tracks for activities synced before the Map tab existed (once)
+     (future (try (let [n (analysis/ensure-tracks! ds)]
+                    (when (pos? n) (println "Heatmap tracks computed for" n "activities")))
+                  (catch Throwable e (println "Heatmap tracks failed:" (ex-message e)))))
      (start-batch-poller! ds)
      (start-update-checker!)
      (when sync?
