@@ -179,6 +179,25 @@
   [& parts]
   (str (apply io/file (data-dir) parts)))
 
+(defn clean-label
+  "Pure: a display name as written in a label file: one line, spaces
+  collapsed, at most 40 characters; nil when empty."
+  [s]
+  (some-> s str/trim (str/replace #"\s+" " ") not-empty (#(subs % 0 (min 40 (count %))))))
+
+(defn instance-label
+  "An extra athlete's display name (\"Nadine\"), from
+  <app folder>/athletes/<name>/label (add-athlete.sh writes it); else the
+  name itself. nil for the first athlete."
+  ([] (instance-label (instance)))
+  ([inst]
+   (when inst
+     (or (try (let [f (app-file "athletes" inst "label")]
+                (when (.isFile f)
+                  (clean-label (slurp f))))
+              (catch Exception _ nil))
+         inst))))
+
 (defn athletes
   "Every athlete on this install, for comparing costs: [{:name nil-or-instance
   :data-dir File :current bool}]. The first athlete's folder comes from the

@@ -145,7 +145,7 @@
     (ui/card {}
              [:div.lab (t "By athlete")]
              (ui/table [{:label (t "Athlete")
-                         :render #(list (or (:name %) (t "Main athlete"))
+                         :render #(list (or (:label %) (:name %) (t "Main athlete"))
                                         (when (:current %) [:span.muted (str " · " (t "this dashboard"))]))}
                         {:label (t "Requests") :align :r :value #(when-not (:error %) (:requests %))}
                         {:label (t "Input") :align :r :value #(tokens (:input_tokens %))}

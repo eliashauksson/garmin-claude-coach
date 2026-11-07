@@ -430,6 +430,7 @@
    :autostart        (coach-app/autostart?)
    :server           (paths/server?)
    :instance         (paths/instance)
+   :instance_label   (paths/instance-label)
    :update           (coach-app/update-status)
    :notice           (coach-app/notice-message)})
 
@@ -592,7 +593,8 @@
     ;; everything before the first sync, in the background
     ["/history"      {:post (fn [_] (json-response 202 (run-history! ds)))}]
     ;; the language of the dashboard, the server's messages and what Claude writes
-    ["/lang"        {:get (fn [_] (ok {:lang @i18n/lang :languages i18n/languages :instance (paths/instance)}))
+    ["/lang"        {:get (fn [_] (ok {:lang @i18n/lang :languages i18n/languages
+                                          :instance (paths/instance-label)}))
                      :put (guarded (fn [req]
                                      (let [lang (:lang (body req))]
                                        (when-not (i18n/language-ids lang)

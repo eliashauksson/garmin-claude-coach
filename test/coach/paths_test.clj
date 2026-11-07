@@ -35,3 +35,11 @@
     (is (= dir (paths/garmin-token-dir)))
     (when-not (System/getenv "GARMINTOKENS_BASE64")
       (is (= (str dir "_base64") b64)))))
+
+(deftest display-labels
+  (is (= "Nadine" (paths/clean-label "Nadine\n")))
+  (is (= "Nadine Muster" (paths/clean-label "  Nadine \t Muster ")))
+  (is (nil? (paths/clean-label " \n")))
+  (is (= 40 (count (paths/clean-label (apply str (repeat 50 "x"))))))
+  (is (nil? (paths/instance-label nil)) "the first athlete has no label")
+  (is (= "no-such-athlete" (paths/instance-label "no-such-athlete")) "no label file: the name"))

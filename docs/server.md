@@ -386,14 +386,16 @@ curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/m
   | sudo bash -s -- anna
 ```
 
-The name may have letters, digits and dashes. The script runs a second copy of the installed app
+The name may have letters, digits and dashes; as typed (`Nadine`) it is the name the dashboards
+show, while services and folders use it in lower case (`nadine`). To show another name later, run
+it again with `--label "Nadine M."`. The script runs a second copy of the installed app
 as a service (`garmin-coach-athlete-anna`), passes it on with `tailscale serve`, and prints the
 address. Then, on that address:
 1. Settings › General: log in to Garmin and connect Coros with **anna's** accounts. The Claude
    key is already there.
 2. The Athlete tab: write anna's profile.
 3. Settings › General shows *"This is the athlete profile "anna"…"*, and the browser tab says
-   *Coach · anna*, so you can tell the dashboards apart.
+   *Coach · anna* (the shown name), so you can tell the dashboards apart.
 
 **Access.** Whoever opens the address needs to be in your Tailscale network. For someone with
 their own Tailscale account, share just the server: in the

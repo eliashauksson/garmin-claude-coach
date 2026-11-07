@@ -232,7 +232,7 @@
   (let [as (paths/athletes)]
     (when (> (count as) 1)
       (vec (for [{:keys [name data-dir current]} as]
-             (merge {:name name :current current}
+             (merge {:name name :label (paths/instance-label name) :current current}
                     (try (athlete-totals (if current
                                            ds
                                            (db/read-only-datasource (str (io/file data-dir "coach.db"))))

@@ -16,6 +16,7 @@
 # Options, after the name:
 #   --port PORT        the app's local port (default: the next free one from 8081)
 #   --https-port PORT  the HTTPS port on the Tailscale address (default: the next free one from 8443)
+#   --label "Name"     the name the dashboard shows (default: the name as typed, e.g. Nadine)
 #   --user NAME        the user the app runs as (default: coach, or the one you sudo from)
 #   --remove           stops and removes this athlete; the data is kept
 #
@@ -28,6 +29,7 @@ PORT=""
 HTTPS_PORT=""
 APP_USER="${COACH_USER:-}"
 REMOVE=""
+LABEL=""
 
 note() { printf '   %s\n' "$*"; }
 bold() { printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -78,14 +80,18 @@ while [ $# -gt 0 ]; do
     --port)       PORT="$2"; shift 2 ;;
     --https-port) HTTPS_PORT="$2"; shift 2 ;;
     --user)       APP_USER="$2"; shift 2 ;;
+    --label)      LABEL="$2"; shift 2 ;;
     --remove)     REMOVE=1; shift ;;
-    -h|--help)    sed -n '2,23p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)    sed -n '2,24p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)           fail "unknown option $1 (see --help)." ;;
     *)            [ -z "$NAME" ] || fail "one name only (got $NAME and $1)."; NAME="$1"; shift ;;
   esac
 done
 
+TYPED="$NAME"
 NAME="$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')"
+# shown name: --label, else the name as typed when it has capitals (Nadine)
+[ -n "$LABEL" ] || [ "$TYPED" = "$NAME" ] || LABEL="$TYPED"
 [ -n "$NAME" ] || fail "give the athlete a name, e.g.: sudo bash add-athlete.sh anna"
 [[ "$NAME" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || fail "the name may only have letters, digits and dashes: $NAME"
 [ "$(id -u)" -eq 0 ] || fail "run it with sudo."
@@ -172,7 +178,7 @@ HOSTS="${HOSTS:-$HOST}"
 
 COUNT=$(( $(wc -w <<< "$USED_PORTS") + 1 ))
 
-bold "Adding the athlete $NAME"
+bold "Adding the athlete $NAME${LABEL:+ ($LABEL)}"
 # about 1 GB of swap per athlete (at least 2 GB): with the syncs taking turns,
 # a small server then gets slower, but nothing is killed
 SWAP_WANT=$(( COUNT * 1024 )); [ "$SWAP_WANT" -ge 2048 ] || SWAP_WANT=2048
@@ -199,6 +205,11 @@ install -d -m 755 -o "$APP_USER" -g "$APP_USER" "$UNIT_DIR"
 } > "$UNIT"
 chown "$APP_USER:$APP_USER" "$UNIT"
 install -d -m 700 -o "$APP_USER" -g "$APP_USER" "$DIR/athletes" "$DIR/athletes/$NAME"
+if [ -n "$LABEL" ]; then # the dashboards read it (coach.paths/instance-label)
+  printf '%s\n' "$LABEL" > "$DIR/athletes/$NAME/label"
+  chown "$APP_USER:$APP_USER" "$DIR/athletes/$NAME/label"
+fi
+SHOWN="$(cat "$DIR/athletes/$NAME/label" 2>/dev/null || echo "$NAME")"
 
 as_app systemctl --user daemon-reload
 as_app systemctl --user enable "$SERVICE" >/dev/null 2>&1
@@ -214,7 +225,7 @@ done
 
 bold "Done!"
 if [ -n "$STARTED" ]; then
-  echo "The athlete $NAME runs at:  https://${HOST:-<server>}:$HTTPS_PORT/"
+  echo "The athlete $SHOWN runs at:  https://${HOST:-<server>}:$HTTPS_PORT/"
 else
   echo "It should soon run at https://${HOST:-<server>}:$HTTPS_PORT/. It hasn't answered yet; see"
   echo "  sudo -u $APP_USER XDG_RUNTIME_DIR=/run/user/$APP_UID systemctl --user status $SERVICE"

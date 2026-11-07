@@ -226,7 +226,7 @@
     [:div {:replicant/key "notice" :class (if ok "ok-line" "error")}
      message " " [:button.pill {:on {:click [[:dismiss-notice]]}} (t "OK")]]))
 
-(defn- app-card [{:keys [version installed update autostart notice server instance]} ui-state]
+(defn- app-card [{:keys [version installed update autostart notice server instance instance_label]} ui-state]
   (let [{:keys [latest available url]} update
         updating (get-in ui-state [:app-update :busy])]
     (ui/card {:flex "1 1 320px"}
@@ -246,7 +246,8 @@
                [:div.sub {:replicant/key "srv"}
                 (t "Runs on a server: it is always on and syncs every 2 hours by itself.")
                 (when instance
-                  (list " " (t "This is the athlete profile \"{0}\", one of several on this server, with its own data and logins; the Claude key is shared." instance)))]
+                  (list " " (t "This is the athlete profile \"{0}\", one of several on this server, with its own data and logins; the Claude key is shared."
+                                      (or instance_label instance))))]
                (list
                 [:div.lab {:replicant/key "asl" :style {:margin-top "6px"}} (t "Start with the computer")]
                 (if installed
