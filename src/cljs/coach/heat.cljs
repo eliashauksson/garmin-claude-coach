@@ -2,7 +2,8 @@
   "The Map tab's heatmap: every track drawn additively onto a canvas, then each pixel coloured by how
   often it was covered. 2D on Leaflet; 3D (terrain to tilt and turn) on MapLibre GL, which is not in
   the app bundle: /vendor/maplibre/ (copied there by `npm install`) is loaded the first time 3D is shown.
-  Ground: the OpenStreetMap map (dark or light) or Esri satellite imagery; terrain: AWS Terrain Tiles.
+  Ground: the OpenStreetMap map (dark or light) or Esri satellite imagery; terrain: Mapterhorn (swisstopo's
+  swissALTI3D in Switzerland, Copernicus and other open elevation models elsewhere).
   Zoomed out, 3D is a globe in front of the real night sky (coach.sky): the Yale Bright Star Catalogue and
   ESO's Milky Way panorama (resources/public/sky/, made by `make sky`)."
   (:require ["leaflet" :as L]
@@ -145,11 +146,13 @@
 (def ^:private osm-url "https://tile.openstreetmap.org/{z}/{x}/{y}.png")
 (def ^:private satellite-url
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}")
-(def ^:private terrain-url "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png")
+;; TileJSON rather than a tile URL: it carries the max zoom, which differs by region (up to z17 where
+;; national high-resolution models exist, e.g. swissALTI3D at 0.5 m).
+(def ^:private terrain-tilejson "https://tiles.mapterhorn.com/tilejson.json")
 
 (def ^:private osm-credit "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a>")
 (def ^:private esri-credit "Imagery &copy; Esri")
-(def ^:private terrain-credit "Terrain: Mapzen, AWS")
+(def ^:private terrain-credit "Terrain <a href=\"https://mapterhorn.com/attribution\">&copy; Mapterhorn</a>")
 
 (defonce ^:private camera
   ;; the last view, shared by 2D and 3D so the Map tab (and a switch between them) keeps the place.
@@ -365,7 +368,7 @@
 
 (defn- style-3d [ground]
   (let [{:keys [osm sat bg shade tint] :as g} (ground-3d ground)
-        dem #js {:type "raster-dem" :tiles #js [terrain-url] :tileSize 256 :maxzoom 15 :encoding "terrarium"}]
+        dem #js {:type "raster-dem" :url terrain-tilejson :tileSize 512 :encoding "terrarium"}]
     #js {:version 8
          :sources #js {:osm   #js {:type "raster" :tiles #js [osm-url] :tileSize 256 :maxzoom 19}
                        :sat   #js {:type "raster" :tiles #js [satellite-url] :tileSize 256 :maxzoom 18}

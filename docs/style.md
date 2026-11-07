@@ -22,7 +22,8 @@ code disagree, the code wins and this file should be updated.
 - **Status is never colour alone.** Every coloured dot or bar also has a label or a value.
 - **Two themes from one set of tokens.** Light and dark use the same token names; only the values
   change. Nothing may hard-code a colour that should follow the theme.
-- **No outside requests** except OpenStreetMap tiles: the font is self-hosted and there is no CSS
+- **No outside requests** except map tiles (OpenStreetMap, Esri satellite, Mapterhorn terrain): the
+  font is self-hosted and there is no CSS
   framework or icon font.
 
 ---

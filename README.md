@@ -143,8 +143,9 @@ from the repository: it installs `target/garmin-coach.jar` instead of the releas
 - Node 18 or newer, for the ClojureScript build
 - `uv`/`uvx`, which runs the Garmin MCP server
 
-The page makes no outside requests except for OpenStreetMap map tiles (`npm install` copies the
-font and Leaflet's CSS into `resources/public/`). The server talks to Garmin, Claude and, in the
+The page makes no outside requests except for map tiles: OpenStreetMap, Esri satellite imagery and
+Mapterhorn terrain for the 3D map (`npm install` copies the font and Leaflet's CSS into
+`resources/public/`). The server talks to Garmin, Claude and, in the
 installed app only, GitHub (the update check).
 
 ### Setup
