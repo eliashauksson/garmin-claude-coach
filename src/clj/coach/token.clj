@@ -10,7 +10,9 @@
   (:import (java.security MessageDigest SecureRandom)
            (java.util Base64)))
 
-(def token-file (str (System/getProperty "user.home") "/.config/coach/dashboard-token"))
+(def token-file
+  "dashboard-token; dashboard-token-<instance> for an extra athlete on a server."
+  (str (System/getProperty "user.home") "/.config/coach/" (paths/per-instance "dashboard-token")))
 (def ^:dynamic *token-file* token-file)
 
 (defonce ^:private cached (atom nil))

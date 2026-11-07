@@ -7,8 +7,10 @@
   doesn't rewrite history. A request served by a fallback model is priced per
   model, from the response's usage.iterations."
   (:require [clojure.data.json :as json]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [coach.db :as db]
+            [coach.paths :as paths]
             [next.jdbc :as jdbc]))
 
 ;; ---------------------------------------------------------------------------
@@ -205,6 +207,38 @@
   [instant]
   (str (.toLocalDate (.atZone (java.time.Instant/parse instant) (java.time.ZoneId/systemDefault)))))
 
+(def ^:private athlete-sums-sql
+  "SELECT count(*) AS requests, coalesce(sum(cost_usd), 0) AS cost_usd,
+          coalesce(sum(input_tokens), 0) + coalesce(sum(cache_read), 0)
+            + coalesce(sum(cache_write_5m), 0) + coalesce(sum(cache_write_1h), 0) AS input_tokens,
+          coalesce(sum(output_tokens), 0) AS output_tokens
+   FROM api_calls")
+
+(defn athlete-totals
+  "One athlete's Claude costs from `from` (ISO date; nil = all), and this month."
+  [ds from]
+  (let [month (str (subs (str (java.time.LocalDate/now)) 0 7) "-01")
+        sums  (fn [since]
+                (first (db/query ds (if since
+                                      [(str athlete-sums-sql " WHERE at >= ?") since]
+                                      [athlete-sums-sql]))))]
+    (assoc (sums from) :this_month (:cost_usd (sums month)))))
+
+(defn by-athlete
+  "Costs per athlete when several share this server (and the Claude key), else
+  nil. `ds` is this athlete's database; the others are read read-only. An
+  athlete whose database can't be read shows :error instead of numbers."
+  [ds from]
+  (let [as (paths/athletes)]
+    (when (> (count as) 1)
+      (vec (for [{:keys [name data-dir current]} as]
+             (merge {:name name :current current}
+                    (try (athlete-totals (if current
+                                           ds
+                                           (db/read-only-datasource (str (io/file data-dir "coach.db"))))
+                                         from)
+                         (catch Exception e {:error (ex-message e)}))))))))
+
 (defn overview
   "Everything the Costs page needs for requests from `from` (ISO date,
   inclusive; nil = all)."
@@ -242,6 +276,7 @@
                                 :last_at (:at (first rs))})))
                       (sort-by :last_at #(compare %2 %1))
                       vec)
+     :by_athlete (by-athlete ds from)
      :requests  (vec (for [r (take 200 rows)] (dissoc r :usage_raw :lines)))
      :pending_batches (first (db/query ds ["SELECT count(*) AS n, min(submitted_at) AS since
                                             FROM claude_batches WHERE status = 'pending'"]))

@@ -36,10 +36,13 @@
                (str (System/getProperty "user.home") "/.local/bin/" exe)])
         "uvx")))
 
-(def python-env
+(defn python-env
   "Python's console encoding on Windows can't print garmin_mcp's ✓ and ✗
-  into a pipe; UTF-8 everywhere. Unbuffered, so prompts arrive at once."
-  {"PYTHONUTF8" "1" "PYTHONIOENCODING" "utf-8" "PYTHONUNBUFFERED" "1"})
+  into a pipe; UTF-8 everywhere. Unbuffered, so prompts arrive at once.
+  Plus this athlete's Garmin token folder (coach.paths/garmin-token-env)."
+  []
+  (merge {"PYTHONUTF8" "1" "PYTHONIOENCODING" "utf-8" "PYTHONUNBUFFERED" "1"}
+         (paths/garmin-token-env)))
 
 (defn server-cmd
   "Command line for one of the pinned server's executables
@@ -417,7 +420,7 @@
      (paths/trim-log! stderr-file) ; appended to on every sync, for months
      (->GarminMcpSource
       (mcp/start! {:cmd (server-cmd "garmin-mcp")
-                   :env (assoc python-env "GARMIN_ENABLED_TOOLS" (str/join "," (sort read-tools)))
+                   :env (assoc (python-env) "GARMIN_ENABLED_TOOLS" (str/join "," (sort read-tools)))
                    :stderr-file stderr-file})
       delay-ms))))
 
@@ -436,7 +439,7 @@
   (let [pb (doto (ProcessBuilder. ^java.util.List (server-cmd "garmin-mcp-auth" "--help"))
              (.redirectError java.lang.ProcessBuilder$Redirect/INHERIT)
              (.redirectOutput java.lang.ProcessBuilder$Redirect/DISCARD))
-        _  (.putAll (.environment pb) ^java.util.Map python-env)
+        _  (.putAll (.environment pb) ^java.util.Map (python-env))
         exit (.waitFor (.start pb))]
     (println (if (zero? exit) "Garmin connector ready." (str "Preparing the Garmin connector failed (exit " exit ").")))
     (System/exit exit)))

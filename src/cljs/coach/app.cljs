@@ -284,6 +284,8 @@
       (.then #(.json %))
       (.then (fn [body]
                (let [lang (.-lang body)]
+                 ;; an extra athlete on a server: its name in the tab and on the home screen
+                 (when-let [inst (.-instance body)] (set! (.-title js/document) (str "Coach · " inst)))
                  (when (not= lang @i18n/lang)
                    (apply-lang! lang)
                    (reload-in-lang!)))))

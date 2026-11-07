@@ -18,6 +18,12 @@
    ;; sync, backfill and the API server may write concurrently
    (jdbc/get-datasource {:dbtype "sqlite" :dbname path :busy_timeout 15000})))
 
+(defn read-only-datasource
+  "Another athlete's database (coach.paths/athletes), opened read-only: their
+  app keeps writing it."
+  [path]
+  (jdbc/get-datasource {:dbtype "sqlite" :dbname path :open_mode "1" :busy_timeout 5000}))
+
 (def ^:private ddl
   ["CREATE TABLE IF NOT EXISTS activities (
       id               INTEGER PRIMARY KEY,

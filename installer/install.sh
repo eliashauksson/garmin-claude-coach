@@ -13,6 +13,9 @@
 # names it may be opened at (a Tailscale address) come from
 # GARMIN_COACH_HOSTS, else the service's earlier setting, else Tailscale.
 #
+# Extra athletes on a server (installer/add-athlete.sh) are services
+# garmin-coach-athlete-<name> running this same app; an update restarts them too.
+#
 # From a clone of the repository it installs the jar you built
 # (target/garmin-coach.jar) instead of downloading the latest release.
 set -euo pipefail
@@ -20,10 +23,20 @@ set -euo pipefail
 REPO="eliashauksson/garmin-claude-coach"
 RELEASE="https://github.com/$REPO/releases/latest/download"
 DIR="${GARMIN_COACH_DIR:-$HOME/.local/share/garmin-coach}"
-PORT="${GARMIN_COACH_PORT:-8080}"
-UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/garmin-coach.service"
+UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+UNIT="$UNIT_DIR/garmin-coach.service"
+PORT="${GARMIN_COACH_PORT:-}"
+if [ -z "$PORT" ] && [ -f "$UNIT" ]; then # an update keeps the service's port
+  PORT="$(sed -n 's/^ExecStart=.* coach\.api \([0-9]*\) .*/\1/p' "$UNIT" | head -n 1)"
+fi
+PORT="${PORT:-8080}"
 SERVER="${GARMIN_COACH_SERVER:-}"
 [ -f "$UNIT" ] && SERVER=1 # installed as a server before: stays one
+athlete_units() { # the extra athletes' services, by name
+  for f in "$UNIT_DIR"/garmin-coach-athlete-*.service; do
+    if [ -f "$f" ]; then basename "$f" .service; fi
+  done
+}
 
 bold() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 fail() { printf '\n\033[31mThe installation stopped: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -63,7 +76,7 @@ mkdir -p "$DIR/app" "$DIR/runtime"
 # A running copy keeps its files open: stop it first (it saves everything as it goes)
 if [ -n "$SERVER" ] && systemctl --user is-active --quiet garmin-coach 2>/dev/null; then
   echo "Stopping the running app…"
-  systemctl --user stop garmin-coach
+  systemctl --user stop garmin-coach $(athlete_units)
 elif curl -fs -m 2 -X POST "http://127.0.0.1:$PORT/api/quit" >/dev/null 2>&1; then
   echo "Stopping the running app…"
   sleep 3
@@ -153,15 +166,18 @@ if [ -n "$SERVER" ]; then
 #!/usr/bin/env bash
 # Removes Garmin Coach (the server install). Asks before deleting your training data.
 systemctl --user disable --now garmin-coach 2>/dev/null
-rm -f "$UNIT"; systemctl --user daemon-reload
+for f in "$UNIT_DIR"/garmin-coach-athlete-*.service; do
+  if [ -f "\$f" ]; then systemctl --user disable --now "\$(basename "\$f" .service)" 2>/dev/null; fi
+done
+rm -f "$UNIT" "$UNIT_DIR"/garmin-coach-athlete-*.service; systemctl --user daemon-reload
 rm -rf "$DIR/app" "$DIR/runtime" "$DIR/garmin-coach"
 answer=n
 if (exec </dev/tty) 2>/dev/null; then
-  read -r -p "Also delete your training data in $DIR/data? [y/N] " answer </dev/tty || answer=n
+  read -r -p "Also delete the training data in $DIR/data (and of other athletes, if any)? [y/N] " answer </dev/tty || answer=n
 fi
 case "\$answer" in
   [yY]*) rm -rf "$DIR" ;;
-  *) rm -f "$DIR/uninstall.sh"; echo "Your data is kept in $DIR/data." ;;
+  *) rm -f "$DIR/uninstall.sh"; echo "Your data is kept in $DIR/data (other athletes: $DIR/athletes)." ;;
 esac
 echo "Garmin Coach is removed."
 EOF
@@ -174,6 +190,10 @@ EOF
   systemctl --user daemon-reload
   systemctl --user enable garmin-coach >/dev/null 2>&1
   systemctl --user restart garmin-coach
+  for u in $(athlete_units); do
+    echo "Restarting the athlete ${u#garmin-coach-athlete-}…"
+    systemctl --user restart "$u"
+  done
 
   trap - ERR
   bold "Done! Garmin Coach runs as a service on this server."

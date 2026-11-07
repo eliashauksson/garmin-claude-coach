@@ -124,6 +124,13 @@ Tailscale on your phone and laptop.
 
 Updates: **Update now** in Settings, or run the setup script again.
 
+**More athletes (optional).** One install is one athlete. To coach someone else on the same
+server, with the same Claude key: `curl -fsSL …/installer/add-athlete.sh | sudo bash -s -- anna`.
+They get their own dashboard (`https://coach.tail1234.ts.net:8443/`), data and Garmin/Coros
+logins; the cost page shows what each athlete costs. On a small server their syncs take turns and
+swap is added, so more athletes make it slower, never crash it. See
+[`docs/server.md`](docs/server.md#11-more-athletes-optional).
+
 ## Making a release
 Push a version tag (`git tag v1.0.0 && git push origin v1.0.0`): the Release workflow runs the
 tests, builds `garmin-coach.jar` and publishes it with the installers. To try an installer with a

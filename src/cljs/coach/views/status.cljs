@@ -139,7 +139,7 @@
     "not_connected" (ui/status-pill :warn (t "Garmin not connected"))
     nil))
 
-(defn sync-button [{:keys [running job last_result setup]}]
+(defn sync-button [{:keys [running waiting job last_result setup]}]
   (let [no-garmin (false? (:garmin setup))]
     [:span {:style {:display "inline-flex" :gap "10px" :align-items "center"}}
      (when (and (not running) (not no-garmin) (false? (:ok last_result))) [:span.error (t "Sync failed")])
@@ -147,6 +147,7 @@
                        :title (when no-garmin (t "Connect Garmin first"))
                        :on {:click [[:sync]]}}
       (cond
+        (and running waiting) (list [:span.spinner {:aria-hidden "true"}] (t "Waiting for another athlete…"))
         (and running (= "history" job)) (list [:span.spinner {:aria-hidden "true"}] (t "Loading history…"))
         running (list [:span.spinner {:aria-hidden "true"}] (t "Syncing…"))
         :else (t "Sync now"))]]))
@@ -154,13 +155,14 @@
 (defn coros-sync-button
   "Settings, Coros card: syncs the Coros rides alone, like `sync-button` for
   Garmin. Every Garmin sync fetches them too."
-  [{:keys [running job coros]}]
+  [{:keys [running waiting job coros]}]
   (let [last-sync (:last_sync coros)]
     [:span {:style {:display "inline-flex" :gap "10px" :align-items "center"}}
      (when (and (not running) last-sync (false? (:ok last-sync)) (not= "rate-limit" (:kind last-sync)))
        [:span.error (t "Sync failed")])
      [:button.btn-ink {:disabled running :on {:click [[:sync-coros]]}}
-      (if (and running (#{"sync" "coros"} job))
-        (list [:span.spinner {:aria-hidden "true"}] (t "Syncing…"))
-        (t "Sync now"))]]))
+      (cond
+        (and running waiting) (list [:span.spinner {:aria-hidden "true"}] (t "Waiting for another athlete…"))
+        (and running (#{"sync" "coros"} job)) (list [:span.spinner {:aria-hidden "true"}] (t "Syncing…"))
+        :else (t "Sync now"))]]))
 

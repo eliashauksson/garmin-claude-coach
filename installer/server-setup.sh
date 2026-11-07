@@ -5,7 +5,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/server-setup.sh | sudo bash
 #
 # It sets up:
-#   1. system updates, curl, and a firewall that lets only SSH in (ufw)
+#   1. system updates, curl, a firewall that lets only SSH in (ufw), and swap
+#      on servers under 4 GB (short of memory, the app gets slower, never killed)
 #   2. the time zone (it asks)
 #   3. a normal user for the app ("coach" when run as root, else you)
 #   4. Tailscale: it prints a link to sign in, and turns on HTTPS
@@ -35,6 +36,46 @@ PORT="${GARMIN_COACH_PORT:-8080}"
 bold() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 note() { printf '   %s\n' "$*"; }
 fail() { printf '\n\033[31mThe setup stopped: %s\033[0m\n' "$*" >&2; exit 1; }
+# Swap, so that running short of memory makes things slower instead of
+# getting the app killed. Only on small servers (under 4 GB) and only a
+# swap file of our own: one the system already has is left alone.
+SWAPFILE=/swapfile-garmin-coach
+ensure_swap() { # wanted MB of swap in all
+  local want="$1" mem total ours free_mb
+  mem=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+  [ "$mem" -lt 3900 ] || return 0
+  total=$(awk '/SwapTotal/ {print int($2/1024)}' /proc/meminfo)
+  ours=0
+  if swapon --show=NAME --noheadings 2>/dev/null | grep -qx "$SWAPFILE"; then
+    ours=$(( $(stat -c %s "$SWAPFILE") / 1048576 ))
+  fi
+  [ "$total" -lt $(( want - 64 )) ] || return 0
+  local size=$(( want - (total - ours) ))
+  [ "$size" -gt "$ours" ] || return 0
+  free_mb=$(df -Pm / | awk 'NR==2 {print $4}')
+  if [ "$free_mb" -lt $(( size - ours + 2048 )) ]; then
+    note "Not enough disk space for ${size} MB of swap; skipped. Add memory or swap yourself."
+    return 0
+  fi
+  if [ "$ours" -gt 0 ]; then swapoff "$SWAPFILE"; fi
+  rm -f "$SWAPFILE"
+  if ! fallocate -l "${size}M" "$SWAPFILE" 2>/dev/null; then
+    dd if=/dev/zero of="$SWAPFILE" bs=1M count="$size" status=none
+  fi
+  chmod 600 "$SWAPFILE"
+  mkswap "$SWAPFILE" >/dev/null
+  if ! swapon "$SWAPFILE" 2>/dev/null; then
+    rm -f "$SWAPFILE"
+    note "This system doesn't allow a swap file (a container?); skipped."
+    return 0
+  fi
+  grep -q "^$SWAPFILE " /etc/fstab || echo "$SWAPFILE none swap sw 0 0" >> /etc/fstab
+  # use it only when memory is really short, not for files the app reads
+  echo "vm.swappiness=10" > /etc/sysctl.d/90-garmin-coach.conf
+  sysctl -q -p /etc/sysctl.d/90-garmin-coach.conf || true
+  note "Swap: ${size} MB ($SWAPFILE). Short of memory, the app gets slower instead of stopping."
+}
+
 trap 'fail "an unexpected error (see the lines above). Fix it and run this again: finished steps are skipped."' ERR
 
 while [ $# -gt 0 ]; do
@@ -45,7 +86,7 @@ while [ $# -gt 0 ]; do
     --jar)         JAR="$2"; shift 2 ;;
     --no-firewall) NO_FIREWALL=1; shift ;;
     --port)        PORT="$2"; shift 2 ;;
-    -h|--help)     sed -n '2,24p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)     sed -n '2,23p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "unknown option $1 (see --help)." ;;
   esac
 done
@@ -65,7 +106,7 @@ case "$(uname -m)" in
   *) fail "this processor ($(uname -m)) isn't supported." ;;
 esac
 MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
-[ "$MEM_MB" -ge 1800 ] || note "Only ${MEM_MB} MB of memory: 2 GB or more is recommended (or add swap)."
+[ "$MEM_MB" -ge 1800 ] || note "Only ${MEM_MB} MB of memory: 2 GB or more is recommended."
 
 # A build to install: copied where the app's user can read it
 if [ -n "$JAR" ]; then
@@ -74,7 +115,7 @@ if [ -n "$JAR" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-bold "1/6  System updates, curl and the firewall"
+bold "1/6  System updates, curl, the firewall and swap"
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
 apt-get update -q
 apt-get upgrade -y -q
@@ -86,6 +127,7 @@ else
   ufw --force enable >/dev/null
   note "Firewall on: only SSH comes in. The dashboard goes through Tailscale, not an open port."
 fi
+ensure_swap 2048
 
 # ---------------------------------------------------------------------------
 bold "2/6  Time zone"

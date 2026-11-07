@@ -18,6 +18,10 @@ phone / laptop ──(Tailscale, HTTPS)──▶ server: tailscale serve ──�
                                                                  Garmin, Coros, Claude
 ```
 
+The server serves one athlete, like the desktop app. Coaching a partner or a friend too? Each
+can get their own dashboard on the same server, with the same Claude key: see
+[More athletes](#11-more-athletes-optional), after the setup.
+
 Time needed: about half an hour with the setup script (including creating the server), 45–60 by hand.
 
 ## Quick setup: one script
@@ -31,6 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/m
 It does steps 2–4 below for you:
 - system updates;
 - a firewall that lets only SSH in;
+- swap on servers under 4 GB, so running short of memory makes the app slower, never stops it;
 - your time zone (it asks);
 - a user `coach` for the app (or you, when run with sudo);
 - Tailscale (it prints a link to sign in);
@@ -74,6 +79,7 @@ Options, after `sudo bash -s --`:
 8. [Everyday use, updates, backups](#8-everyday-use-updates-backups)
 9. [Troubleshooting](#9-troubleshooting)
 10. [Removing it](#10-removing-it)
+11. [More athletes (optional)](#11-more-athletes-optional)
 
 ---
 
@@ -355,6 +361,75 @@ sudo tailscale serve reset                     # stops passing on port 8080
 ```
 To also remove Tailscale: `sudo apt remove tailscale`. Then delete the machine in the admin
 console.
+
+## 11. More athletes (optional)
+One install is one athlete: their data, athlete profile, plan and logins. To coach someone else
+on the same server, add them as another athlete. They get a dashboard of their own, at the same
+address with another port:
+
+```
+https://coach.tail1234.ts.net/        you (the first athlete, as before)
+https://coach.tail1234.ts.net:8443/   anna
+https://coach.tail1234.ts.net:8444/   the next one
+```
+
+Each athlete has their own data, backups, Garmin login and Coros login. Only the **Claude key is
+shared**: all athletes' requests go to your Anthropic account. Settings › Claude & API costs then
+has a **By athlete** table: what each athlete's requests cost in the chosen range and this
+month, and all of them together (what Anthropic bills). The rest of the page (tasks, models,
+requests) is about the dashboard's own athlete.
+
+**Add one** (on the server, after the setup above):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/add-athlete.sh \
+  | sudo bash -s -- anna
+```
+
+The name may have letters, digits and dashes. The script runs a second copy of the installed app
+as a service (`garmin-coach-athlete-anna`), passes it on with `tailscale serve`, and prints the
+address. Then, on that address:
+1. Settings › General: log in to Garmin and connect Coros with **anna's** accounts. The Claude
+   key is already there.
+2. The Athlete tab: write anna's profile.
+3. Settings › General shows *"This is the athlete profile "anna"…"*, and the browser tab says
+   *Coach · anna*, so you can tell the dashboards apart.
+
+**Access.** Whoever opens the address needs to be in your Tailscale network. For someone with
+their own Tailscale account, share just the server: in the
+[admin console](https://login.tailscale.com/admin/machines), ⋯ › **Share…**. Note that every
+dashboard is open to everyone who reaches the server: anna could also open yours at the address
+without a port. The app has no login of its own.
+
+**Memory.** Each athlete runs their own app (about 400 MB, plus the Garmin connector during a
+sync). A 2 GB server is enough; more athletes make it slower, not unstable:
+- **The syncs take turns.** While one athlete syncs, the others wait. Their **Sync now** button
+  says *"Waiting for another athlete…"* and their sync starts as soon as the other one is done.
+- **Swap.** On a server under 4 GB, the script adds a swap file (about 1 GB per athlete, at least
+  2 GB; `/swapfile-garmin-coach`). Short of memory, the system moves what isn't used right now
+  to the disk, so things get slower instead of a process being killed.
+- If a dashboard feels slow, `free -h` shows memory and swap use. More memory (Hetzner: power
+  off, **Rescale**) makes it fast again.
+
+**Coros** sends you back to the address you connected from, with its port. If that fails, use
+the SSH tunnel from [step 5](#coros-if-you-use-it) with this athlete's local port (8081 for the
+first extra athlete; `systemctl --user cat garmin-coach-athlete-anna` shows it):
+`ssh -L 8081:127.0.0.1:8081 coach@<server-ip>`, then open <http://127.0.0.1:8081>.
+
+**Updates** update all athletes at once: **Update now** in any dashboard, or the install command.
+
+| | |
+|---|---|
+| Status | `systemctl --user status garmin-coach-athlete-anna` |
+| Restart | `systemctl --user restart garmin-coach-athlete-anna` |
+| Log | `~/.local/share/garmin-coach/athletes/anna/data/app.log` |
+| Data and backups | `~/.local/share/garmin-coach/athletes/anna/data/` |
+| Garmin login | `~/.garminconnect-anna` (copy a laptop login there, like step 5, option B) |
+| Coros login | `~/.config/coach/coros-anna.json` |
+| Remove (keeps the data) | `sudo bash add-athlete.sh anna --remove` |
+
+Options, after the name: `--port 8085` (the app's local port), `--https-port 8450` (the port in
+the address), `--user NAME` (when the app runs as another user than `coach`).
 
 ---
 

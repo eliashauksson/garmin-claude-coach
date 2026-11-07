@@ -2,7 +2,8 @@
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is testing]]
             [coach.costs :as costs]
-            [coach.db :as db]))
+            [coach.db :as db]
+            [next.jdbc :as jdbc]))
 
 (defn- temp-ds []
   (let [f (java.io.File/createTempFile "coach-costs" ".db")]
@@ -81,3 +82,23 @@
     (let [[r] (db/query ds ["SELECT * FROM api_calls"])]
       (is (= ["week_plan" "imported"] [(:task r) (:source r)]))
       (is (close? 0.232 (:cost_usd r))))))
+
+(deftest athlete-totals-test
+  (let [ds    (temp-ds)
+        today (str (java.time.LocalDate/now))
+        add!  (fn [at cost in out cr]
+                (jdbc/execute! ds ["INSERT INTO api_calls (at, task, model_requested, status, input_tokens,
+                                          output_tokens, cache_read, cost_usd) VALUES (?,?,?,?,?,?,?,?)"
+                                        at "week_plan" "claude-opus-5-5" "ok" in out cr cost]))]
+    (is (= 0 (:requests (costs/athlete-totals ds nil))) "no requests: zeros, not nil")
+    (add! "2020-01-01T10:00:00Z" 1.0 100 10 0)
+    (add! (str today "T00:00:01Z") 0.5 200 20 1000)
+    (let [all    (costs/athlete-totals ds nil)
+          recent (costs/athlete-totals ds today)]
+      (is (= 2 (:requests all)))
+      (is (close? 1.5 (:cost_usd all)))
+      (is (= 1300 (:input_tokens all)) "input counts cached tokens too, like the rest of the page")
+      (is (= 30 (:output_tokens all)))
+      (is (= 1 (:requests recent)))
+      (is (close? 0.5 (:this_month all))))
+    (is (nil? (costs/by-athlete ds nil)) "one athlete: no per-athlete table")))

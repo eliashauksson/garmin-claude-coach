@@ -137,6 +137,29 @@
                        {:label (t "Share") :align :r :value #(pct (:cost_usd %) (:cost_usd totals 0))}])
                      by_task {:key-fn :key})))
 
+(defn- by-athlete-card
+  "Several athletes on one server share the Claude key: what each one's
+  requests cost in this range (from their own databases)."
+  [{:keys [by_athlete usd_chf]}]
+  (let [total (reduce + 0 (keep :cost_usd by_athlete))]
+    (ui/card {}
+             [:div.lab (t "By athlete")]
+             (ui/table [{:label (t "Athlete")
+                         :render #(list (or (:name %) (t "Main athlete"))
+                                        (when (:current %) [:span.muted (str " · " (t "this dashboard"))]))}
+                        {:label (t "Requests") :align :r :value #(when-not (:error %) (:requests %))}
+                        {:label (t "Input") :align :r :value #(tokens (:input_tokens %))}
+                        {:label (t "Output") :align :r :value #(tokens (:output_tokens %))}
+                        {:label (t "Cost") :align :r
+                         :render #(if (:error %)
+                                    [:span.error {:title (:error %)} (t "Couldn't be read")]
+                                    (usd (:cost_usd %)))}
+                        {:label (t "Share") :align :r :value #(when-not (:error %) (pct (:cost_usd %) total))}
+                        {:label (t "This month") :align :r :value #(usd (:this_month %) 2)}]
+                       by_athlete {:key-fn #(or (:name %) "")})
+             [:div.sub (t "All athletes together: {0} ({1}) in this range. They share one Claude key, so the Claude Console bills this total."
+                          (usd total 2) (chf total usd_chf))])))
+
 (defn- by-model-card [{:keys [by_model]}]
   (ui/card {}
            [:div.lab (t "By model")]
@@ -360,6 +383,7 @@
                                    (t "No Claude requests yet. Costs appear here after the first plan or athlete chat."))])
          (list
           (kpis d)
+          (when (seq (:by_athlete d)) [:div {:replicant/key "athletes"} (by-athlete-card d)])
           [:div {:replicant/key "daily"} (daily-chart (:daily d))]
           [:div {:replicant/key "task"} (by-task-card d)]
           [:div {:replicant/key "model"} (by-model-card d)]

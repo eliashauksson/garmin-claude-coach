@@ -77,6 +77,27 @@
   (assoc (coros-auth/status)
          :last_sync (coros-last-sync ds)))
 
+(defn- taking-turns
+  "Runs `f` when no other athlete on this server is syncing (coach.paths/
+  one-at-a-time); meanwhile the state says :waiting. A lock that can't be
+  taken (a read-only app folder) doesn't stop the sync."
+  [f]
+  (let [ran (atom false)
+        run #(do (swap! sync-state dissoc :waiting) (reset! ran true) (f))]
+    (try (paths/one-at-a-time "sync.lock" #(swap! sync-state assoc :waiting true) run)
+         (catch java.io.IOException e
+           (if @ran (throw e) (do (println "Sync lock unavailable:" (ex-message e)) (run)))))))
+
+(defn- in-background!
+  "Runs the sync job `f` in the background, taking turns with the other
+  athletes. Should it fail unexpectedly, the sync isn't left \"running\"."
+  [f]
+  (future
+    (try (taking-turns f)
+         (catch Throwable e
+           (println "Sync job failed:" (ex-message e))
+           (swap! sync-state assoc :running false :job nil :waiting false)))))
+
 (defn- run-job!
   "Runs `f` with a Garmin source in the background unless a sync or history
   load is already running (one Garmin session at a time), and records the
@@ -89,27 +110,28 @@
     (let [[old _] (swap-vals! sync-state #(if (:running %) % (assoc % :running true :job job
                                                                       :started_at (str (java.time.Instant/now)))))]
       (when-not (:running old)
-        (future
-          ;; first backup of the day, before anything is written
-          (try (backup/daily! ds)
-               (catch Throwable e (println "Daily backup failed:" (ex-message e))))
-          (let [result (try
-                         (let [src ((requiring-resolve 'coach.garmin-mcp/start!))]
-                           (try (f src)
-                                (finally ((requiring-resolve 'coach.garmin-mcp/stop!) src))))
-                         {:ok true}
-                         (catch Throwable e
-                           (println (str job " failed:") (ex-message e))
-                           (merge {:ok false} (sync/failure e))))
-                ;; rides from a Coros bike computer: on their own, so a Coros
-                ;; problem never fails the Garmin sync (and the other way round)
-                result (cond-> result (coros-auth/connected?) (assoc :coros (run-coros! ds)))
-                result (if (and (:ok result) after) (after result) result)
-                done   (str (java.time.Instant/now))
-                result (assoc result :finished_at done)]
-            (try (sync/record-result! ds result) (catch Throwable _))
-            (swap! sync-state assoc :running false :job nil :finished_at done :last_result result
-                   :last_ok (if (:ok result) done (:last_ok @sync-state))))))
+        (in-background!
+         (fn []
+           ;; first backup of the day, before anything is written
+           (try (backup/daily! ds)
+                (catch Throwable e (println "Daily backup failed:" (ex-message e))))
+           (let [result (try
+                          (let [src ((requiring-resolve 'coach.garmin-mcp/start!))]
+                            (try (f src)
+                                 (finally ((requiring-resolve 'coach.garmin-mcp/stop!) src))))
+                          {:ok true}
+                          (catch Throwable e
+                            (println (str job " failed:") (ex-message e))
+                            (merge {:ok false} (sync/failure e))))
+                 ;; rides from a Coros bike computer: on their own, so a Coros
+                 ;; problem never fails the Garmin sync (and the other way round)
+                 result (cond-> result (coros-auth/connected?) (assoc :coros (run-coros! ds)))
+                 result (if (and (:ok result) after) (after result) result)
+                 done   (str (java.time.Instant/now))
+                 result (assoc result :finished_at done)]
+             (try (sync/record-result! ds result) (catch Throwable _))
+             (swap! sync-state assoc :running false :job nil :finished_at done :last_result result
+                    :last_ok (if (:ok result) done (:last_ok @sync-state)))))))
       @sync-state)))
 
 (defn- run-coros-sync!
@@ -122,13 +144,14 @@
     (let [[old _] (swap-vals! sync-state #(if (:running %) % (assoc % :running true :job "coros"
                                                                       :started_at (str (java.time.Instant/now)))))]
       (when-not (:running old)
-        (future
-          (try (backup/daily! ds)
-               (catch Throwable e (println "Daily backup failed:" (ex-message e))))
-          (let [r (try (run-coros! ds {:force force})
-                       (catch Throwable e {:ok false :message (ex-message e)}))]
-            (swap! sync-state assoc :running false :job nil
-                   :finished_at (or (:finished_at r) (str (java.time.Instant/now)))))))
+        (in-background!
+         (fn []
+           (try (backup/daily! ds)
+                (catch Throwable e (println "Daily backup failed:" (ex-message e))))
+           (let [r (try (run-coros! ds {:force force})
+                        (catch Throwable e {:ok false :message (ex-message e)}))]
+             (swap! sync-state assoc :running false :job nil
+                    :finished_at (or (:finished_at r) (str (java.time.Instant/now))))))))
       @sync-state)))
 
 (defn- run-sync!
@@ -406,6 +429,7 @@
    :data_dir_env     (boolean (paths/env-data-dir))
    :autostart        (coach-app/autostart?)
    :server           (paths/server?)
+   :instance         (paths/instance)
    :update           (coach-app/update-status)
    :notice           (coach-app/notice-message)})
 
@@ -568,7 +592,7 @@
     ;; everything before the first sync, in the background
     ["/history"      {:post (fn [_] (json-response 202 (run-history! ds)))}]
     ;; the language of the dashboard, the server's messages and what Claude writes
-    ["/lang"        {:get (fn [_] (ok {:lang @i18n/lang :languages i18n/languages}))
+    ["/lang"        {:get (fn [_] (ok {:lang @i18n/lang :languages i18n/languages :instance (paths/instance)}))
                      :put (guarded (fn [req]
                                      (let [lang (:lang (body req))]
                                        (when-not (i18n/language-ids lang)

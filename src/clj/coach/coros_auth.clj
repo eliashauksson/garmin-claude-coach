@@ -26,7 +26,9 @@
 
 (def scope "openid mcp.tools offline_access")
 
-(def token-file (str (System/getProperty "user.home") "/.config/coach/coros.json"))
+(def token-file
+  "~/.config/coach/coros.json; coros-<instance>.json for an extra athlete on a server."
+  (str (System/getProperty "user.home") "/.config/coach/" (paths/per-instance "coros.json")))
 (def ^:dynamic *token-file* token-file)
 
 ;; ---------------------------------------------------------------------------

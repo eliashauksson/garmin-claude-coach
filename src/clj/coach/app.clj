@@ -191,8 +191,10 @@
 
 (defn start-update! [port]
   (when-not (paths/installed?) (throw (ex-info (t "Only the installed app updates itself.") {})))
-  (let [env {"GARMIN_COACH_DIR" (str (paths/app-dir)) "GARMIN_COACH_PORT" (str port)
-             "GARMIN_COACH_UPDATING" "1"}
+  ;; on a server the installer keeps each service's own port (an extra
+  ;; athlete's port must not end up in the main service)
+  (let [env (cond-> {"GARMIN_COACH_DIR" (str (paths/app-dir)) "GARMIN_COACH_UPDATING" "1"}
+              (not (paths/server?)) (assoc "GARMIN_COACH_PORT" (str port)))
         log (paths/data-file "update.log")]
     (paths/trim-log! log)
     (spit log (str "\n--- " (Instant/now) " ---\n") :append true)

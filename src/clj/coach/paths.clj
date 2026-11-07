@@ -10,7 +10,12 @@
   Settings (config.edn in the app folder), or data/ in the app folder. It
   is fixed while the app runs; changing it restarts the app.
 
-  A lock file in the data folder makes sure only one running app uses it."
+  A lock file in the data folder makes sure only one running app uses it.
+
+  Extra athletes on a server (installer/add-athlete.sh) are more copies of
+  the same installed app, each run with $COACH_INSTANCE (its name) and its
+  own $COACH_DATA_DIR: config.edn and the Coros login are then per instance,
+  the Claude key is shared."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str])
@@ -45,7 +50,51 @@
 ;; config.edn: settings that can't live in the database because they say
 ;; where the database is
 
-(defn config-file ^File [] (app-file "config.edn"))
+(defn parse-instance
+  "Pure: an instance name (lower-case letters, digits, dashes) or nil."
+  [s]
+  (let [s (some-> s str/trim str/lower-case not-empty)]
+    (when s
+      (if (re-matches #"[a-z0-9][a-z0-9-]{0,31}" s)
+        s
+        (throw (ex-info (str "COACH_INSTANCE must be letters, digits and dashes, not: " s) {}))))))
+
+(def ^:private instance* (delay (parse-instance (System/getenv "COACH_INSTANCE"))))
+
+(defn instance
+  "This copy's athlete name on a server with several athletes; nil for the
+  usual single install."
+  []
+  @instance*)
+
+(defn per-instance
+  "\"name.ext\" for the usual install, \"name-<instance>.ext\" for an extra athlete."
+  ([file-name] (per-instance file-name (instance)))
+  ([file-name inst]
+   (if-not inst
+     file-name
+     (let [i (str/last-index-of file-name ".")]
+       (if (and i (pos? i))
+         (str (subs file-name 0 i) "-" inst (subs file-name i))
+         (str file-name "-" inst))))))
+
+(defn config-file ^File [] (app-file (per-instance "config.edn")))
+
+(defn garmin-token-dir
+  "Where the Garmin login is kept: $GARMINTOKENS, else ~/.garminconnect, or
+  ~/.garminconnect-<instance> for an extra athlete on a server."
+  []
+  (or (not-empty (System/getenv "GARMINTOKENS"))
+      (str (System/getProperty "user.home") "/" (per-instance ".garminconnect"))))
+
+(defn garmin-token-env
+  "The token locations for the Garmin connector's processes, so every athlete
+  reads and writes only their own login (the base64 copy is an export it
+  writes next to it)."
+  []
+  (let [dir (garmin-token-dir)]
+    {"GARMINTOKENS" dir
+     "GARMINTOKENS_BASE64" (or (not-empty (System/getenv "GARMINTOKENS_BASE64")) (str dir "_base64"))}))
 
 (defn read-config []
   (let [f (config-file)]
@@ -130,6 +179,30 @@
   [& parts]
   (str (apply io/file (data-dir) parts)))
 
+(defn athletes
+  "Every athlete on this install, for comparing costs: [{:name nil-or-instance
+  :data-dir File :current bool}]. The first athlete's folder comes from the
+  plain config.edn (or the default); extra ones live in
+  <app folder>/athletes/<name>/data. Only folders with a database count, and
+  this run's own folder always does."
+  []
+  (let [inst  (instance)
+        main  (if inst
+                (.getAbsoluteFile (io/file (or (:data-dir (let [f (app-file "config.edn")]
+                                                                (when (.isFile f)
+                                                                  (try (edn/read-string (slurp f))
+                                                                       (catch Exception _ nil)))))
+                                               (default-data-dir))))
+                (data-dir))
+        extra (for [^File d (sort (.listFiles (app-file "athletes")))
+                    :when (.isDirectory d)
+                    :let [n (.getName d)]
+                    :when (re-matches #"[a-z0-9][a-z0-9-]{0,31}" n)]
+                {:name n :data-dir (if (= n inst) (data-dir) (.getAbsoluteFile (io/file d "data")))
+                 :current (= n inst)})
+        all   (cons {:name nil :data-dir main :current (nil? inst)} extra)]
+    (vec (filter #(or (:current %) (.isFile (io/file (:data-dir %) "coach.db"))) all))))
+
 ;; ---------------------------------------------------------------------------
 ;; One app per data folder
 
@@ -148,6 +221,18 @@
         (cond l (do (reset! lock {:lock l :raf raf}) true)
               (< (System/currentTimeMillis) deadline) (do (Thread/sleep 500) (recur))
               :else (do (.close raf) false))))))
+
+(defn one-at-a-time
+  "Runs `f` while holding the lock file `lock-name` in the app folder, which
+  every copy of the app shares (all athletes on a server). Another copy
+  holding it makes this wait: `on-wait` runs once first. So on a small
+  server the athletes' syncs take turns instead of competing for memory."
+  [lock-name on-wait f]
+  (let [file (app-file lock-name)]
+    (with-open [raf (RandomAccessFile. file "rw")]
+      (let [ch (.getChannel raf)
+            ^FileLock l (or (.tryLock ch) (do (on-wait) (.lock ch)))]
+        (try (f) (finally (.release l)))))))
 
 (def log-max-bytes "A log is trimmed once it is bigger than this…" (* 1024 1024))
 (def log-keep-bytes "…to about its newest this much." (* 256 1024))

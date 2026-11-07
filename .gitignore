@@ -22,4 +22,7 @@ resources/public/vendor/
 /data-archive-*/
 target/
 config.edn
+config-*.edn
 !.clj-kondo/config.edn
+/sync.lock
+/athletes/

@@ -9,7 +9,8 @@
             [clojure.string :as str]
             [coach.db :as db]
             [coach.garmin-mcp :as gm]
-            [coach.i18n :refer [t]])
+            [coach.i18n :refer [t]]
+            [coach.paths :as paths])
   (:import (java.time LocalDate)
            (java.time.temporal ChronoUnit)))
 
@@ -47,8 +48,7 @@
 (defn token-dir
   "Where garmin-mcp-auth stores the login (garmin_mcp reads it from there)."
   []
-  (or (not-empty (System/getenv "GARMINTOKENS"))
-      (str (System/getProperty "user.home") "/.garminconnect")))
+  (paths/garmin-token-dir))
 
 (defn connected?
   "Whether Garmin has ever been connected: a login token is stored. (Whether
@@ -156,7 +156,7 @@
           (let [pb   (doto (ProcessBuilder. ^java.util.List (gm/server-cmd "garmin-mcp-auth" "--force-reauth"))
                        (.redirectErrorStream true))
                 _    (doto (.environment pb)
-                       (.putAll ^java.util.Map gm/python-env)
+                       (.putAll ^java.util.Map (gm/python-env))
                        (.put "GARMIN_EMAIL" email)
                        (.put "GARMIN_PASSWORD" (str password)))
                 proc (.start pb)
