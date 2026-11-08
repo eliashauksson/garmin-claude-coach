@@ -376,7 +376,7 @@
                        :shade (js/Object.assign #js {} dem)}
          ;; a globe when zoomed out, blending into the flat map close up (as in Google Earth)
          :projection #js {:type "globe"}
-         :terrain #js {:source "dem" :exaggeration 1.3}
+         :terrain #js {:source "dem" :exaggeration 1.0}
          :sky (sky-props (:sky g))
          :layers #js [#js {:id "bg" :type "background" :paint #js {"background-color" bg}}
                       #js {:id "osm" :type "raster" :source "osm" :layout #js {:visibility osm} :paint (clj->js tint)}
