@@ -73,15 +73,6 @@ download() { # url target
 bold "Installing Garmin Coach into $DIR"
 mkdir -p "$DIR/app" "$DIR/runtime"
 
-# A running copy keeps its files open: stop it first (it saves everything as it goes)
-if [ -n "$SERVER" ] && systemctl --user is-active --quiet garmin-coach 2>/dev/null; then
-  echo "Stopping the running app…"
-  systemctl --user stop garmin-coach $(athlete_units)
-elif curl -fs -m 2 -X POST "http://127.0.0.1:$PORT/api/quit" >/dev/null 2>&1; then
-  echo "Stopping the running app…"
-  sleep 3
-fi
-
 # 1. Java, only for this app
 if [ -x "$DIR/runtime/jre/bin/java" ]; then
   echo "Java: already there."
@@ -105,21 +96,37 @@ else
   mv -f "$TMP/uv/uv" "$TMP/uv/uvx" "$DIR/runtime/uv/"
 fi
 
-# 3. The app itself
-bold "3/4  Installing the app…"
+# 3. The app itself, beside the one that may be running
+bold "3/4  Downloading the app…"
 if [ -n "$LOCAL_JAR" ]; then
   echo "Using the local build $LOCAL_JAR"
   cp "$LOCAL_JAR" "$DIR/app/garmin-coach.jar.new"
   if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/icon.png" ]; then
-    cp "$SCRIPT_DIR/icon.png" "$DIR/app/icon.png"
+    cp "$SCRIPT_DIR/icon.png" "$DIR/app/icon.png.new"
   else
-    download "$RELEASE/icon.png" "$DIR/app/icon.png"
+    download "$RELEASE/icon.png" "$DIR/app/icon.png.new"
   fi
 else
   download "$RELEASE/garmin-coach.jar" "$DIR/app/garmin-coach.jar.new"
-  download "$RELEASE/icon.png" "$DIR/app/icon.png"
+  download "$RELEASE/icon.png" "$DIR/app/icon.png.new"
+fi
+
+# 4. Python and the Garmin connector, so the first login doesn't wait for them
+bold "4/4  Preparing the Garmin connector (downloads Python the first time)…"
+(cd "$DIR" && ./runtime/jre/bin/java -cp app/garmin-coach.jar.new clojure.main -m coach.garmin-mcp prepare) \
+  || fail "the Garmin connector couldn't be prepared. Check the internet connection and run this again."
+
+# Only now, with everything downloaded: a failed download must leave a running app running.
+# A running copy keeps its files open, so stop it for the swap (it saves everything as it goes).
+if [ -n "$SERVER" ] && systemctl --user is-active --quiet garmin-coach 2>/dev/null; then
+  echo "Stopping the running app…"
+  systemctl --user stop garmin-coach $(athlete_units)
+elif curl -fs -m 2 -X POST "http://127.0.0.1:$PORT/api/quit" >/dev/null 2>&1; then
+  echo "Stopping the running app…"
+  sleep 3
 fi
 mv -f "$DIR/app/garmin-coach.jar.new" "$DIR/app/garmin-coach.jar"
+mv -f "$DIR/app/icon.png.new" "$DIR/app/icon.png"
 
 cat > "$DIR/garmin-coach" <<EOF
 #!/bin/sh
@@ -128,11 +135,6 @@ cd "\$(dirname "\$0")" || exit 1
 exec ./runtime/jre/bin/java -cp app/garmin-coach.jar clojure.main -m coach.api $PORT --open "\$@"
 EOF
 chmod +x "$DIR/garmin-coach"
-
-# 4. Python and the Garmin connector, so the first login doesn't wait for them
-bold "4/4  Preparing the Garmin connector (downloads Python the first time)…"
-(cd "$DIR" && ./runtime/jre/bin/java -cp app/garmin-coach.jar clojure.main -m coach.garmin-mcp prepare) \
-  || fail "the Garmin connector couldn't be prepared. Check the internet connection and run this again."
 
 if [ -n "$SERVER" ]; then
   # The host names the dashboard may be opened at
@@ -169,7 +171,7 @@ systemctl --user disable --now garmin-coach 2>/dev/null
 for f in "$UNIT_DIR"/garmin-coach-athlete-*.service; do
   if [ -f "\$f" ]; then systemctl --user disable --now "\$(basename "\$f" .service)" 2>/dev/null; fi
 done
-rm -f "$UNIT" "$UNIT_DIR"/garmin-coach-athlete-*.service; systemctl --user daemon-reload
+rm -f "$UNIT" "$UNIT_DIR"/garmin-coach-athlete-*.service; rm -rf "$UNIT_DIR/garmin-.service.d"; systemctl --user daemon-reload
 rm -rf "$DIR/app" "$DIR/runtime" "$DIR/garmin-coach"
 answer=n
 if (exec </dev/tty) 2>/dev/null; then
@@ -187,12 +189,33 @@ EOF
   if ! loginctl enable-linger "$USER" 2>/dev/null; then
     echo "Couldn't keep it running after logout. Run: sudo loginctl enable-linger $USER"
   fi
+  # For every athlete's service (systemd applies "garmin-" to all units starting with it): several apps
+  # share a small server, so Java gives back memory it isn't using, and the C library keeps fewer pools.
+  mkdir -p "$UNIT_DIR/garmin-.service.d"
+  {
+    echo "[Service]"
+    echo "Environment=MALLOC_ARENA_MAX=2"
+    echo "Environment=\"JDK_JAVA_OPTIONS=-XX:+UseSerialGC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=25\""
+  } > "$UNIT_DIR/garmin-.service.d/memory.conf"
+
+  wait_started() { # port: the next app starts once this one answers, or after two minutes anyway
+    local i
+    for i in $(seq 1 60); do
+      if curl -fs -o /dev/null -m 2 "http://127.0.0.1:$1/"; then return 0; fi
+      sleep 2
+    done
+    echo "The app on port $1 isn't answering yet; going on."
+  }
   systemctl --user daemon-reload
   systemctl --user enable garmin-coach >/dev/null 2>&1
+  # One at a time: starting Java is the heaviest moment, and a small server may have one CPU core
   systemctl --user restart garmin-coach
+  wait_started "$PORT"
   for u in $(athlete_units); do
     echo "Restarting the athlete ${u#garmin-coach-athlete-}…"
     systemctl --user restart "$u"
+    athlete_port="$(sed -n 's/^ExecStart=.* coach\.api \([0-9]*\) .*/\1/p' "$UNIT_DIR/$u.service" | head -n 1)"
+    if [ -n "$athlete_port" ]; then wait_started "$athlete_port"; fi
   done
 
   trap - ERR
