@@ -336,6 +336,15 @@
                       (swap! state dissoc :flash)
                       (api! "PUT" (str costs/settings-url "/" task)
                             (assoc (select-keys current [:model :effort :delivery :scope]) field value)))
+      :claude-limits (let [{:keys [ui data route]} @state
+                           edits (:claude-limits ui)
+                           value (fn [r field k] (get-in edits [(or (:name r) "") field] (k r)))]
+                       (swap! state dissoc :flash)
+                       (api! "PUT" costs/limits-url
+                             {:limits (vec (for [r (get-in data [(costs/url route) :limits :athletes])]
+                                             {:name        (:name r)
+                                              :daily_usd   (value r :daily :daily_usd)
+                                              :monthly_usd (value r :monthly :monthly_usd)}))}))
       :claude-check (do (swap! state assoc-in [:ui :claude-check] {:checking true})
                         (-> (js/fetch "/api/claude/check" #js {:method "POST"})
                             (.then #(.json %))

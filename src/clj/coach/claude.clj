@@ -112,7 +112,12 @@
 (defn- ->json-value [x] (JsonValue/from (json/read-str (json/write-str x))))
 
 (defn- client []
-  (-> (AnthropicOkHttpClient/builder) (.apiKey ^String (api-key)) (.timeout (Duration/ofMinutes 10)) (.build)))
+  (-> (AnthropicOkHttpClient/builder)
+      (.apiKey ^String (api-key))
+      (.timeout (Duration/ofMinutes 10))
+      ;; athletes share one key: a rate limit or a busy API means waiting (with backoff), not an error
+      (.maxRetries (int 6))
+      (.build)))
 
 (defn- api-json
   "An SDK object as the API's own JSON (snake_case keys), via the SDK's mapper."
@@ -139,6 +144,20 @@
                   (= "billing_error" (some-> (.orElse (.errorType se) nil) str)))))
        (re-find #"(?i)credit balance is too low" (str (ex-message e))))))
 
+(defn limit-message
+  "`hit` (coach.costs/limit-hit) as a sentence for the athlete."
+  [{:keys [period limit_usd]}]
+  (let [limit (str (String/format java.util.Locale/ROOT "%.2f" (object-array [limit_usd])) " USD")]
+    (if (= "month" period)
+      (t "This athlete's Claude spending limit for this month ({0}) is reached. Claude requests resume next month, or when the main athlete raises the limit in Settings." limit)
+      (t "This athlete's Claude spending limit for today ({0}) is reached. Claude requests resume tomorrow, or when the main athlete raises the limit in Settings." limit))))
+
+(defn- check-limit!
+  "Stops a request before it costs anything once this athlete's limit is reached."
+  []
+  (when-let [hit (some-> @costs/log-ds costs/limit-reached)]
+    (throw (ex-info (limit-message hit) {:type :cost-limit :limit hit}))))
+
 (declare request*)
 
 (defn request
@@ -148,6 +167,7 @@
   chosen for `task` (coach.ai-settings) unless opts give :model / :effort.
   Every request, failed ones too, is logged with its cost under `task`."
   [{:keys [task ref] :as opts}]
+  (when-not (= :test task) (check-limit!)) ; testing the key stays possible, and costs next to nothing
   (let [chosen (ai/for-task task)
         model  (or (:model opts) (:model chosen))
         effort (or (:effort opts) (:effort chosen))
@@ -263,7 +283,7 @@
   the current language. Skipped while the credits are out (like the
   automatic planning); the next run after that fills in what's missing."
   [& [new-texts]]
-  (when-not (some-> @costs/log-ds costs/credits-out)
+  (when-not (when-let [ds @costs/log-ds] (or (costs/credits-out ds) (costs/limit-reached ds)))
     (translate/soon! request new-texts)))
 
 
@@ -298,6 +318,7 @@
   pending. `data` (JSON-able) goes to the task's batch handler with the
   result. Throws like request does (no credits included)."
   [ds {:keys [task ref data] :as opts}]
+  (check-limit!)
   (let [chosen (ai/for-task task)
         model  (or (:model opts) (:model chosen))
         effort (or (:effort opts) (:effort chosen))

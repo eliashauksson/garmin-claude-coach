@@ -23,6 +23,7 @@ resources/public/vendor/
 target/
 config.edn
 config-*.edn
+claude-limits.edn
 !.clj-kondo/config.edn
 /sync.lock
 /athletes/

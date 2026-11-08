@@ -97,6 +97,12 @@
                         (t "Still no credits. If you just paid, wait a minute and try again.")
                         (t "The check failed: {0}" result))])])))
 
+(defn- limit-banner
+  "This athlete's Claude spending limit is reached: new requests wait for the next day or month."
+  [{:keys [limit_hit message]}]
+  (when limit_hit
+    (banner "warn" (t "Claude spending limit reached") message)))
+
 (defn view
   "Banners for every page. `sync` is the polled /api/sync state."
   [{:keys [sync server-down quit route restarting] ui-state :ui}]
@@ -126,6 +132,7 @@
             (banner "warn" (t "A new version is available: {0}" (get-in sync [:update :latest]))
                     nil [:a {:href "#/settings"} (t "Update in Settings › General")]))
           (credits-banner (:claude sync) (:claude-check ui-state))
+          (limit-banner (:claude sync))
           (auth-banner (:auth sync) (:last_ok sync))
           (sync-banner sync))))
 

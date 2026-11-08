@@ -410,8 +410,16 @@ sync). A 2 GB server is enough; more athletes make it slower, not unstable:
 - **Swap.** On a server under 4 GB, the script adds a swap file (about 1 GB per athlete, at least
   2 GB; `/swapfile-garmin-coach`). Short of memory, the system moves what isn't used right now
   to the disk, so things get slower instead of a process being killed.
+- **Memory is handed back.** After a sync the app returns what it no longer needs, and an update
+  restarts the athletes one at a time.
 - If a dashboard feels slow, `free -h` shows memory and swap use. More memory (Hetzner: power
   off, **Rescale**) makes it fast again.
+
+**Claude spending limits.** In the main athlete's Settings › Claude & API costs, each athlete can
+get a daily and a monthly limit in US dollars, counted against their own requests only. Once one
+is reached, that athlete's new Claude requests stop until the next day or month (local server
+time). A request already running still finishes, so a limit can be passed by that last request.
+The other athletes see their own limits there but can't change them.
 
 **Coros** sends you back to the address you connected from, with its port. If that fails, use
 the SSH tunnel from [step 5](#coros-if-you-use-it) with this athlete's local port (8081 for the

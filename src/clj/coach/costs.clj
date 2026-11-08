@@ -7,9 +7,11 @@
   doesn't rewrite history. A request served by a fallback model is priced per
   model, from the response's usage.iterations."
   (:require [clojure.data.json :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [coach.db :as db]
+            [coach.i18n :as i18n]
             [coach.paths :as paths]
             [next.jdbc :as jdbc]))
 
@@ -239,6 +241,103 @@
                                          from)
                          (catch Exception e {:error (ex-message e)}))))))))
 
+;; ---------------------------------------------------------------------------
+;; Spending limits: each athlete's own daily and monthly amount in USD, counted against that athlete's
+;; requests only. One file in the app folder, so every athlete's app reads it; only the main athlete
+;; changes it. {nil {:daily_usd 2.0 :monthly_usd 20.0} "nadine" {:daily_usd 1.0}}, nil being the main athlete.
+
+(defn limits-file ^java.io.File [] (paths/app-file "claude-limits.edn"))
+
+(defn read-limits
+  "Every athlete's limits. A file that can't be read means no limits: it mustn't stop the coach."
+  []
+  (let [f (limits-file)]
+    (or (when (.isFile f)
+          (try (let [m (edn/read-string (slurp f))] (when (map? m) m))
+               (catch Exception e (println "Could not read the Claude limits:" (ex-message e)))))
+        {})))
+
+(defn- amount
+  "A limit as typed: a positive number of dollars, nil when empty."
+  [v]
+  (let [x (cond (nil? v)    nil
+                (number? v) (double v)
+                (string? v) (when-let [s (not-empty (str/trim (str/replace v "," ".")))]
+                              (try (Double/parseDouble s) (catch NumberFormatException _ ##NaN)))
+                :else       ##NaN)]
+    (when (and x (not (< 0 x 1e6)))
+      (throw (ex-info (i18n/t "Enter an amount in dollars, or leave it empty for no limit.") {:amount v})))
+    x))
+
+(defn save-limits!
+  "Stores `rows` [{:name :daily_usd :monthly_usd}], empty amounts meaning no limit. Limits of athletes
+  not on this server any more stay, in case they come back."
+  [rows]
+  (let [known (set (map :name (paths/athletes)))
+        new   (into {} (for [{:keys [name daily_usd monthly_usd]} rows
+                             :when (contains? known name) ; the main athlete's name is nil
+                             :let [d (amount daily_usd) m (amount monthly_usd)]
+                             :when (or d m)]
+                         [name (cond-> {} d (assoc :daily_usd d) m (assoc :monthly_usd m))]))
+        f     (limits-file)
+        tmp   (io/file (str f ".tmp"))]
+    (spit tmp (pr-str (merge (apply dissoc (read-limits) known) new)))
+    (java.nio.file.Files/move (.toPath tmp) (.toPath f)
+                              (into-array java.nio.file.CopyOption
+                                          [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                                           java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+    nil))
+
+(defn- period-starts
+  "The instants this local day and month began, in the form api_calls.at is stored."
+  []
+  (let [zone  (java.time.ZoneId/systemDefault)
+        today (java.time.LocalDate/now zone)
+        at    (fn [^java.time.LocalDate d] (str (.toInstant (.atStartOfDay d zone))))]
+    {:day (at today) :month (at (.withDayOfMonth today 1))}))
+
+(defn spent
+  "What the athlete of database `ds` has spent: {:today usd :month usd}."
+  [ds]
+  (let [{:keys [day month]} (period-starts)
+        sum (fn [since]
+              (:cost_usd (first (db/query ds ["SELECT coalesce(sum(cost_usd), 0) AS cost_usd FROM api_calls WHERE at >= ?"
+                                              since]))))]
+    {:today (sum day) :month (sum month)}))
+
+(defn limit-hit
+  "Pure: {:period \"day\"|\"month\" :limit_usd :spent_usd} for the limit `spending` has reached, else nil.
+  The month first, since it lasts longer."
+  [{:keys [daily_usd monthly_usd]} {:keys [today month]}]
+  (cond
+    (and monthly_usd (>= month monthly_usd)) {:period "month" :limit_usd monthly_usd :spent_usd month}
+    (and daily_usd (>= today daily_usd))     {:period "day" :limit_usd daily_usd :spent_usd today}))
+
+(defn limit-reached
+  "The limit this athlete (database `ds`) has reached, else nil. If spending can't be read, no limit
+  applies: a failed check mustn't stop the coach."
+  [ds]
+  (when-let [limits (not-empty (get (read-limits) (paths/instance)))]
+    (try (limit-hit limits (spent ds))
+         (catch Exception e (println "Could not check the Claude limit:" (ex-message e))))))
+
+(defn limits-overview
+  "For Settings: the main athlete sees and edits everyone's limits, the others see only their own."
+  [ds]
+  (let [limits (read-limits)
+        main?  (nil? (paths/instance))]
+    {:can_edit main?
+     :athletes
+     (vec (for [{:keys [name data-dir current]} (paths/athletes)
+                :when (or main? current)
+                :let [own (get limits name)
+                      s   (try (spent (if current ds (db/read-only-datasource (str (io/file data-dir "coach.db")))))
+                               (catch Exception e {:error (ex-message e)}))]]
+            (merge {:name name :label (paths/instance-label name) :current current
+                    :spent_today (:today s) :spent_month (:month s) :error (:error s)
+                    :hit (when-not (:error s) (limit-hit own s))}
+                   own)))}))
+
 (defn overview
   "Everything the Costs page needs for requests from `from` (ISO date,
   inclusive; nil = all)."
@@ -277,6 +376,7 @@
                       (sort-by :last_at #(compare %2 %1))
                       vec)
      :by_athlete (by-athlete ds from)
+     :limits    (limits-overview ds)
      :requests  (vec (for [r (take 200 rows)] (dissoc r :usage_raw :lines)))
      :pending_batches (first (db/query ds ["SELECT count(*) AS n, min(submitted_at) AS since
                                             FROM claude_batches WHERE status = 'pending'"]))

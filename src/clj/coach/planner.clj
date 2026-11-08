@@ -556,7 +556,7 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
   "The one-time backfill at dashboard start, in the background; marked done
   in sync_state after it succeeds (a failure is retried at the next start)."
   [ds]
-  (when-not (or (db/get-state ds :structure_backfill) (costs/credits-out ds))
+  (when-not (or (db/get-state ds :structure_backfill) (costs/credits-out ds) (costs/limit-reached ds))
     (future
       (try
         (let [n (structure! ds (str (LocalDate/now)))]

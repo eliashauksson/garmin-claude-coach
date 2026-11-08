@@ -271,6 +271,42 @@
                (* (:cache_read avg 0) (:cache_read p))
                (* (:cache_write_5m avg 0) (:cache_write_5m p)) (* (:cache_write_1h avg 0) (:cache_write_1h p))))))
 
+(def limits-url "/api/claude/limits")
+
+(defn- limits-card
+  "Each athlete's daily and monthly Claude limit: the main athlete edits them all, others see their own."
+  [{:keys [can_edit athletes]} edits]
+  (let [several (> (count athletes) 1)
+        limit-cell
+        (fn [r field k label]
+          (if can_edit
+            [:input.note {:type "number" :min "0" :step "0.5" :inputmode "decimal"
+                          :style {:width "7em"} :placeholder (t "No limit") :aria-label label
+                          :value (or (get-in edits [(or (:name r) "") field]) (some-> (k r) str) "")
+                          :on {:input [[:set-in-ui :claude-limits (or (:name r) "") field :event/target-value]]}}]
+            (or (usd (k r) 2) (t "No limit"))))]
+    (ui/card {}
+             [:div.lab (t "Spending limits")]
+             (ui/table (filterv some?
+                                [(when several
+                                   {:label (t "Athlete")
+                                    :render #(list (or (:label %) (:name %) (t "Main athlete"))
+                                                   (when (:current %) [:span.muted (str " · " (t "this dashboard"))]))})
+                                 {:label (t "Spent today") :align :r :value #(usd (:spent_today %) 2)}
+                                 {:label (t "Daily limit") :align :r
+                                  :render #(limit-cell % :daily :daily_usd (t "Daily limit"))}
+                                 {:label (t "Spent this month") :align :r :value #(usd (:spent_month %) 2)}
+                                 {:label (t "Monthly limit") :align :r
+                                  :render #(limit-cell % :monthly :monthly_usd (t "Monthly limit"))}
+                                 {:label "" :render #(cond (:error %) [:span.error {:title (:error %)}
+                                                                       (t "Couldn't be read")]
+                                                           (:hit %)   [:span.error (t "Reached")])}])
+                       athletes {:key-fn #(or (:name %) "")})
+             [:div.sub (t "Each athlete's own Claude spending, in US dollars as Anthropic bills it. Once a limit is reached, that athlete's new Claude requests stop until the next day or month, including automatic planning. Leave a field empty for no limit.")]
+             (if can_edit
+               [:div.connect-row [:button.btn-ink {:on {:click [[:claude-limits]]}} (t "Save limits")]]
+               [:div.sub (t "Only the main athlete can change these limits.")]))))
+
 (defn- settings-card
   "Choose the model and effort per task, with what each combination has cost so far."
   [{:keys [tasks models efforts defaults deliveries scopes]} {:keys [by_task by_setting prices pending_batches]}]
@@ -375,6 +411,7 @@
       (ui/seg range ranges [:set-param :range])]
      (when flash [:div.error flash])
      (some (fn [x] (when-let [e (get errors x)] [:div.error (t "Could not load: {0}" e)])) [u settings-url])
+     (when (:limits d) [:div {:replicant/key "limits"} (limits-card (:limits d) (:claude-limits ui-state))])
      (when (and st d) [:div {:replicant/key "settings"} (settings-card st d)])
      (when d
        (if (zero? (get-in d [:totals :requests] 0))

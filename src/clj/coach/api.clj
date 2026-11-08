@@ -96,7 +96,9 @@
     (try (taking-turns f)
          (catch Throwable e
            (println "Sync job failed:" (ex-message e))
-           (swap! sync-state assoc :running false :job nil :waiting false)))))
+           (swap! sync-state assoc :running false :job nil :waiting false))
+         ;; a sync is the app's peak: hand that memory back to the others on the server now, not eventually
+         (finally (System/gc)))))
 
 (defn- run-job!
   "Runs `f` with a Garmin source in the background unless a sync or history
@@ -172,6 +174,7 @@
                      (catch Throwable e (println "Training load refit failed:" (ex-message e))))
                 (cond
                   (costs/credits-out ds) (assoc result :plan_check_skipped "no Claude credits")
+                  (costs/limit-reached ds) (assoc result :plan_check_skipped "Claude spending limit reached")
                   :else (try (assoc result :proposals (:proposed (planner/check! ds)))
                              (catch Throwable e (assoc result :plan_check_error (ex-message e)))))))))
 
@@ -245,10 +248,12 @@
 (defn- auth-status [ds] (auth/status ds))
 
 (defn- claude-status
-  "For the banner on every page: are the Claude credits out?"
+  "For the banner on every page: are the Claude credits out, or this athlete's spending limit reached?"
   [ds]
-  (when-let [out (costs/credits-out ds)]
-    (assoc out :credits_out true :billing_url claude/billing-url :message (claude/no-credits-message))))
+  (if-let [out (costs/credits-out ds)]
+    (assoc out :credits_out true :billing_url claude/billing-url :message (claude/no-credits-message))
+    (when-let [hit (costs/limit-reached ds)]
+      {:limit_hit hit :message (claude/limit-message hit)})))
 
 (defn- claude-check!
   "After the athlete adds funds: one tiny request on the cheapest model
@@ -584,6 +589,12 @@
                                 (ok (ai/overview ds))))}]]
     ["/costs"       {:get (fn [{:keys [query-params]}]
                             (ok (costs/overview ds (get query-params "from"))))}]
+    ["/claude/limits" {:put (guarded
+                             (fn [req]
+                               (if (paths/instance)
+                                 (json-response 403 {:error (i18n/t "Only the main athlete can change these limits.")})
+                                 (do (costs/save-limits! (:limits (body req)))
+                                     (ok (costs/limits-overview ds))))))}]
     ["/claude/check" {:post (fn [_] (ok (claude-check! ds)))}]
     ;; the Claude API key: saved in ~/.config/coach/anthropic-key, never sent back
     ["/claude/key"   {:get    (fn [_] (ok (claude/key-status)))
