@@ -58,7 +58,7 @@
     :day        [(day/url (:date route))]
     :activity   [(str "/api/activities/" id "?streams=true")]
     :workout    [(workout/url id)]
-    :calendar   (calendar/urls route)
+    :calendar   (calendar/urls route (:ui @state))
     :map        [heatmap/url]
     :plan       (plan/urls)
     :dashboard  (dashboard/urls route)
@@ -444,6 +444,9 @@
                         (swap! state assoc-in [:ui :heat-base] (first args)))
       :heat-colors  (do (.setItem js/localStorage "heat-colors" (first args))
                         (swap! state assoc-in [:ui :heat-colors] (first args)))
+      :cal-extend   (calendar/extend! state fetch! (first args))
+      :cal-jump     (calendar/jump! state fetch! (first args))
+      :cal-month    (calendar/jump! state fetch! (calendar/month-monday (first args)))
       :scroll-to    (some-> (js/document.getElementById (first args))
                             (.scrollIntoView #js {:behavior "smooth" :block "start"}))
       :back         (if (> (.-length js/history) 1) (.back js/history) (set! (.-hash js/location) "#/"))
@@ -482,13 +485,15 @@
       [:div.brand [:span.logo] "Coach"]
       (for [[k href label] nav-items]
         [:a {:replicant/key k :href href :class (when (= k active) "active")} (t label)])]
-     [:main {:class (remove nil? [(when (seq loading) "loading") (when (#{:calendar :map} page) "wide")])}
+     [:main {:class (remove nil? [(when (and (seq loading) (not (and (= page :calendar) (calendar/loaded? s))))
+                                   "loading")
+                                 (when (#{:calendar :map} page) "wide")])}
       (status/view s)
       (case page
         :day        (day/view s (first (urls route)) (:date route))
         :activity   (activity/view s (first (urls route)))
         :workout    (workout/view s (first (urls route)))
-        :calendar   (calendar/view s (urls route))
+        :calendar   (calendar/view s)
         :map        (heatmap/view s)
         :plan       (plan/view s (urls route))
         :dashboard  (dashboard/view s)
@@ -520,6 +525,7 @@
   (r/set-dispatch! dispatch)
   (add-watch state ::render (fn [_ _ _ _] (render!)))
   (.addEventListener js/window "hashchange" on-hash!)
+  (calendar/install! state fetch!)
   (apply-theme!)
   (set! (.. js/document -documentElement -lang) @i18n/lang)
   (load-lang!)

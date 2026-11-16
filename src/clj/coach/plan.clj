@@ -54,6 +54,21 @@
   []
   (str (LocalDate/now)))
 
+(defn deviation
+  "How a done activity `a` departed from its planned workout `w`: :long / :short (time more than 20% off),
+  :hard (an easy session ridden at tempo effort) or :easy (a hard one that wasn't), else nil."
+  [w a]
+  (let [plan-s (* 60 (or (:duration_min w) 0))
+        act-s  (or (:moving_s a) (:duration_s a))
+        ratio  (when (and (pos? plan-s) (number? act-s)) (/ act-s plan-s))
+        sess   (get rules/sessions (:session_id w))
+        i      (:intensity a)]
+    (cond
+      (and ratio (> ratio 1.2)) :long
+      (and ratio (< ratio 0.8)) :short
+      (and (:easy? sess) (number? i) (> i 0.85)) :hard
+      (and (:hard? sess) (number? i) (< i 0.7)) :easy)))
+
 (defn with-done
   "Status as seen by the athlete: a planned workout is done when an activity
   of the same kind exists that day (each activity matches one workout), and
@@ -67,7 +82,7 @@
               (cond
                 (and a (#{"planned" "done"} (:status w)))
                 (do (swap! pool update k rest)
-                    (assoc w :status "done" :activity_id (:id a)))
+                    (assoc w :status "done" :activity_id (:id a) :deviation (deviation w a)))
 
                 (and (= "planned" (:status w)) (neg? (compare (:date w) today)))
                 (assoc w :status "missed")
@@ -93,7 +108,8 @@
   (mapv parse-blocks
         (with-done (db/query ds ["SELECT * FROM planned_workouts WHERE date BETWEEN ? AND ? AND status <> 'cancelled'
                                   ORDER BY date, slot" from to])
-          (db/query ds ["SELECT id, date, sport FROM activities WHERE date BETWEEN ? AND ?" from to])
+          (db/query ds ["SELECT a.id, a.date, a.sport, a.duration_s, a.moving_s, m.intensity FROM activities a
+                        LEFT JOIN activity_metrics m ON m.activity_id = a.id WHERE a.date BETWEEN ? AND ?" from to])
           (today))))
 
 (defn workout

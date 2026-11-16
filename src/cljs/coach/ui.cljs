@@ -146,15 +146,17 @@
 
 ;; Sport families: a fixed colour per family, assigned by entity, never by rank.
 (def families
-  [{:id :run   :label (tk "Run")       :plural (tk "runs")     :color "--fam-run"   :re #"running"}
-   {:id :bike  :label (tk "Bike")      :plural (tk "rides")    :color "--fam-bike"  :re #"cycling|biking|ride"}
-   {:id :swim  :label (tk "Swim")      :plural (tk "swims")    :color "--fam-swim"  :re #"swimming"}
-   {:id :hike  :label (tk "Hike/walk") :plural (tk "hikes")    :color "--fam-hike"
+  [{:id :run :icon :sport-run :label (tk "Run") :plural (tk "runs") :color "--fam-run" :re #"running"}
+   {:id :bike :icon :sport-bike :label (tk "Bike") :plural (tk "rides") :color "--fam-bike"
+    :re #"cycling|biking|ride"}
+   {:id :swim :icon :sport-swim :label (tk "Swim") :plural (tk "swims") :color "--fam-swim" :re #"swimming"}
+   {:id :hike :icon :sport-hike :label (tk "Hike/walk") :plural (tk "hikes") :color "--fam-hike"
     :re #"hiking|walking|mountaineering"}
-   {:id :ski   :label (tk "Ski/snow")  :plural (tk "ski days") :color "--fam-ski"   :re #"ski|snowboard"}
-   {:id :strength :label (tk "Strength") :plural (tk "strength sessions") :color "--fam-strength"
-    :re #"strength|fitness|cardio|hiit|yoga"}
-   {:id :other :label (tk "Other")     :plural (tk "other")    :color "--fam-other" :re #".*"}])
+   {:id :ski :icon :sport-ski :label (tk "Ski/snow") :plural (tk "ski days") :color "--fam-ski"
+    :re #"ski|snowboard"}
+   {:id :strength :icon :sport-strength :label (tk "Strength") :plural (tk "strength sessions")
+    :color "--fam-strength" :re #"strength|fitness|cardio|hiit|yoga"}
+   {:id :other :icon :sport-sport :label (tk "Other") :plural (tk "other") :color "--fam-other" :re #".*"}])
 
 (defn family [sport]
   (some #(when (re-find (:re %) (str sport)) %) families))
@@ -182,7 +184,18 @@
 ;; Icons (inline SVG, 24x24 stroke icons from the mockup)
 
 (def icon-paths
-  {:bolt       [[:path {:d "M13 2 3 14h9l-1 8 10-12h-9l1-8z"}]]
+  {:sport-run      [[:circle {:cx 15 :cy 4.5 :r 2}]
+                    [:path {:d "M13 9l-3 3 3 3-2 6M10 12l-4 2M13 9l4 3 3-1M13 15l4 2 1 4"}]]
+   :sport-bike     [[:circle {:cx 5.5 :cy 17.5 :r 3.5}] [:circle {:cx 18.5 :cy 17.5 :r 3.5}]
+                    [:path {:d "M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm-3 11.5V14l-3-3 4-3 2 3h2"}]]
+   :sport-swim     [[:circle {:cx 17 :cy 6 :r 2}] [:path {:d "M4 12l5-3 4 2 2-3"}]
+                    [:path {:d "M2 16c1.5 1 3 1 4.5 0s3-1 4.5 0 3 1 4.5 0 3-1 4.5 0"}]
+                    [:path {:d "M2 20c1.5 1 3 1 4.5 0s3-1 4.5 0 3 1 4.5 0 3-1 4.5 0"}]]
+   :sport-hike     [[:path {:d "M3 20l6-11 4 6 2-3 6 8z"}]]
+   :sport-ski      [[:path {:d "M12 2v20M4.9 7l14.2 10M4.9 17L19.1 7"}]]
+   :sport-strength [[:path {:d "M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"}]]
+   :sport-sport    [[:path {:d "M3 12h4l3-8 4 16 3-8h4"}]]
+   :bolt       [[:path {:d "M13 2 3 14h9l-1 8 10-12h-9l1-8z"}]]
    :battery    [[:rect {:x 2 :y 7 :width 18 :height 10 :rx 2}] [:path {:d "M22 11v2"}]]
    :moon       [[:path {:d "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"}]]
    :sun        [[:circle {:cx 12 :cy 12 :r 4}]

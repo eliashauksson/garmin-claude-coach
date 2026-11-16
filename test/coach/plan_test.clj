@@ -1,6 +1,7 @@
 (ns coach.plan-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [coach.plan :as plan]
             [coach.plan-rules :as rules]
             [coach.readiness :as readiness]
             [coach.season :as season]))
@@ -127,3 +128,11 @@
       (is (< (Math/abs (- 0.232 (cost {:input_tokens 3000 :output_tokens 9000 :cache_read 0 :cache_write_5m 8000})))
              1e-9)))
     (is (zero? (cost {})))))
+
+(deftest deviation-test
+  (is (nil? (plan/deviation {:session_id "EASY" :duration_min 60} {:duration_s 3600})))
+  (is (= :long (plan/deviation {:session_id "EASY" :duration_min 60} {:duration_s 4500})))
+  (is (= :short (plan/deviation {:session_id "EASY" :duration_min 60} {:moving_s 2700})))
+  (is (= :hard (plan/deviation {:session_id "EASY" :duration_min 60} {:duration_s 3600 :intensity 0.9})))
+  (is (= :easy (plan/deviation {:session_id "THR" :duration_min 60} {:duration_s 3600 :intensity 0.6})))
+  (is (nil? (plan/deviation {:session_id "EASY" :duration_min 0} {:duration_s 3600}))))
