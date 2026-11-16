@@ -471,11 +471,12 @@
 ;; ---------------------------------------------------------------------------
 ;; Shell
 
-(def nav-items [[:dashboard "#/" (i18n/tk "Dashboard")] [:calendar "#/calendar" (i18n/tk "Calendar")]
-                [:map "#/map" (i18n/tk "Map")]
-                [:plan "#/plan" (i18n/tk "Plan")]
-                [:metrics "#/metrics" (i18n/tk "Metrics")]
-                [:settings "#/settings" (i18n/tk "Settings")]])
+(def nav-items [[:dashboard "#/" (i18n/tk "Dashboard") :nav-home]
+                [:calendar "#/calendar" (i18n/tk "Calendar") :nav-calendar]
+                [:map "#/map" (i18n/tk "Map") :nav-map]
+                [:plan "#/plan" (i18n/tk "Plan") :nav-plan]
+                [:metrics "#/metrics" (i18n/tk "Metrics") :nav-metrics]
+                [:settings "#/settings" (i18n/tk "Settings") :nav-settings]])
 
 (defn view [{:keys [route loading] :as s}]
   (let [page (:page route)
@@ -483,8 +484,10 @@
     [:div.shell
      [:nav.side {:aria-label (t "Main")}
       [:div.brand [:span.logo] "Coach"]
-      (for [[k href label] nav-items]
-        [:a {:replicant/key k :href href :class (when (= k active) "active")} (t label)])]
+      (for [[k href label icon] nav-items]
+        [:a {:replicant/key k :href href :class (when (= k active) "active")
+             :aria-current (when (= k active) "page")}
+         (ui/nav-icon icon) [:span (t label)]])]
      [:main {:class (remove nil? [(when (and (seq loading) (not (and (= page :calendar) (calendar/loaded? s))))
                                    "loading")
                                  (when (#{:calendar :map} page) "wide")
@@ -504,20 +507,8 @@
 (defn render! []
   (r/render (js/document.getElementById "app") (view @state)))
 
-(defn- show-active-tab!
-  "On a phone the tabs are one scrolling row: bring the current one into view."
-  []
-  (js/requestAnimationFrame
-   (fn []
-     (when-let [a (.querySelector js/document "nav.side a.active")]
-       (let [nav (.-parentElement a)]
-         (when (> (.-scrollWidth nav) (.-clientWidth nav))
-           (set! (.-scrollLeft nav) (- (.-offsetLeft a) (.-offsetLeft nav)
-                                       (/ (- (.-clientWidth nav) (.-offsetWidth a)) 2)))))))))
-
 (defn on-hash! []
   (swap! state assoc :route (parse-route (.-hash js/location)))
-  (show-active-tab!)
   (load-route!))
 
 (defn ^:dev/after-load reload! [] (render!))

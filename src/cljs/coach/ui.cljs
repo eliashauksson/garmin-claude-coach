@@ -184,7 +184,14 @@
 ;; Icons (inline SVG, 24x24 stroke icons from the mockup)
 
 (def icon-paths
-  {:sport-run      [[:circle {:cx 15 :cy 4.5 :r 2}]
+  {:nav-home       [[:path {:d "M3 11l9-8 9 8"}] [:path {:d "M5 10v10h14V10"}] [:path {:d "M10 20v-6h4v6"}]]
+   :nav-calendar   [[:rect {:x 3 :y 5 :width 18 :height 16 :rx 2}] [:path {:d "M3 10h18M8 3v4M16 3v4"}]]
+   :nav-map        [[:path {:d "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"}]]
+   :nav-plan       [[:rect {:x 5 :y 4 :width 14 :height 17 :rx 2}] [:path {:d "M9 3h6v3H9zM9 11h6M9 15h6"}]]
+   :nav-metrics    [[:path {:d "M5 21V11M12 21V4M19 21v-7"}]]
+   :nav-settings   [[:circle {:cx 12 :cy 12 :r 3}]
+                    [:path {:d "M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"}]]
+   :sport-run      [[:circle {:cx 15 :cy 4.5 :r 2}]
                     [:path {:d "M13 9l-3 3 3 3-2 6M10 12l-4 2M13 9l4 3 3-1M13 15l4 2 1 4"}]]
    :sport-bike     [[:circle {:cx 5.5 :cy 17.5 :r 3.5}] [:circle {:cx 18.5 :cy 17.5 :r 3.5}]
                     [:path {:d "M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm-3 11.5V14l-3-3 4-3 2 3h2"}]]
@@ -316,6 +323,13 @@
                :stroke (str "var(" (:color fam) ")") :stroke-width 2.2 :stroke-linecap "round"
                :stroke-linejoin "round"}]
         (icon-paths (:icon fam))))
+
+(defn nav-icon
+  "A tab of the main navigation, drawn in the link's text colour."
+  [icon]
+  (into [:svg {:aria-hidden "true" :width 22 :height 22 :viewBox "0 0 24 24" :fill "none"
+               :stroke "currentColor" :stroke-width 2 :stroke-linecap "round" :stroke-linejoin "round"}]
+        (icon-paths icon)))
 
 (defn sport-chip [sport]
   (let [f (family sport)]

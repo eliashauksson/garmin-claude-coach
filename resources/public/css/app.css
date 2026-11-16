@@ -36,6 +36,7 @@
   --tint-purple: #ece8fd;
   --tint-red: #fde9e7;
   --tint-amber: #fff2dc;
+  --tabbar-h: 58px;
   --shadow-nav: 0 1px 2px rgba(22,24,29,.06);
   --radius: 6px; --radius-sm: 4px; --bar-w: 4px;
   --shadow-card: 0 1px 3px rgba(22,24,29,.14);
@@ -133,10 +134,8 @@ main.loading { opacity: .55; transition: opacity .15s; }
 main.wide { max-width: 1600px; }
 @media (max-width: 760px) {
   .shell:has(main.full) { flex-direction: column; flex-wrap: nowrap; height: 100dvh; }
-  .shell main.full { flex: 1; min-height: 0; height: auto; }
-  nav.side { position: static; max-height: none; max-width: none; flex-basis: 100%; padding: 16px 16px 0; display: flex; flex-wrap: wrap; gap: 4px; }
-  nav.side .brand { flex-basis: 100%; padding: 0 0 8px; }
-  main { padding: 16px 16px 40px; }
+  .shell main.full { flex: 1; min-height: 0; height: auto; padding: 0 0 calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
+  main { padding: 16px 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 24px); }
 }
 
 /* Page header */
@@ -731,14 +730,20 @@ a.info:hover, a.info:focus-visible { color: var(--text); }
 
 /* --- Phone (≤ 760 px wide; most rules ≤ 480 px) ------------------------- */
 @media (max-width: 760px) {
-  /* one scrolling row of tabs instead of a wrapped list; the page title names the app */
-  nav.side { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 2px; padding: 12px 12px 0; }
-  nav.side::-webkit-scrollbar { display: none; }
+  /* the main navigation is a tab bar fixed to the bottom: icon over a short label */
+  nav.side { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 1100; max-width: none; max-height: none;
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; padding: 4px 4px env(safe-area-inset-bottom);
+    background: var(--surface); border-top: 1px solid var(--line); overflow: visible; }
   nav.side .brand { display: none; }
-  nav.side a { flex: none; padding: 9px 11px; font-size: 13.5px; white-space: nowrap; }
+  nav.side a { flex-direction: column; justify-content: center; gap: 2px; min-width: 0; min-height: 50px; padding: 6px 0;
+    font-size: 10.5px; font-weight: 600; color: var(--text-3); background: none; box-shadow: none; }
+  nav.side a span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  nav.side a.active { color: var(--text); background: none; box-shadow: none; }
+  /* no tab bar above the keyboard */
+  body:has(input:not([type=checkbox], [type=radio], [type=range]):focus, textarea:focus) nav.side { display: none; }
 }
 @media (max-width: 480px) {
-  main { padding: 12px 12px 32px; gap: 12px; }
+  main { padding: 12px 12px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 20px); gap: 12px; }
   .row, .chart-grid, .morning, .race, .kpis, .predictions, .vitals { gap: 10px; }
   .card { padding: 16px 16px; }
   h1 { font-size: 26px; }
