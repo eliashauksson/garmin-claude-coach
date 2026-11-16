@@ -487,7 +487,8 @@
         [:a {:replicant/key k :href href :class (when (= k active) "active")} (t label)])]
      [:main {:class (remove nil? [(when (and (seq loading) (not (and (= page :calendar) (calendar/loaded? s))))
                                    "loading")
-                                 (when (#{:calendar :map} page) "wide")])}
+                                 (when (#{:calendar :map} page) "wide")
+                                 (when (= :map page) "full")])}
       (status/view s)
       (case page
         :day        (day/view s (first (urls route)) (:date route))

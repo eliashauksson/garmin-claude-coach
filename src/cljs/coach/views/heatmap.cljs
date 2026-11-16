@@ -1,15 +1,16 @@
 (ns coach.views.heatmap
   "Map tab: a heatmap of every activity with GPS, filtered by time range and sport family."
-  (:require [coach.heat :as heat]
-            [coach.i18n :as i18n :refer [t]]
+  (:require [clojure.string :as str]
+            [coach.heat :as heat]
+            [coach.i18n :refer [t tk]]
             [coach.ui :as ui]
             [coach.views.status :as status]))
 
 (def url "/api/heatmap")
 
 (def ranges
-  [["all" (i18n/tk "All time")] ["year" (i18n/tk "This year")]
-   ["365" (i18n/tk "12 months")] ["90" (i18n/tk "90 days")]])
+  [["all" (tk "All time")] ["year" (tk "This year")]
+   ["365" (tk "12 months")] ["90" (tk "90 days")]])
 
 (defn- from-date
   "First date included by `span`, nil for all time."
@@ -27,7 +28,7 @@
   (or (:heat-colors ui) (.getItem js/localStorage "heat-colors") "blue"))
 
 (def grounds
-  [["dark" (i18n/tk "Dark map")] ["light" (i18n/tk "Light map")] ["satellite" (i18n/tk "Satellite")]])
+  [["dark" (tk "Dark map")] ["light" (tk "Light map")] ["satellite" (tk "Satellite")]])
 
 (defn ground
   "What's under the heat: \"dark\", \"light\" or \"satellite\" (remembered in this browser)."
@@ -52,6 +53,34 @@
                :on {:click [[:heat-colors id]]}}
       [:span.swatch {:style {:background-image (heat/gradient id)}}] (t label)])])
 
+(defn- row [label & controls]
+  [:div.map-row [:div.map-row-lab (t label)] (into [:div.map-row-ctl] controls)])
+
+(defn- overlay
+  "Top-left over the map: the title with the number of activities, and the settings in a drop-down."
+  [{:keys [empty? n span sport present sync ui]}]
+  (let [summary (str/join " · " (remove nil? [(t (some #(when (= span (first %)) (second %)) ranges))
+                                              (when (seq sport)
+                                                (t (:label (some #(when (= sport (name (:id %))) %) ui/families))))]))]
+    [:div.map-overlay
+     [:div.map-title [:b (t "Map")] [:span.sub (if (= 1 n) (t "1 activity") (t "{0} activities" n))]]
+     (when empty?
+       [:div.map-note (t "No activities with GPS yet: they appear here after the next sync.")])
+     [:details.map-filters
+      [:summary (t "Filters") [:span.sub summary]]
+      [:div.map-panel
+       (row (tk "Time range") (ui/seg span ranges [:set-param :range] {:soft? true}))
+       (row (tk "Sport") (ui/seg sport (into [["" (tk "All sports")]]
+                                             (for [f ui/families :when (present (name (:id f)))]
+                                               [(name (:id f)) (:label f)]))
+                                 [:set-param :sport] {:soft? true}))
+       (row (tk "Heat") (ui/seg (if (heat? ui) "on" "off") [["on" (tk "Heat on")] ["off" (tk "Heat off")]]
+                                [:heat-show] {:soft? true}))
+       (row (tk "Colours") (palette-picker (palette ui)))
+       (row (tk "Map") (ui/seg (ground ui) grounds [:heat-base] {:soft? true}))
+       (row (tk "View") (ui/seg (dim ui) [["2d" (tk "2D")] ["3d" (tk "3D")]] [:heat-dim] {:soft? true}))
+       [:div.map-row (status/sync-button sync)]]]]))
+
 (defn view [{:keys [data errors route sync ui]}]
   (let [items   (get data url)
         span    (get-in route [:params :range] "all")
@@ -62,26 +91,12 @@
         present (set (map fam-of items))
         shown   (vec (cond->> in-time (seq sport) (filter #(= sport (fam-of %)))))]
     [:div {:style {:display "contents"}}
-     [:div.page-head
-      [:div.title
-       [:div.sub (if (= 1 (count shown)) (t "1 activity") (t "{0} activities" (count shown)))]
-       [:h1 (t "Map")]]
-      (status/sync-button sync)]
-     [:div.map-filters
-      (ui/seg span ranges [:set-param :range])
-      (ui/seg sport (into [["" (i18n/tk "All sports")]]
-                          (for [f ui/families :when (present (name (:id f)))]
-                            [(name (:id f)) (:label f)]))
-              [:set-param :sport])
-      (ui/seg (if (heat? ui) "on" "off") [["on" (i18n/tk "Heat on")] ["off" (i18n/tk "Heat off")]] [:heat-show])
-      (palette-picker (palette ui))
-      (ui/seg (ground ui) grounds [:heat-base])
-      (ui/seg (dim ui) [["2d" (i18n/tk "2D")] ["3d" (i18n/tk "3D")]] [:heat-dim])]
      (when-let [e (get errors url)] [:div.error (t "Could not load: {0}" e)])
      (cond
        (nil? items)   nil
-       (empty? items) [:div.card [:div.sub (t "No activities with GPS yet: they appear here after the next sync.")]]
        :else          (let [props {:items shown :version (str span "|" sport "|" (count shown))
                                    :palette (palette ui) :ground (ground ui) :heat? (heat? ui)}]
                         [:div.heat-base {:class (ground ui)}
-                         (if (= "3d" (dim ui)) (heat/map-3d props) (heat/map-2d props))]))]))
+                         (if (= "3d" (dim ui)) (heat/map-3d props) (heat/map-2d props))
+                         (overlay {:empty? (empty? items) :n (count shown) :span span :sport sport :present present
+                                  :sync sync :ui ui})]))]))

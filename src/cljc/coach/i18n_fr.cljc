@@ -22,6 +22,11 @@
 
    ;; --- navigation, shell ---------------------------------------------------
    "Calendar" "Calendrier"
+   "Filters" "Filtres"
+   "Time range" "Période"
+   "Heat" "Heatmap"
+   "Colours" "Couleurs"
+   "View" "Vue"
    "Map" "Carte"
    "Satellite" "Satellite"
    "2D" "2D"
