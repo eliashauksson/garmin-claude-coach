@@ -24,8 +24,8 @@
     (let [r (nth rows (.-dataIndex (first params)) nil)]
       (c/tooltip-rows (ui/date-long (:date r))
                       [{:label (t "fitness (CTL)") :value (:ctl r) :color (c/css-var "--blue")}
-                       {:label (t "fatigue (ATL)") :value (:atl r) :color (c/css-var "--red")}
-                       {:label (t "form (TSB)") :value (:tsb r) :color (c/css-var "--green-ink")}
+                       {:label (t "fatigue (ATL)") :value (:atl r) :color (c/css-var "--pink")}
+                       {:label (t "form (TSB)") :value (:tsb r) :color (c/css-var "--amber")}
                        {:label (t "TSS that day") :value (:tss r)}]))))
 
 (defn urls
@@ -59,17 +59,17 @@
         [:div.row {:replicant/key "kpi"}
          (ui/tile {:info "ctl" :label (t "Fitness · CTL") :tint "blue" :size "md" :value (:ctl latest)
                    :sub (t "42-day load")})
-         (ui/tile {:info "atl" :label (t "Fatigue · ATL") :tint "red" :size "md" :value (:atl latest)
+         (ui/tile {:info "atl" :label (t "Fatigue · ATL") :tint "pink" :size "md" :value (:atl latest)
                    :sub (t "7-day load")})
-         (ui/tile {:info "tsb" :label (t "Form · TSB") :tint "green" :size "md" :value (:tsb latest)
+         (ui/tile {:info "tsb" :label (t "Form · TSB") :tint "amber" :size "md" :value (:tsb latest)
                    :sub (t "fitness − fatigue")})
-         (ui/tile {:info "ramp" :label (t "Ramp rate") :tint "amber" :size "md" :value (:ramp latest)
+         (ui/tile {:info "ramp" :label (t "Ramp rate") :tint "purple" :size "md" :value (:ramp latest)
                    :sub (t "CTL change / 7 days")})]
         [:div {:replicant/key "pmc"}
          (ui/chart-card
           {:title (t "Fitness, fatigue and form") :info "tsb"
-           :legend-items [{:label (t "Fitness (CTL)") :color "--blue"} {:label (t "Fatigue (ATL)") :color "--red"}
-                          {:label (t "Form (TSB)") :color "--green-ink"}]
+           :legend-items [{:label (t "Fitness (CTL)") :color "--blue"} {:label (t "Fatigue (ATL)") :color "--pink"}
+                          {:label (t "Form (TSB)") :color "--amber"}]
            :chart (c/echart
                    {:key "pmc" :class "h280" :group "load"
                     :option-fn (fn []
@@ -78,9 +78,9 @@
                                         {:series [(-> (c/line (t "Fitness (CTL)") "--blue" (mapv (juxt :date :ctl) pmc)
                                                               :lineStyle {:width 3})
                                                       (c/area-wash 0.18))
-                                                  (c/line (t "Fatigue (ATL)") "--red" (mapv (juxt :date :atl) pmc)
+                                                  (c/line (t "Fatigue (ATL)") "--pink" (mapv (juxt :date :atl) pmc)
                                                           :lineStyle {:width 2.5})
-                                                  (-> (c/line (t "Form (TSB)") "--green-ink"
+                                                  (-> (c/line (t "Form (TSB)") "--amber"
                                                               (mapv (juxt :date :tsb) pmc)
                                                               :lineStyle {:width 2})
                                                       (assoc :markLine {:silent true :symbol "none" :label {:show false}

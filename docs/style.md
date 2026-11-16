@@ -1,4 +1,4 @@
-# Coach style guide (bento)
+# Coach style guide (TrainingPeaks-style, formerly bento)
 
 This guide describes the app's visual style precisely enough to rebuild it in another system and
 get the same result. It replaces the original bento implementation brief, which is not in git
@@ -12,10 +12,17 @@ code disagree, the code wins and this file should be updated.
 
 ## 1. Principles
 
-- **Bento grid.** Every piece of content sits in a rounded card on a pale grey page. Cards wrap
-  in flex rows with a 14px gap. There are no borders around cards and no drop shadows on them.
-- **Colour by tint.** A card for one metric gets a pale tint of that metric's accent colour
-  (green for readiness, blue for body battery, purple for sleep…). Neutral content sits on white.
+- **White cards, small radius.** Content sits in white cards on a pale grey page: 6px radius
+  (`--radius`; 4px, `--radius-sm`, for buttons, chips and session cards) and a light shadow
+  (`--shadow-card`). Inner boxes have a hairline border instead of a grey fill. Cards wrap in flex rows
+  with a 14px gap.
+- **Colour by top bar.** A card for one metric gets a 4px bar on top in that metric's accent colour
+  (`.tint-*` sets `--bar`; green readiness, blue body battery, purple sleep…). The background stays white.
+- **Status bars (as in the calendar).** Sessions and activities carry the same bar everywhere: green done,
+  yellow done but off plan (with "Longer/Shorter/Harder/Easier than planned"), red missed, blue planned
+  (`--st-done|off|missed|planned`; `ui/activity-card`, `ui/planned-card`, `.plan-row.st-*`). Sport chips and
+  cards show the sport's icon in its colour (`ui/sport-icon`).
+- **Fitness, fatigue, form** are blue, pink and amber wherever they appear.
 - **One big number per card.** Large, heavy, tabular numerals carry the card; everything else is
   small and quiet.
 - **Recessive charts.** No axis lines, no ticks, hairline grid, no symbols, no animation.

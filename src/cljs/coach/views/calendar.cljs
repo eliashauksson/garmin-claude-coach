@@ -146,34 +146,10 @@
       (ui/day-month d)
       (str (.getDate d)))))
 
-(defn- sport-label [fam]
-  [:div.cal-item-kind
-   (into [:svg {:aria-hidden "true" :width 15 :height 15 :viewBox "0 0 24 24" :fill "none"
-                :stroke (str "var(" (:color fam) ")") :stroke-width 2.2 :stroke-linecap "round"
-                :stroke-linejoin "round"}]
-         (ui/icon-paths (:icon fam)))
-   (t (:label fam))])
-
-(def deviation-labels
-  {"long"  (tk "Longer than planned")
-   "short" (tk "Shorter than planned")
-   "hard"  (tk "Harder than planned")
-   "easy"  (tk "Easier than planned")})
-
 (defn- activity-item
   "Green when it matched its planned session (or none was planned), yellow when it didn't."
-  [by-act {:keys [id sport name distance_m tss tss_method] :as a}]
-  (let [fam (ui/family sport)
-        dev (:deviation (by-act id))]
-    [:a.cal-item.done {:replicant/key id :class (when dev "off")
-                       :href (str "#/activities/" id)
-                       :title (str name (when tss_method (str " · " tss_method)))}
-     (sport-label fam)
-     [:div.cal-item-name name]
-     [:div.cal-item-big (ui/hms (ui/active-secs a))]
-     (when (and distance_m (pos? distance_m)) [:div.cal-item-meta (str (ui/km distance_m) " km")])
-     (when tss [:div.cal-item-meta (str (js/Math.round tss) " " (or tss_method "TSS"))])
-     (when dev [:div.cal-item-dev (t (deviation-labels dev))])]))
+  [by-act a]
+  (ui/activity-card a (:deviation (by-act (:id a))) {:class "cal-item"}))
 
 (def health-metrics
   "Shown in a day's metrics card, with the day page's icons and colours."
@@ -203,17 +179,8 @@
        (when (:steps w)
          [:span {:replicant/key "steps"} (mini-icon :footprints "--green") (ui/thousands (:steps w))])])))
 
-(defn- planned-item [{:keys [id session_id title slot duration_min distance_km status]}]
-  ;; yellow bar while planned, red once missed (like TrainingPeaks)
-  (let [gym? (re-find #"^GYM" session_id)
-        fam  (if gym? (ui/family "strength_training") (ui/family "running"))]
-    [:a.cal-item.planned {:replicant/key (str "p" id) :href (str "#/workouts/" id) :class status
-                          :title (str slot " · " title)}
-     (sport-label fam)
-     [:div.cal-item-name (ui/session-names session_id session_id)]
-     (when (pos? duration_min) [:div.cal-item-big (ui/hms (* 60 duration_min))])
-     (when (pos? distance_km) [:div.cal-item-meta (str distance_km " km")])
-     [:div.cal-item-meta slot]]))
+(defn- planned-item [w]
+  (ui/planned-card w {:class "cal-item"}))
 
 (defn- week-summary [monday acts planned load-by-date today]
   (let [sunday  (ui/add-days monday 6)

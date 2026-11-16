@@ -309,9 +309,66 @@
         chart
         footer))
 
+(defn sport-icon
+  "The family's icon in its colour (the calendar's session cards, the chips)."
+  [fam size]
+  (into [:svg {:aria-hidden "true" :width size :height size :viewBox "0 0 24 24" :fill "none"
+               :stroke (str "var(" (:color fam) ")") :stroke-width 2.2 :stroke-linecap "round"
+               :stroke-linejoin "round"}]
+        (icon-paths (:icon fam))))
+
 (defn sport-chip [sport]
   (let [f (family sport)]
-    [:span.chip {:class (name (:id f))} [:span.dot] (sport-label sport)]))
+    [:span.chip {:class (name (:id f))} (sport-icon f 13) (sport-label sport)]))
+
+(defn planned-family
+  "The sport family of a planned session: GYM… strength, HIKE, RIDE, else a run."
+  [session-id]
+  (let [id (str session-id)]
+    (family (cond (re-find #"^GYM" id) "strength_training"
+                  (= "HIKE" id)        "hiking"
+                  (= "RIDE" id)        "cycling"
+                  :else                "running"))))
+
+(def deviation-labels
+  {"long"  (tk "Longer than planned")
+   "short" (tk "Shorter than planned")
+   "hard"  (tk "Harder than planned")
+   "easy"  (tk "Easier than planned")})
+
+(defn session-status
+  "How a planned workout (coach.plan/with-done) stands: \"off\" is done but not as planned, else its status."
+  [{:keys [status deviation]}]
+  (if (and (= "done" status) deviation) "off" (or status "planned")))
+
+(defn- kind-line [fam]
+  [:div.session-kind (sport-icon fam 15) (t (:label fam))])
+
+(defn activity-card
+  "A recorded activity as a card: green, or yellow when it departed from its planned session (`dev`)."
+  [{:keys [id sport name distance_m tss tss_method] :as a} dev & [{:keys [class]}]]
+  [:a.session.done {:replicant/key id :class (remove nil? [(when dev "off") class])
+                    :href (str "#/activities/" id)
+                    :title (str name (when tss_method (str " · " tss_method)))}
+   (kind-line (family sport))
+   [:div.session-name name]
+   [:div.session-big (hms (active-secs a))]
+   (when (and distance_m (pos? distance_m)) [:div.session-meta (str (km distance_m) " km")])
+   (when tss [:div.session-meta (str (js/Math.round tss) " " (or tss_method "TSS"))])
+   (when dev [:div.session-dev (t (deviation-labels dev))])])
+
+(defn planned-card
+  "A planned session as a card: blue while planned, red once missed."
+  [{:keys [id session_id title slot duration_min distance_km status]} & [{:keys [class]}]]
+  [:a.session.planned {:replicant/key (str "p" id) :href (str "#/workouts/" id)
+                       :class (remove nil? [status class])
+                       :title (str slot " · " title)}
+   (kind-line (planned-family session_id))
+   [:div.session-name (session-names session_id session_id)]
+   (when (pos? duration_min) [:div.session-big (hms (* 60 duration_min))])
+   (when (pos? distance_km) [:div.session-meta (str distance_km " km")])
+   [:div.session-meta slot]
+   (when (= "missed" status) [:div.session-miss (t "missed")])])
 
 (defn status-pill [level text]
   [:span.pill {:style {:background "var(--surface)"}}

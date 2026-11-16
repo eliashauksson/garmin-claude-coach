@@ -12,8 +12,6 @@
 
 (def session-names ui/session-names)
 
-(defn strength? [session-id] (boolean (re-find #"^GYM" (str session-id))))
-(defn- cross? [session-id] (contains? #{"HIKE" "RIDE"} session-id))
 
 (defn mondays []
   (let [m (ui/monday (ui/iso-today))] (mapv #(ui/add-days m (* 7 %)) (range weeks-shown))))
@@ -31,8 +29,8 @@
   (let [d (ui/parse-date iso)] (str (ui/weekdays (.getDay d)) " " (ui/day-month d))))
 
 (defn session-chip [session-id]
-  [:span.chip {:class (if (or (strength? session-id) (cross? session-id)) "other" "run")} [:span.dot]
-   (session-names session-id session-id)])
+  (let [fam (ui/planned-family session-id)]
+    [:span.chip {:class (name (:id fam))} (ui/sport-icon fam 13) (session-names session-id session-id)]))
 
 (defn- amount [{:keys [duration_min distance_km]}]
   (str/join " · " (remove nil? [(when (and duration_min (pos? duration_min)) (str duration_min " min"))
@@ -42,11 +40,12 @@
 ;; Planned sessions
 
 (defn- workout-row [{:keys [id date slot session_id title intensity status] :as w}]
-  [:div.plan-row {:replicant/key id :class status}
+  [:div.plan-row {:replicant/key id :class [status (str "st-" (ui/session-status w))]}
    [:div.plan-when (short-date date) [:span.sub (str " " slot)]]
    [:div.plan-what
     [:div (session-chip session_id) " " [:a.plain {:href (str "#/workouts/" id)} [:b title]]]
-    [:div.sub (str/join " · " (remove str/blank? [(amount w) intensity]))]]
+    [:div.sub (str/join " · " (remove str/blank? [(amount w) intensity]))]
+    (when-let [dev (:deviation w)] [:div.session-dev (t (ui/deviation-labels dev))])]
    (let [patch (fn [k label body] [:button.pill
                                    {:replicant/key k :on {:click [[:api "PATCH" (str "/api/plan/workouts/" id) body]]}}
                                    label])]

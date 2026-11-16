@@ -288,8 +288,7 @@
        (for [w workouts
              :let [c (by-id (:id w))]]
          [:div {:replicant/key (:id w) :style {:display "flex" :flex-direction "column" :gap "4px"}}
-          [:div (plan/session-chip (:session_id w)) " " [:a.plain {:href (str "#/workouts/" (:id w))} [:b (:title w)]]
-           [:span.sub (str " · " (:slot w) (when (pos? (:duration_min w)) (str " · " (:duration_min w) " min")))]]
+          (ui/planned-card w)
           (when c
             [:div {:style {:display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap"}}
              [:span.sub (t "Readiness suggests: {0}"
@@ -310,11 +309,8 @@
   [:div.divider
    [:div.lab (t "Planned")]
    (if (seq planned)
-     (for [w planned]
-       [:div {:replicant/key (:id w)}
-        (plan/session-chip (:session_id w)) " " [:a.plain {:href (str "#/workouts/" (:id w))} [:b (:title w)]]
-        [:span.sub (str " · " (:slot w) (when (pos? (:duration_min w)) (str " · " (:duration_min w) " min"))
-                        (when (not= "planned" (:status w)) (str " · " (t (:status w)))))]])
+     (for [w (remove #(= "done" (:status %)) planned)]
+       [:div {:replicant/key (:id w)} (ui/planned-card w)])
      [:div.sub (t "Nothing planned.")])])
 
 (defn- activities-card
@@ -324,16 +320,10 @@
   (ui/card {:flex "1 1 300px"}
            (ui/label-row {:icon :mountain :accent "--text" :tint "--surface-2" :soft? true :label (t "Activities")})
            (if (seq acts)
-             (for [a acts]
-               [:div {:replicant/key (:id a) :style {:display "flex" :flex-direction "column" :gap "6px"}}
-                [:a
-                 {:href (str "#/activities/" (:id a))
-                  :style {:font-size "20px" :font-weight 800 :text-decoration "none"}}
-                 (:name a)]
-                (ui/pills (some-> (ui/km (:distance_m a)) (str " km") ui/pill)
-                          (some-> (ui/hm (or (:moving_s a) (:duration_s a))) ui/pill)
-                          (some-> (:avg_hr a) js/Math.round (str " bpm") ui/pill)
-                          (some-> (:tss a) js/Math.round (str " TSS") ui/pill))])
+             (let [by-act (into {} (keep #(when (:activity_id %) [(:activity_id %) %])) planned)]
+               (for [a acts]
+                 [:div {:replicant/key (:id a)}
+                  (ui/activity-card a (:deviation (by-act (:id a))))]))
              [:div.empty (t "No activities this day.")])
            (if check (planned-today check) (planned-day planned))))
 

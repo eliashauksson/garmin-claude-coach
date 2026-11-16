@@ -13,10 +13,11 @@
   (str/join " · " (remove nil? [(when (and duration_min (pos? duration_min)) (str duration_min " min"))
                                 (when (and distance_km (pos? distance_km)) (str distance_km " km"))])))
 
-(defn- status-pill [{:keys [status activity_id]}]
+(defn- status-pill [{:keys [status activity_id deviation]}]
   (case status
     "done"      (if activity_id
-                  [:a.pill {:href (str "#/activities/" activity_id)} (t "✓ done") " · " (t "Open activity")]
+                  [:a.pill {:href (str "#/activities/" activity_id)} (t "✓ done") " · " (t "Open activity")
+                   (when deviation (str " · " (t (ui/deviation-labels deviation))))]
                   (ui/pill "--green" (t "✓ done")))
     "missed"    [:span.pill.missed (t "missed")]
     "skipped"   (ui/pill (t "skipped"))
@@ -48,7 +49,7 @@
      (when-let [e (get errors url)] [:div.error (t "Could not load: {0}" e)])
      (when w
        (list
-        [:div {:replicant/key "head"}
+        [:div.workout-head {:replicant/key "head" :class (str "st-" (ui/session-status w))}
          [:div (plan/session-chip (:session_id w))]
          [:h1 (:title w)]
          [:div.sub (str/join " · " (remove str/blank? [(ui/date-long (:date w)) (:slot w) (amount w)]))]
