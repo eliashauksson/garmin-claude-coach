@@ -90,6 +90,10 @@
                          (not-empty (into {} (remove (comp nil? val))
                                           {:ftp_w (some-> (:ftp p) Math/round) :ftp_source (:ftp_source p)
                                            :w_per_kg (:wkg p) :vo2max_estimate (:vo2max_est p)})))
+     :lthr             (let [th (analysis/thresholds-at (db/thresholds ds) today
+                                                        (analysis/estimated-lthr ds (db/thresholds ds) today))]
+                         (when-let [v (:lthr th)]
+                           {:bpm (Math/round (double v)) :source (or (:lthr_source th) "garmin")}))
      :season_plan_target (plan/season-target ds monday)
      :proposed_previous_week (proposed-week ds (season/add-days monday -7))
      :planned_previous_and_target_weeks
@@ -141,6 +145,12 @@ and readiness win - say so in `warnings`.
 athlete hasn't reviewed yet; treat them as planned.
 `cycling_power`, when present, is from rides with a power meter (FTP estimated or from Garmin):
 give ride intensities in watts as well.
+`lthr` is the lactate threshold HR the zones and scores use; its `source` is `garmin` or
+`estimate` (Garmin has none, so it is guessed from the athlete's hardest efforts). While it is an
+estimate, put one `LT_TEST` into this week or the next (after an easy or rest day, only when
+readiness is fine and the hard rules allow intensity) and say in its `reason` that the LTHR is only
+an estimate and the test replaces it. Skip it when an `LT_TEST` is already planned or proposed in
+the previous or target week.
 
 Plan load in time per zone: give every session its duration; `targets.run_min` is the week's
 total running time in minutes. Hikes and rides count as endurance time, not running volume

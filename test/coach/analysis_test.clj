@@ -116,3 +116,37 @@
         (is (empty? (:curve_prev_90d p)))))
     (testing "nothing without rides with power"
       (is (nil? (analysis/cycling-power (temp-ds) today))))))
+
+(deftest estimated-lthr-test
+  (let [row (fn [kind value] {:sport "all" :kind kind :value value :valid_from "2006-01-01" :source "garmin"})
+        base [(row "max_hr" 200.0) (row "hr_z1" 100.0) (row "hr_z2" 120.0) (row "hr_z3" 140.0)
+              (row "hr_z4" 160.0) (row "hr_z5" 180.0)]]
+    (testing "no Garmin LTHR: middle of zone 4"
+      (let [th (analysis/thresholds-at base "2026-01-01")]
+        (is (= 170.0 (:lthr th)))
+        (is (= "estimate" (:lthr_source th)))))
+    (testing "without zones: 85% of max HR"
+      (is (= 170.0 (:lthr (analysis/thresholds-at [(row "max_hr" 200.0)] "2026-01-01")))))
+    (testing "Garmin's LTHR wins"
+      (let [th (analysis/thresholds-at (conj base (row "lthr" 172.0)) "2026-01-01")]
+        (is (= 172.0 (:lthr th)))
+        (is (nil? (:lthr_source th)))))
+    (testing "nothing to estimate from"
+      (is (nil? (:lthr (analysis/thresholds-at [] "2026-01-01")))))))
+
+(deftest lthr-from-peaks-test
+  (testing "best 60 min average wins"
+    (is (= 190.0 (analysis/lthr-from-peaks [{:p60 190.0 :p20 195.0} {:p60 180.0}] 215.0))))
+  (testing "else 95% of the best 20 min average"
+    (is (= 190.0 (analysis/lthr-from-peaks [{:p20 200.0} {:p20 150.0}] 215.0))))
+  (testing "easy efforts say nothing"
+    (is (nil? (analysis/lthr-from-peaks [{:p60 120.0 :p20 140.0}] 215.0))))
+  (testing "clamped to 97% of max HR"
+    (is (= (* 0.97 200.0) (analysis/lthr-from-peaks [{:p60 199.0}] 200.0))))
+  (testing "no max HR or no peaks"
+    (is (nil? (analysis/lthr-from-peaks [{:p60 190.0}] nil)))
+    (is (nil? (analysis/lthr-from-peaks [] 200.0))))
+  (testing "thresholds-at uses it only without a Garmin LTHR"
+    (let [row (fn [kind value] {:sport "all" :kind kind :value value :valid_from "2006-01-01" :source "garmin"})]
+      (is (= 188.0 (:lthr (analysis/thresholds-at [(row "max_hr" 200.0)] "2026-01-01" 188.0))))
+      (is (= 172.0 (:lthr (analysis/thresholds-at [(row "max_hr" 200.0) (row "lthr" 172.0)] "2026-01-01" 188.0)))))))

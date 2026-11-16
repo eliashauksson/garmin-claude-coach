@@ -426,6 +426,7 @@
    "Time in heart-rate zones" "Temps dans les zones cardiaques"
    "Peak values" "Valeurs maximales"
    "Duration" "Durée"
+   "Scored with estimated LTHR {0} bpm" "Calculé avec une LTHR estimée à {0} bpm"
    "Scored with LTHR {0} bpm" "Calculé avec LTHR {0} bpm"
    ", threshold pace {0} /km" ", allure au seuil {0} /km"
    ", FTP {0}" ", FTP {0}"

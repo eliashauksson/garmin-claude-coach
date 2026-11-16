@@ -21,10 +21,36 @@
    ["bike" "ftp"]            :ftp
    ["swim" "css"]            :css})
 
+(defn estimate-lthr
+  "LTHR for athletes whose Garmin has detected none: the middle of heart-rate
+  zone 4 (zone 4 and 5 floors), else 85% of max HR. nil without either."
+  [{:keys [hr_zones max_hr]}]
+  (let [[z4 z5] (drop 3 hr_zones)]
+    (cond
+      (and z4 z5) (/ (+ z4 z5) 2.0)
+      max_hr      (* 0.85 max_hr))))
+
+(defn lthr-from-peaks
+  "LTHR from the athlete's own hard efforts: the best 60 min average HR, else
+  95% of the best 20 min average HR (Friel's field test, see training-principles.md).
+  `peaks` are {:p20 :p60} of running/cycling activities of the last year; efforts
+  below 75% (60 min) / 80% (20 min) of `max_hr` are not hard enough to say anything.
+  Clamped to 75-97% of `max_hr`. nil when nothing qualifies."
+  [peaks max_hr]
+  (when max_hr
+    (let [best (fn [k lo]
+                 (let [xs (filter #(>= % (* lo max_hr)) (keep k peaks))]
+                   (when (seq xs) (apply max xs))))
+          est  (or (best :p60 0.75) (some-> (best :p20 0.8) (* 0.95)))]
+      (when est (max (* 0.75 max_hr) (min (* 0.97 max_hr) est))))))
+
 (defn thresholds-at
   "Thresholds valid on `date`: per (sport, kind) the latest row with
-  valid_from <= date, or the earliest one if all are later."
-  [rows date]
+  valid_from <= date, or the earliest one if all are later. Without a Garmin
+  LTHR, an estimate (:lthr_source \"estimate\"): `lthr-est` (from the athlete's
+  own efforts, `estimated-lthr`) or else `estimate-lthr`, so hrTSS works."
+  ([rows date] (thresholds-at rows date nil))
+  ([rows date lthr-est]
   (let [row  (fn [rs]
                (let [rs (sort-by :valid_from rs)]
                  (or (last (filter #(<= (compare (:valid_from %) date) 0) rs))
@@ -33,9 +59,28 @@
         by   (group-by (juxt :sport :kind) rows)
         zones (keep #(pick (by ["all" (str "hr_z" %)])) (range 1 6))
         ftp  (row (by ["bike" "ftp"]))]
-    (cond-> (into {} (for [[k rs] by :let [key (threshold-keys k)] :when key] [key (pick rs)]))
-      (= 5 (count zones)) (assoc :hr_zones (vec zones))
-      ftp                 (assoc :ftp_source (:source ftp)))))
+    (as-> (cond-> (into {} (for [[k rs] by :let [key (threshold-keys k)] :when key] [key (pick rs)]))
+            (= 5 (count zones)) (assoc :hr_zones (vec zones))
+            ftp                 (assoc :ftp_source (:source ftp)))
+          th
+      (if-let [est (and (not (:lthr th)) (or lthr-est (estimate-lthr th)))]
+        (assoc th :lthr est :lthr_source "estimate")
+        th)))))
+
+(defn estimated-lthr
+  "`lthr-from-peaks` over the last year's running and cycling activities as of
+  `today`; nil without peaks (a first sync) or when Garmin has its own LTHR."
+  [ds rows today]
+  (let [th (thresholds-at rows today)]
+    (when (= "estimate" (:lthr_source th))
+      (let [from  (str (.minusDays (java.time.LocalDate/parse today) 365))
+            peaks (for [r (db/query ds ["SELECT a.sport, json_extract(m.peaks, '$.hr.\"1200\"') AS p20,
+                                                json_extract(m.peaks, '$.hr.\"3600\"') AS p60
+                                         FROM activities a JOIN activity_metrics m ON m.activity_id = a.id
+                                         WHERE a.date >= ? AND m.peaks IS NOT NULL" from])
+                        :when (#{:run :bike} (m/sport-family (:sport r)))]
+                    r)]
+        (lthr-from-peaks peaks (:max_hr th))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Route thumbnail
@@ -123,6 +168,7 @@
   ([ds] (compute-metrics! ds nil))
   ([ds ids]
    (let [rows    (db/thresholds ds)
+         lthr-est (estimated-lthr ds rows (season/today))
          sex     (db/get-state ds :sex)
          rest-hr (rest-hr-lookup ds)
          lp      (load-params ds)
@@ -136,7 +182,7 @@
        (db/upsert-metrics!
         ds
         (for [a batch]
-          (let [th     (assoc (thresholds-at rows (:date a)) :rest_hr (rest-hr (:date a)) :sex sex)
+          (let [th     (assoc (thresholds-at rows (:date a) lthr-est) :rest_hr (rest-hr (:date a)) :sex sex)
                 [stream hr-src] (stream-with-hr ds a)
                 load   (when stream (epoc/activity-load lp cal th (= :bike (m/sport-family (:sport a))) stream))]
             (merge (m/activity-metrics a stream th)

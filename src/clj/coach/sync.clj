@@ -308,11 +308,15 @@
           no-hr    (map :id (db/query ds ["SELECT a.id FROM activities a
                                            JOIN activity_metrics m ON m.activity_id = a.id
                                            WHERE a.avg_hr IS NULL AND (m.tss IS NULL OR a.date >= ?)"
-                                          (str (.minusDays (d t) (inc intraday-days)))]))]
+                                          (str (.minusDays (d t) (inc intraday-days)))]))
+          ;; heart rate but no score yet: thresholds (e.g. an estimated LTHR) were missing
+          unscored (map :id (db/query ds ["SELECT a.id FROM activities a
+                                           JOIN activity_metrics m ON m.activity_id = a.id
+                                           WHERE a.avg_hr IS NOT NULL AND m.tss IS NULL"]))]
       ;; new thresholds change every score; otherwise only score what's new
       (if changed?
         (analysis/compute-metrics! ds)
-        (analysis/compute-metrics! ds (distinct (concat new-ids missing no-hr))))
+        (analysis/compute-metrics! ds (distinct (concat new-ids missing no-hr unscored))))
       (analysis/update-eftp! ds))
     :ok))
 

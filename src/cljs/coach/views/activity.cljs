@@ -282,7 +282,9 @@
                         [:5 :60 :300 :1200 :3600]))))]
         (when-let [th (:thresholds a)]
           [:div.sub {:replicant/key "th"}
-           (str (t "Scored with LTHR {0} bpm" (some-> (:lthr th) js/Math.round))
+           (str (if (= "estimate" (:lthr_source th))
+                  (t "Scored with estimated LTHR {0} bpm" (some-> (:lthr th) js/Math.round))
+                  (t "Scored with LTHR {0} bpm" (some-> (:lthr th) js/Math.round)))
                 (some->> (:threshold_speed th) ui/pace (t ", threshold pace {0} /km"))
                 (when-let [ftp (some-> (:ftp th) js/Math.round)]
                   (if (= "estimate" (:ftp_source th)) (t ", estimated FTP {0}" ftp) (t ", FTP {0}" ftp)))
