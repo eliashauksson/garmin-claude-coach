@@ -28,6 +28,66 @@
                        {:label (t "form (TSB)") :value (:tsb r) :color (c/css-var "--amber")}
                        {:label (t "TSS that day") :value (:tss r)}]))))
 
+(def forecast-url "/api/forecast")
+
+;; coach.metrics/form-state, in words
+(def state-texts
+  {"overloaded"  [(tk "Overloaded") (tk "Fatigue is high: ease off before it costs you training.")]
+   "building"    [(tk "Building") (tk "Fitness is growing; fatigue is the price. Keep recovery days easy.")]
+   "maintaining" [(tk "Maintaining") (tk "Load and recovery are balanced.")]
+   "recovering"  [(tk "Recovering") (tk "Rested, but fitness is slipping. Fine for a short break.")]
+   "fresh"       [(tk "Fresh") (tk "Rested and ready for a race or a hard session.")]})
+
+(defn- state-line [state]
+  (when-let [[name sub] (state-texts state)]
+    [:div.sub {:replicant/key "state"}
+     [:b (t name)] " · " (t sub) (ui/info "form-state")]))
+
+(defn- forecast-card
+  "The last 4 weeks and, dashed, the plan's load to race day: fitness and form
+  as the season plan would leave them."
+  [pmc {:keys [forecast race_date]}]
+  (when (seq forecast)
+    (let [past   (vec (take-last 28 pmc))
+          anchor (last past)
+          rows   (into past forecast)
+          by-day (into {} (map (juxt :date identity)) rows)
+          series (fn [k] (mapv (juxt :date k) forecast))
+          from   (fn [k] (into (if anchor [[(:date anchor) (get anchor k)]] []) (series k)))
+          race   (or (by-day race_date) (last forecast))]
+      (ui/chart-card
+       {:title (t "Form on the way to race day") :info "form-state"
+        :legend-items [{:label (t "Fitness (CTL)") :color "--blue"} {:label (t "Form (TSB)") :color "--amber"}]
+        :chart (c/echart
+                {:key "forecast" :class "h220"
+                 :option-fn (fn []
+                              (merge (c/base {:tooltip-fmt
+                                              (fn [params]
+                                                (let [r (by-day (aget (.-value (first params)) 0))]
+                                                  (c/tooltip-rows (ui/date-long (:date r))
+                                                                  [{:label (t "fitness (CTL)") :value (:ctl r)
+                                                                    :color (c/css-var "--blue")}
+                                                                   {:label (t "form (TSB)") :value (:tsb r)
+                                                                    :color (c/css-var "--amber")}])))})
+                                     {:series [(c/line (t "Fitness (CTL)") "--blue" (mapv (juxt :date :ctl) past)
+                                                       :lineStyle {:width 3})
+                                               (c/line (t "Fitness (CTL)") "--blue" (from :ctl)
+                                                       :lineStyle {:width 3 :type "dashed"})
+                                               (c/line (t "Form (TSB)") "--amber" (mapv (juxt :date :tsb) past)
+                                                       :lineStyle {:width 2})
+                                               (-> (c/line (t "Form (TSB)") "--amber" (from :tsb)
+                                                           :lineStyle {:width 2 :type "dashed"})
+                                                   (assoc :markLine
+                                                          {:silent true :symbol "none"
+                                                           :label {:show false}
+                                                           :lineStyle {:color (c/css-var "--text-3")
+                                                                       :opacity 0.5 :width 1}
+                                                           :data (cond-> [{:yAxis 0}]
+                                                                   race_date (conj {:xAxis race_date}))}))]}))})
+        :footer [:div.sub (when race
+                            (t "Race day: fitness {0}, form {1} if you train the plan as written."
+                               (:ctl race) (:tsb race)))]}))))
+
 (defn urls
   "Load and volume for the range chosen in the route (?range=, default 180 days)."
   [route]
@@ -37,8 +97,9 @@
 
 (defn section
   "The training load, as a section of the Dashboard."
-  [{:keys [data errors route] ui-state :ui} [load-url volume-url]]
+  [{:keys [data errors route] ui-state :ui} [load-url volume-url forecast-url]]
   (let [pmc    (get data load-url)
+        fc     (when forecast-url (get data forecast-url))
         vol    (get data volume-url)
         range  (get-in route [:params :range] "180")
         vm-key (get ui-state :volume-metric "hours")
@@ -56,6 +117,7 @@
        (ui/card {} [:div.empty (t "No training data yet — run Sync.")]))
      (when (and pmc any?)
        (list
+        (state-line (:state fc))
         [:div.row {:replicant/key "kpi"}
          (ui/tile {:info "ctl" :label (t "Fitness · CTL") :tint "blue" :size "md" :value (:ctl latest)
                    :sub (t "42-day load")})
@@ -89,6 +151,7 @@
                                                                                     :type "solid" :width 1}
                                                                         :data [{:yAxis 0}]}))]}))})
            :footer [:div.sub (t "Above 0: fresh. −10 to −30: building fitness. Below −30: high strain.")]})]
+        (when fc [:div {:replicant/key "forecast"} (forecast-card pmc fc)])
         [:div.row {:replicant/key "r2"}
          (ui/chart-card
           {:title (t "Daily stress · TSS") :info "tss" :tint "amber" :flex "1 1 100%"

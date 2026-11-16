@@ -5,7 +5,7 @@
             [coach.charts :as c]
             [coach.i18n :as i18n :refer [t tk]]
             [coach.ui :as ui]
-            [coach.views.plan :as plan]))
+            [coach.views.workout :as workout]))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -272,37 +272,6 @@
                                                       :data [[{:yAxis low} {:yAxis high}]]})})})
                (no-data))})))
 
-(defn- apply-change
-  "PATCH body for one readiness suggestion."
-  [{:keys [to slot]}]
-  (cond (= "REST" to) {:status "skipped"}
-        :else (cond-> {}
-                to   (assoc :session_id to :title (plan/session-names to))
-                slot (assoc :slot slot))))
-
-(defn planned-today [{:keys [workouts signals changes level]}]
-  (let [by-id (into {} (map (juxt :workout_id identity)) changes)]
-    [:div.divider
-     [:div.lab (t "Planned today")]
-     (if (seq workouts)
-       (for [w workouts
-             :let [c (by-id (:id w))]]
-         [:div {:replicant/key (:id w) :style {:display "flex" :flex-direction "column" :gap "4px"}}
-          (ui/planned-card w)
-          (when c
-            [:div {:style {:display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap"}}
-             [:span.sub (t "Readiness suggests: {0}"
-                           (cond (= "REST" (:to c)) (t "rest instead")
-                                 :else (str/join ", "
-                                                 (remove nil? [(some->> (:to c) plan/session-names (t "change to {0}"))
-                                                               (when (:slot c) (t "move to the evening"))]))))]
-             [:button.pill {:on {:click [[:api "PATCH" (str "/api/plan/workouts/" (:id w)) (apply-change c)]]}}
-              (t "Apply")]])])
-       [:div.sub (t "Nothing planned today.")])
-     (when (seq signals)
-       [:div.sub {:style {:color (if (= "rest" (name level)) "var(--red)" "var(--text-2)")}}
-        (str/join " · " signals)])]))
-
 (defn- planned-day
   "The day's planned sessions, without today's readiness suggestions."
   [planned]
@@ -325,7 +294,7 @@
                  [:div {:replicant/key (:id a)}
                   (ui/activity-card a (:deviation (by-act (:id a))))]))
              [:div.empty (t "No activities this day.")])
-           (if check (planned-today check) (planned-day planned))))
+           (if check (workout/planned-today check) (planned-day planned))))
 
 ;; ---------------------------------------------------------------------------
 

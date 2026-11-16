@@ -199,3 +199,36 @@
         (is (m/has-hr? s))
         (is (not (m/has-hr? ride)))
         (is (#{"hrTSS"} (:tss_method (m/activity-metrics {:sport "road_biking" :moving_s 1800} s thresholds))))))))
+
+(deftest form-state-test
+  (is (nil? (m/form-state {})))
+  (is (= :overloaded (m/form-state {:tsb -35 :ramp 2})))
+  (is (= :overloaded (m/form-state {:tsb -5 :ramp 9})))
+  (is (= :building (m/form-state {:tsb -20 :ramp 3})))
+  (is (= :maintaining (m/form-state {:tsb -4 :ramp 1})))
+  (is (= :recovering (m/form-state {:tsb 6 :ramp -2})))
+  (is (= :fresh (m/form-state {:tsb 6 :ramp 1}))))
+
+(deftest forecast-test
+  (let [dates (map str (take 41 (iterate #(.plusDays ^java.time.LocalDate % 1)
+                                         (java.time.LocalDate/parse "2026-01-01"))))
+        daily (zipmap dates (repeat 60.0))
+        today "2026-02-10"]
+    (testing "no planned weeks: the load only decays, like pmc"
+      (let [fc  (m/forecast daily [] today "2026-02-17")
+            ref (drop-while #(<= (compare (:date %) today) 0)
+                            (m/pmc daily "2026-01-01" "2026-02-17"))]
+        (is (= (map :date ref) (map :date fc)))
+        (is (= (map :ctl ref) (map :ctl fc)))
+        (is (< (:ctl (last fc)) (:ctl (first fc))))))
+    (testing "planned weeks fill the days after today, less what is done"
+      (let [done {"2026-02-09" 100.0 "2026-02-10" 100.0}
+            plan (m/planned-daily-tss [{:monday "2026-02-09" :tss 700}] today done nil)]
+        (is (= #{"2026-02-11" "2026-02-12" "2026-02-13" "2026-02-14" "2026-02-15"} (set (keys plan))))
+        (is (every? #(< (Math/abs (- 100.0 %)) 1e-9) (vals plan)))))
+    (testing "the race week trains only before the race, and not for the race's share"
+      (let [plan (m/planned-daily-tss [{:monday "2026-02-09" :tss 600}] "2026-02-09" {} "2026-02-14")]
+        (is (= #{"2026-02-10" "2026-02-11" "2026-02-12" "2026-02-13"} (set (keys plan))))
+        (is (close? 75.0 (get plan "2026-02-11") 1e-9))))
+    (testing "nothing after the race"
+      (is (nil? (m/forecast daily [] today today))))))

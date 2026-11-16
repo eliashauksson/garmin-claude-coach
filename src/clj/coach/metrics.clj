@@ -413,6 +413,55 @@
   (reduce (fn [m {:keys [date tss]}] (if (and date tss) (update m date (fnil + 0.0) tss) m))
           {} activities))
 
+(defn form-state
+  "The athlete's state in a word from the latest PMC row ({:tsb :ramp}), by the
+  thresholds the Metrics page gives: :overloaded (TSB below -30, or fitness
+  rising by more than 8 a week), :building (-30 to -10), :maintaining (-10
+  to 0), :recovering (rested but fitness slipping), :fresh. Nil without TSB."
+  [{:keys [tsb ramp]}]
+  (when (number? tsb)
+    (cond (or (< tsb -30) (and (number? ramp) (> ramp 8))) :overloaded
+          (<= tsb -10)                                     :building
+          (neg? tsb)                                       :maintaining
+          (and (number? ramp) (neg? ramp))                 :recovering
+          :else                                            :fresh)))
+
+(def race-share
+  "The part of the race week's TSS target that is the race itself (the season
+  plan's target includes it); the rest is training before race day."
+  0.5)
+
+(defn planned-daily-tss
+  "Date -> TSS for the days after `today`: each season-plan week
+  ({:monday :tss}) spread evenly over its days still to come, less what the
+  week already holds in `done` (date -> TSS). In the race week (the one with
+  `race-date`) only the days before the race get training, and only the
+  share of the target that is not the race."
+  [weeks today done race-date]
+  (into {}
+        (for [{:keys [monday tss]} weeks
+              :when (number? tss)
+              :let [days    (dates monday (str (.plusDays (LocalDate/parse monday) 6)))
+                    race?   (and race-date (some #{race-date} days))
+                    target  (if race? (* tss (- 1.0 race-share)) tss)
+                    usable  (if race? (filter #(neg? (compare % race-date)) days) days)
+                    ahead   (filter #(pos? (compare % today)) usable)
+                    past    (filter #(<= (compare % today) 0) days)
+                    left    (max 0.0 (- target (reduce + 0.0 (map #(get done % 0.0) past))))]
+              :when (seq ahead)
+              d     ahead]
+          [d (/ left (count ahead))])))
+
+(defn forecast
+  "The PMC after `today` up to `end` (race day), if the season plan's weeks
+  are trained as planned (rows like `pmc`). Without planned weeks the load
+  just decays."
+  [daily-tss weeks today end]
+  (when (pos? (compare end today))
+    (let [start (or (first (sort (keys daily-tss))) today)]
+      (filterv #(pos? (compare (:date %) today))
+               (pmc (merge daily-tss (planned-daily-tss weeks today daily-tss end)) start end)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Volume
 

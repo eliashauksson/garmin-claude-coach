@@ -457,16 +457,29 @@
       :athlete-upload    (read-athlete-file! (first args))
       (js/console.warn "unknown action" (pr-str action)))))
 
+(defn- open-vital!
+  "A click, or Enter/Space, on a dashboard card opens its history; a link
+  inside the card (the \"?\") keeps its own job."
+  [ev k]
+  (when (and (not (some-> ev .-target (.closest "a")))
+             (or (= "click" (.-type ev)) (#{"Enter" " "} (.-key ev))))
+    (when (= "keydown" (.-type ev)) (.preventDefault ev))
+    (handle [:set-param :vital k])))
+
 (defn dispatch [event-data actions]
   (let [ev (:replicant/dom-event event-data)]
     (doseq [action actions]
-      (handle (cond
-                (= :event/target-value (last action)) (conj (vec (butlast action)) (.. ev -target -value))
-                (= :athlete-chat-key (first action))  [:athlete-chat-key ev]
-                (= :garmin-login-key (first action))  [:garmin-login-key (second action) ev]
-                (= :restore-file (first action))      [:restore-file ev]
-                (= :athlete-upload (first action))    [:athlete-upload ev]
-                :else action)))))
+      (case (first action)
+        :open-vital     (open-vital! ev (second action))
+        ;; only a click on the backdrop itself, not one inside the card
+        :backdrop-close (when (identical? (.-target ev) (.-currentTarget ev)) (handle [:set-param :vital nil]))
+        (handle (cond
+                  (= :event/target-value (last action)) (conj (vec (butlast action)) (.. ev -target -value))
+                  (= :athlete-chat-key (first action))  [:athlete-chat-key ev]
+                  (= :garmin-login-key (first action))  [:garmin-login-key (second action) ev]
+                  (= :restore-file (first action))      [:restore-file ev]
+                  (= :athlete-upload (first action))    [:athlete-upload ev]
+                  :else action))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Shell
@@ -517,6 +530,10 @@
   (r/set-dispatch! dispatch)
   (add-watch state ::render (fn [_ _ _ _] (render!)))
   (.addEventListener js/window "hashchange" on-hash!)
+  ;; Esc closes the dashboard's open card
+  (.addEventListener js/window "keydown"
+                     #(when (and (= "Escape" (.-key %)) (get-in @state [:route :params :vital]))
+                        (handle [:set-param :vital nil])))
   (calendar/install! state fetch!)
   (apply-theme!)
   (set! (.. js/document -documentElement -lang) @i18n/lang)

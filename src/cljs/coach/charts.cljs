@@ -120,8 +120,9 @@
 
 (defn echart
   "Hiccup for an ECharts chart. `option-fn` returns a Clojure option map.
-  Charts sharing `group` get a linked crosshair."
-  [{:keys [class option-fn group key]}]
+  Charts sharing `group` get a linked crosshair. `on-click` gets the clicked
+  point's ECharts params."
+  [{:keys [class option-fn group key on-click]}]
   [:div.chart
    {:class class
     :replicant/key key
@@ -137,6 +138,8 @@
                       (observe-resize! node #(.resize c))
                       c))]
           (.setOption c (clj->js (option-fn)) #js {:notMerge true})
+          (.off c "click")
+          (when on-click (.on c "click" on-click))
           (when group
             (set! (.-group c) group)
             (echarts/connect group))))))}])

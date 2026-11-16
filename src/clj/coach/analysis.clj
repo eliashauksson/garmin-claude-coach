@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [coach.db :as db]
             [coach.epoc :as epoc]
+            [coach.i18n :as i18n]
             [coach.metrics :as m]
             [coach.season :as season]
             [coach.track :as track]
@@ -366,16 +367,31 @@
                     :max_hr (apply max hr)})))))))
 
 
+(defn- daily-tss-by-date [ds]
+  (m/daily-tss (db/query ds ["SELECT a.date, m.tss FROM activities a
+                              JOIN activity_metrics m ON m.activity_id = a.id"])))
+
 (defn pmc
   "CTL/ATL/TSB for [from, to]. Always computed from the first activity so
   the values are correct regardless of the window; `from` \"all\" means
   from there."
   [ds from to]
-  (let [daily (m/daily-tss (db/query ds ["SELECT a.date, m.tss FROM activities a
-                                          JOIN activity_metrics m ON m.activity_id = a.id"]))
+  (let [daily (daily-tss-by-date ds)
         start (or (first (sort (keys daily))) to)
         from  (if (= "all" from) start from)]
     (filterv #(>= (compare (:date %) from) 0) (m/pmc daily start to))))
+
+(defn form-state
+  "Today's state in a word (coach.metrics/form-state), or nil without load data."
+  [ds today]
+  (m/form-state (last (pmc ds today today))))
+
+(defn forecast
+  "The PMC from tomorrow to race day if the season plan (coach.plan/current-season)
+  is trained as planned, or nil without a plan or after the race."
+  [ds today {:keys [race_date weeks]}]
+  (when (and race_date (seq weeks))
+    (m/forecast (daily-tss-by-date ds) weeks today race_date)))
 
 (defn volume
   "Weekly volume for [from, to]; `from` \"all\" means from the first activity."
@@ -403,6 +419,22 @@
           (for [k trend-keys]
             [k (filterv #(>= (compare (:date %) from) 0) (m/trend rows k))]))))
 
+
+(def vital-keys
+  "The wellness metrics the dashboard's detail card can chart."
+  #{:rhr :hrv_avg :sleep_score :sleep_s :readiness :body_battery_high :avg_stress})
+
+(defn vital-trend
+  "History of the wellness metrics `ks` (see vital-keys) for [from, to] as
+  {key [rows from coach.metrics/trend]}; `from` \"all\" means every day on
+  record. The 60 days before `from` feed the baselines."
+  [ds ks from to]
+  (when-let [bad (seq (remove vital-keys ks))]
+    (throw (ex-info (i18n/t "Unknown metric: {0}" (str/join ", " (map name bad))) {:metrics bad})))
+  (let [from (if (= "all" from) "2000-01-01" from)
+        rows (wellness ds (season/add-days from (- m/baseline-days)) to)]
+    (into {} (for [k ks]
+               [k (filterv #(>= (compare (:date %) from) 0) (m/trend rows k))]))))
 
 (defn- num-or-nil [x] (when (number? x) x))
 

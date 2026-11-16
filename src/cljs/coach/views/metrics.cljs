@@ -118,6 +118,14 @@
       :what (tk "How much your fitness (CTL) changed over the last 7 days.")
       :how (tk "Today's CTL minus the CTL 7 days ago.")
       :read (tk "Up to about 5 per week is a sustainable build. Much more raises the risk of injury and illness.")}
+     {:id "form-state" :name (tk "Training state") :src :app
+      :what (tk "Your form in a word, with a forecast of fitness and form up to race day.")
+      :how (tk "From today's form (TSB) and ramp rate. The forecast spreads each season-plan week's TSS over its remaining days; in race week, half of it is counted as the race itself.")
+      :read (tk "Building is normal in a training block; Fresh is what you want on race day. The dashed lines show where the plan takes you.")}
+     {:id "week-progress" :name (tk "This week") :src :app
+      :what (tk "Planned sessions and how much of the week's time and load you have done.")
+      :how (tk "Time and TSS of this week's activities, against the planned sessions' time and the season plan's TSS for the week.")
+      :read (tk "A bar near full by Sunday means the week went as planned; amber means you went past it.")}
      {:id "volume" :name (tk "Weekly volume") :src :app
       :what (tk "Hours, distance or TSS per week, stacked by sport.")
       :how (tk "Added up from your activities, Monday to Sunday.")

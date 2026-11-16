@@ -572,9 +572,21 @@
     ["/wellness"    {:get (fn [{:keys [query-params]}]
                             (let [[from to] (date-range query-params 90)]
                               (ok (analysis/wellness ds from to))))}]
+    ["/trend"       {:get (guarded
+                           (fn [{:keys [query-params]}]
+                             (let [ks   (->> (str/split (get query-params "metrics" "") #",")
+                                             (remove str/blank?) (mapv keyword))
+                                   [from to] (date-range query-params 90)]
+                               (ok (analysis/vital-trend ds ks from to)))))}]
     ["/load"        {:get (fn [{:keys [query-params]}]
                             (let [[from to] (date-range query-params 180)]
                               (ok (analysis/pmc ds from to))))}]
+    ["/forecast"    {:get (fn [_]
+                            (let [today (season/today)
+                                  season (plan/current-season ds)]
+                              (ok {:race_date (:race_date season)
+                                   :state     (some-> (analysis/form-state ds today) name)
+                                   :forecast  (analysis/forecast ds today season)})))}]
     ["/volume"      {:get (fn [{:keys [query-params]}]
                             (let [[from to] (date-range query-params 180)]
                               (ok (analysis/volume ds from to))))}]

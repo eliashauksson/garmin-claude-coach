@@ -8,11 +8,13 @@
   (:require [coach.i18n :refer [t tk]]
             [coach.ui :as ui]
             [coach.views.dashboard.common :refer [lower tone]]
+            [coach.views.dashboard.detail :as detail]
             [coach.views.dashboard.fitness :as fitness]
             [coach.views.dashboard.morning :as morning]
             [coach.views.dashboard.race :as race]
             [coach.views.dashboard.recovery :as recovery]
             [coach.views.dashboard.training :as training]
+            [coach.views.dashboard.week :as week]
             [coach.views.feedback :as feedback]
             [coach.views.load :as load]
             [coach.views.status :as status]))
@@ -21,9 +23,14 @@
 
 (defn urls
   "The overview, the training load's (load/urls), the activities
-  waiting for \"How did it go?\", then the cycling power."
+  waiting for \"How did it go?\", the cycling power, today's readiness
+  check, this week's plan, the form forecast, then the open card's history."
   [route]
-  (conj (into [url] (load/urls route)) feedback/due-url load/power-url))
+  (let [vital (get-in route [:params :vital])
+        trend (detail/url vital (detail/range-of route))]
+    (cond-> (conj (into [url] (load/urls route)) feedback/due-url load/power-url week/readiness-url (week/plan-url)
+                  load/forecast-url)
+      trend (conj trend))))
 
 ;; Garmin's enums as shown (ui/enum); listed so each has a translation.
 (def enum-texts
@@ -117,8 +124,9 @@
    [:div.skel {:style {:height "320px"}}]])
 
 (defn view [{:keys [data errors sync route] ui-state :ui :as s}]
-  (let [[ov-url load-url volume-url due-url power-url] (urls route)
+  (let [[ov-url load-url volume-url due-url power-url check-url plan-url forecast-url] (urls route)
         d     (get data ov-url)
+        plan  (get data plan-url)
         today (or (:date d) (ui/iso-today))]
     [:div {:style {:display "contents"}}
      [:div.page-head
@@ -129,20 +137,27 @@
       (status/sync-button sync)]
      (setup-card sync)
      (when-let [e (get errors ov-url)] [:div.error (t "Could not load: {0}" e)])
-     (if-not d
-       (when-not (get errors ov-url) (skeleton))
+     (when-not (or d (get errors ov-url)) (skeleton))
+     (when d
        (list
         (takeaway d)
+        (week/today-card (get data check-url) plan today)
         (feedback/due-card ui-state (get data due-url))
         [:div.morning {:replicant/key "morning"}
          (morning/readiness-card (:readiness d))
          (morning/vitals-grid d)]
+        (when plan (week/week-card plan d (get data load-url) today))))
+     [:div {:replicant/key "load" :style {:display "contents"}}
+      (load/section s [load-url volume-url forecast-url])]
+     (when d
+       (list
         [:div.section-head {:replicant/key "race-head"} [:h2.section-title (t "Goal race")]]
         [:div.race {:replicant/key "race"}
          (race/race-hero (:race d))
          (race/prediction-cards (:race d))]
         (recovery/recovery d)
         (training/training d)))
-     (load/section s [load-url volume-url])
-     (load/power-section s power-url)
-     (when d (fitness/fitness d))]))
+     [:div {:replicant/key "power" :style {:display "contents"}}
+      (load/power-section s power-url)]
+     (when d (fitness/fitness d))
+     (when-let [v (get-in route [:params :vital])] (detail/modal s v))]))

@@ -150,3 +150,24 @@
     (let [row (fn [kind value] {:sport "all" :kind kind :value value :valid_from "2006-01-01" :source "garmin"})]
       (is (= 188.0 (:lthr (analysis/thresholds-at [(row "max_hr" 200.0)] "2026-01-01" 188.0))))
       (is (= 172.0 (:lthr (analysis/thresholds-at [(row "max_hr" 200.0) (row "lthr" 172.0)] "2026-01-01" 188.0)))))))
+
+(deftest vital-trend-test
+  (let [ds (temp-ds)]
+    (db/upsert-wellness!
+     ds (for [[d rhr] [["2026-09-01" 60] ["2026-10-01" 54] ["2026-10-02" 52] ["2026-10-03" 50]]]
+          {:date d :rhr rhr :sleep_score 70 :raw {}}))
+    (testing "only the rows from `from`, with the days before it feeding the average and baseline"
+      (let [rows (:rhr (analysis/vital-trend ds [:rhr] "2026-10-02" "2026-10-03"))]
+        (is (= ["2026-10-02" "2026-10-03"] (map :date rows)))
+        (is (= [52 50] (map :value rows)))
+        ;; the windows count days that have data: 60, 54 and 52 (the day before `from` is in them)
+        (is (= 55.3 (:avg7 (first rows))))
+        (is (= 55.3 (:avg28 (first rows))))
+        (is (some? (:base_low (first rows))))))
+    (testing "\"all\" starts at the first day on record"
+      (is (= "2026-09-01" (:date (first (:rhr (analysis/vital-trend ds [:rhr] "all" "2026-10-03")))))))
+    (testing "several metrics at once"
+      (is (= #{:rhr :sleep_score}
+             (set (keys (analysis/vital-trend ds [:rhr :sleep_score] "2026-10-01" "2026-10-03"))))))
+    (testing "only the allowlisted metrics"
+      (is (thrown? clojure.lang.ExceptionInfo (analysis/vital-trend ds [:raw] "2026-10-01" "2026-10-03"))))))

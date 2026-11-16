@@ -59,7 +59,8 @@
       [:span.factor-val (if p (str p "%") "—")]])])
 
 (defn readiness-card [{:keys [feedback estimate] :as r}]
-  [:section.card.readiness {:replicant/key "readiness"}
+  [:section.card.readiness.clickable {:replicant/key "readiness" :role "button" :tabindex 0
+                                      :on {:click [[:open-vital "readiness"]] :keydown [[:open-vital "readiness"]]}}
    (ui/label-row {:icon :bolt :accent (tone-var (tone (:level r)) "--text-3")
                   :tint (case (tone (:level r)) :good "--tint-green" :warn "--tint-amber" :bad "--tint-red"
                           "--surface-2")
@@ -74,7 +75,8 @@
            (t "Garmin's score from 0 to 100, built from last night's sleep, recovery time, load balance, stress and HRV. The bars show how much each one helps today.")))])
 
 (defn- vital [{:keys [key tint tint-var icon accent label value unit sub visual info]}]
-  [:section.card.vital {:replicant/key key :class (str "tint-" tint)}
+  [:section.card.vital.clickable {:replicant/key key :class (str "tint-" tint) :role "button" :tabindex 0
+                                  :on {:click [[:open-vital key]] :keydown [[:open-vital key]]}}
    (ui/label-row {:icon icon :accent accent :tint tint-var :label label :info info})
    [:div.big (dash value) (when (and value unit) [:small unit])]
    [:div.sub sub]
