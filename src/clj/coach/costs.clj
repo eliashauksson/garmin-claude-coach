@@ -216,15 +216,28 @@
           coalesce(sum(output_tokens), 0) AS output_tokens
    FROM api_calls")
 
+(defn daily-totals
+  "Pure: `rows` (api_calls with :at and :cost_usd) as [{:date :cost_usd :requests}] per local
+  calendar day, oldest first."
+  [rows]
+  (->> rows
+       (group-by #(local-date (:at %)))
+       (map (fn [[d rs]] {:date d :cost_usd (reduce + 0.0 (keep :cost_usd rs)) :requests (count rs)}))
+       (sort-by :date)
+       vec))
+
 (defn athlete-totals
-  "One athlete's Claude costs from `from` (ISO date; nil = all), and this month."
+  "One athlete's Claude costs from `from` (ISO date; nil = all), this month, and per day."
   [ds from]
   (let [month (str (subs (str (java.time.LocalDate/now)) 0 7) "-01")
         sums  (fn [since]
                 (first (db/query ds (if since
                                       [(str athlete-sums-sql " WHERE at >= ?") since]
-                                      [athlete-sums-sql]))))]
-    (assoc (sums from) :this_month (:cost_usd (sums month)))))
+                                      [athlete-sums-sql]))))
+        rows  (db/query ds (if from
+                             ["SELECT at, cost_usd FROM api_calls WHERE at >= ?" from]
+                             ["SELECT at, cost_usd FROM api_calls"]))]
+    (assoc (sums from) :this_month (:cost_usd (sums month)) :daily (daily-totals rows))))
 
 (defn by-athlete
   "Costs per athlete when several share this server (and the Claude key), else
@@ -234,7 +247,7 @@
   (let [as (paths/athletes)]
     (when (> (count as) 1)
       (vec (for [{:keys [name data-dir current]} as]
-             (merge {:name name :label (paths/instance-label name) :current current}
+             (merge {:name name :label (paths/athlete-label name) :current current}
                     (try (athlete-totals (if current
                                            ds
                                            (db/read-only-datasource (str (io/file data-dir "coach.db"))))
@@ -333,7 +346,7 @@
                 :let [own (get limits name)
                       s   (try (spent (if current ds (db/read-only-datasource (str (io/file data-dir "coach.db")))))
                                (catch Exception e {:error (ex-message e)}))]]
-            (merge {:name name :label (paths/instance-label name) :current current
+            (merge {:name name :label (paths/athlete-label name) :current current
                     :spent_today (:today s) :spent_month (:month s) :error (:error s)
                     :hit (when-not (:error s) (limit-hit own s))}
                    own)))}))

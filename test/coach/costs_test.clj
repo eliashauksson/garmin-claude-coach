@@ -100,5 +100,17 @@
       (is (= 1300 (:input_tokens all)) "input counts cached tokens too, like the rest of the page")
       (is (= 30 (:output_tokens all)))
       (is (= 1 (:requests recent)))
-      (is (close? 0.5 (:this_month all))))
+      (is (close? 0.5 (:this_month all)))
+      (is (= 2 (count (:daily all))) "one entry per day, oldest first")
+      (is (= 1 (:requests (last (:daily all)))))
+      (is (= 1 (count (:daily recent)))))
     (is (nil? (costs/by-athlete ds nil)) "one athlete: no per-athlete table")))
+
+(deftest daily-totals-test
+  (let [rows [{:at "2020-01-01T10:00:00Z" :cost_usd 1.0} {:at "2020-01-01T10:05:00Z" :cost_usd nil}
+              {:at "2020-01-03T10:00:00Z" :cost_usd 0.25}]
+        r    (costs/daily-totals rows)]
+    (is (= 2 (count r)))
+    (is (= 2 (:requests (first r))) "a request without a cost still counts")
+    (is (close? 1.0 (:cost_usd (first r))))
+    (is (= [] (costs/daily-totals [])))))

@@ -245,3 +245,24 @@
         (testing "the Coros card's Sync now does"
           (run {:force true})
           (is (= 2 @calls)))))))
+
+(deftest admin-only-test
+  (let [ds  (temp-ds)
+        app (api/app ds)]
+    (testing "the main athlete"
+      (is (= 200 (first (get-json app "/api/costs"))))
+      (is (true? (:admin (second (get-json app "/api/sync")))))
+      (is (string? (:admin_name (second (get-json app "/api/sync"))))))
+    (testing "an extra athlete on a server"
+      (with-redefs [paths/instance (constantly "nadine")]
+        (is (false? (:admin (second (get-json app "/api/sync")))))
+        (let [[s body] (get-json app "/api/costs")]
+          (is (= 403 s))
+          (is (string? (:error body))))
+        (is (= 403 (first (send-json app :put "/api/claude/key" {:key "sk-ant-x"}))))
+        (is (= 403 (first (send-json app :delete "/api/claude/key" {}))))
+        (is (= 403 (first (send-json app :put "/api/ai-settings/week_plan" {:model "x"}))))
+        (is (= 403 (first (send-json app :post "/api/app/data-dir" {:path "/tmp/x"}))))
+        (is (= 403 (first (send-json app :put "/api/claude/limits" {:limits []}))))
+        (is (= 200 (first (get-json app "/api/ai-settings"))) "reading the settings stays open")
+        (is (= 200 (first (get-json app "/api/claude/key"))) "the key's status stays open")))))

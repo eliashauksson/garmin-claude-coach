@@ -62,7 +62,7 @@
     :map        [heatmap/url]
     :plan       (plan/urls)
     :dashboard  (dashboard/urls route)
-    :settings   (settings/urls route)
+    :settings   (settings/urls route (:sync @state))
     []))
 
 ;; ---------------------------------------------------------------------------

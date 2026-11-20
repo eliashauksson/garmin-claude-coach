@@ -147,10 +147,11 @@
 (defn limit-message
   "`hit` (coach.costs/limit-hit) as a sentence for the athlete."
   [{:keys [period limit_usd]}]
-  (let [limit (str (String/format java.util.Locale/ROOT "%.2f" (object-array [limit_usd])) " USD")]
+  (let [limit (str (String/format java.util.Locale/ROOT "%.2f" (object-array [limit_usd])) " USD")
+        who   (paths/main-name)]
     (if (= "month" period)
-      (t "This athlete's Claude spending limit for this month ({0}) is reached. Claude requests resume next month, or when the main athlete raises the limit in Settings." limit)
-      (t "This athlete's Claude spending limit for today ({0}) is reached. Claude requests resume tomorrow, or when the main athlete raises the limit in Settings." limit))))
+      (t "This athlete's Claude spending limit for this month ({0}) is reached. Claude requests resume next month, or when {1} raises the limit in Settings." limit who)
+      (t "This athlete's Claude spending limit for today ({0}) is reached. Claude requests resume tomorrow, or when {1} raises the limit in Settings." limit who))))
 
 (defn- check-limit!
   "Stops a request before it costs anything once this athlete's limit is reached."

@@ -43,3 +43,16 @@
   (is (= 40 (count (paths/clean-label (apply str (repeat 50 "x"))))))
   (is (nil? (paths/instance-label nil)) "the first athlete has no label")
   (is (= "no-such-athlete" (paths/instance-label "no-such-athlete")) "no label file: the name"))
+
+(deftest main-athlete-label
+  (let [f (paths/app-file "label")
+        had (.isFile f)]
+    (when-not had
+      (is (nil? (paths/main-label)) "no label file: nil")
+      (is (= (paths/main-label) (paths/athlete-label nil)))
+      (is (= "the main athlete" (paths/main-name)))
+      (try (spit f "Elías\n")
+           (is (= "Elías" (paths/main-label)))
+           (is (= "Elías" (paths/athlete-label nil)))
+           (is (= "Elías" (paths/main-name)))
+           (finally (.delete f))))))

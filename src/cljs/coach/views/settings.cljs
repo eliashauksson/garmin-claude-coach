@@ -1,6 +1,7 @@
 (ns coach.views.settings
   "Settings: General (language, appearance, backup, Garmin, Coros) and Claude & API
-  costs (model, effort and delivery per task, and what the requests cost)."
+  costs (model, effort and delivery per task, and what the requests cost). The Claude
+  key, the data folder and the costs are the main athlete's only (`admin?`)."
   (:require [coach.i18n :as i18n :refer [t tk]]
             [coach.ui :as ui]
             [coach.views.costs :as costs]
@@ -13,10 +14,19 @@
 
 (defn tab [route] (get-in route [:params :tab] "general"))
 
-(defn urls [route]
-  (if (= "claude" (tab route))
-    [(costs/url route) costs/settings-url]
-    [status/backup-url key-url app-url]))
+(defn admin?
+  "Whether the main athlete is looking: the Claude key, the data folder and the costs are only theirs. Unknown
+  (the sync status hasn't arrived) counts as no, so nothing flashes up for the other athletes."
+  [sync]
+  (true? (:admin sync)))
+
+(defn urls
+  "What the page loads; `sync` says if an extra athlete is looking (they don't load the costs or the key)."
+  [route sync]
+  (cond
+    (false? (:admin sync)) [status/backup-url app-url]
+    (= "claude" (tab route)) [(costs/url route) costs/settings-url]
+    :else [status/backup-url key-url app-url]))
 
 (defn- choice
   "A row of buttons; the current one is highlighted."
@@ -28,11 +38,13 @@
                      attrs)
       label])])
 
-(defn- language-card []
+(defn- language-card [admin]
   (ui/card {:flex "1 1 320px"}
            [:div.lab (t "Language")]
            (choice @i18n/lang (for [{:keys [id label]} i18n/languages] [id label {:lang id}]) [:set-lang])
-           [:div.sub (t "Also the language Claude writes in from now on; its earlier texts are translated (see Claude & API costs: Translations).")]))
+           [:div.sub (if admin
+                       (t "Also the language Claude writes in from now on; its earlier texts are translated (see Claude & API costs: Translations).")
+                       (t "Also the language Claude writes in from now on; its earlier texts are translated."))]))
 
 (defn- appearance-card [theme-choice]
   (ui/card {:flex "1 1 320px"}
@@ -322,18 +334,19 @@
                 (if (:ok result) (t "Claude answered: the key works.") (:error result))]))))
 
 (defn view [{:keys [data route sync] :as s} theme-choice]
-  (let [tb (tab route)]
+  (let [admin (admin? sync)
+        tb    (if admin (tab route) "general")]
     [:div {:style {:display "contents"}}
      [:div.page-head
       [:h1.title (t "Settings")]
-      (ui/seg tb tabs [:set-param :tab])]
+      (when admin (ui/seg tb tabs [:set-param :tab]))]
      (if (= "claude" tb)
-       (costs/view s (first (urls route)))
+       (costs/view s (first (urls route sync)))
        (list
         [:div.row {:replicant/key "r0"} (garmin-card sync (get-in s [:ui :garmin-login]))
-         (claude-card (get data key-url) (get-in s [:ui :claude-key]))]
+         (when admin (claude-card (get data key-url) (get-in s [:ui :claude-key])))]
         [:div.row {:replicant/key "rc"} (coros-card sync (get-in s [:ui :coros]))]
-        [:div.row {:replicant/key "r1"} (language-card) (appearance-card theme-choice)]
+        [:div.row {:replicant/key "r1"} (language-card admin) (appearance-card theme-choice)]
         [:div.row {:replicant/key "r2"} (app-card (get data app-url) (:ui s))
-         (data-card (get data app-url) (get-in s [:ui :data-dir]))]
+         (when admin (data-card (get data app-url) (get-in s [:ui :data-dir])))]
         [:div.row {:replicant/key "r3"} (backup-card (get data status/backup-url) (get-in s [:ui :restore]))]))]))

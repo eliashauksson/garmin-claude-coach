@@ -66,17 +66,28 @@
 ;; ---------------------------------------------------------------------------
 ;; Pieces
 
-(defn- kpis [{:keys [totals this_month usd_chf by_task]}]
-  (let [in   (input-total totals)
-        busy (first by_task)]
+(defn- kpis
+  "On a server with several athletes the first two tiles count all of them (what the Claude Console bills),
+  with this athlete's own share in the sub line."
+  [{:keys [totals this_month usd_chf by_task by_athlete]}]
+  (let [in     (input-total totals)
+        busy   (first by_task)
+        sum    (fn [k] (reduce + 0 (keep k (remove :error by_athlete))))
+        several (seq by_athlete)
+        own    (some #(when (:current %) %) by_athlete)
+        own-by (when own (str " · " (or (:label own) (:name own) (t "Main athlete")) " "))
+        range-usd (if several (sum :cost_usd) (:cost_usd totals 0))
+        month-usd (if several (sum :this_month) (:cost_usd this_month 0))]
     [:div.row {:replicant/key "kpi"}
      (ui/tile {:label (t "Spent in this range") :tint "blue" :size "md"
-               :value (usd (:cost_usd totals 0) 2)
-               :sub (str (chf (:cost_usd totals 0) usd_chf) " · " (n-requests (:requests totals 0))
-                         (when (pos? (:errors totals 0)) (str " · " (t "{0} failed" (:errors totals)))))})
+               :value (usd range-usd 2)
+               :sub (str (chf range-usd usd_chf) " · " (n-requests (:requests totals 0))
+                         (when (pos? (:errors totals 0)) (str " · " (t "{0} failed" (:errors totals))))
+                         (when several (str own-by (usd (:cost_usd totals 0) 2))))})
      (ui/tile {:label (t "This month") :size "md"
-               :value (usd (:cost_usd this_month 0) 2)
-               :sub (str (chf (:cost_usd this_month 0) usd_chf) " · " (n-requests (:requests this_month 0)))})
+               :value (usd month-usd 2)
+               :sub (str (chf month-usd usd_chf) " · " (n-requests (:requests this_month 0))
+                         (when several (str own-by (usd (:cost_usd this_month 0) 2))))})
      (ui/tile {:label (t "Tokens") :size "md"
                :value (tokens (+ in (:output_tokens totals 0)))
                :sub (t "{0} in · {1} out" (tokens in) (tokens (:output_tokens totals 0)))})
@@ -84,38 +95,67 @@
                :value (when busy (pct (:cost_usd busy) (:cost_usd totals 0)))
                :sub (if busy (str (task-label (:key busy)) " · " (usd (:cost_usd busy))) (t "No requests yet"))})]))
 
-(defn- daily-chart [daily]
-  (let [dates (vec (distinct (map :date daily)))
-        cost  (into {} (for [{:keys [date task cost_usd]} daily] [[date task] cost_usd]))
-        shown (filter (fn [task] (some #(= (:id task) (:task %)) daily)) tasks)]
+(def ^:private athlete-colors ["--task-1" "--task-4" "--task-3" "--task-2" "--task-5" "--task-7"])
+
+(defn- athlete-name [a] (or (:label a) (:name a) (t "Main athlete")))
+
+(defn- day-axis
+  "Every day from `start` (or the first day with a request) to today, so quiet days show as gaps."
+  [start dates]
+  (let [from  (or start (first dates))
+        today (ui/iso-today)]
+    (when (and from (<= (compare from today) 0))
+      (vec (take-while #(<= (compare % today) 0) (iterate #(ui/add-days % 1) from))))))
+
+(defn- daily-groups
+  "What the daily bars are stacked by: [{:key :label :color :cost {date usd}}], by athlete or by task."
+  [{:keys [daily by_athlete]} split]
+  (if (= "athlete" split)
+    (vec (for [[i a] (map-indexed vector (remove :error by_athlete))]
+           {:key (or (:name a) "") :label (athlete-name a) :color (nth athlete-colors (mod i (count athlete-colors)))
+            :cost (into {} (for [{:keys [date cost_usd]} (:daily a)] [date cost_usd]))}))
+    (vec (for [{:keys [id label color]} tasks :when (some #(= id (:task %)) daily)]
+           {:key id :label (t label) :color color
+            :cost (into {} (for [{:keys [date cost_usd] :as row} daily :when (= id (:task row))] [date cost_usd]))}))))
+
+(defn- daily-chart [{:keys [daily by_athlete] :as d} split range-days]
+  (let [several (seq by_athlete)
+        split   (cond (not several) "task" split split :else "athlete")
+        groups  (daily-groups d split)
+        all-dates (sort (distinct (concat (map :date daily) (mapcat (comp (partial map :date) :daily) by_athlete))))
+        days    (day-axis (when range-days (ui/days-ago range-days)) all-dates)
+        total   (fn [day] (reduce + 0 (keep #(get (:cost %) day) groups)))
+        today   (ui/iso-today)
+        week    (/ (reduce + (map #(total (ui/add-days today (- %))) (range 7))) 7)]
     (ui/chart-card
      {:title (t "Daily cost")
-      :legend-items (for [task shown] {:label (t (:label task)) :color (:color task)})
+      :icon :bolt :accent "--blue" :tint "blue" :soft? true
+      :controls (when several
+                  (ui/seg split [["athlete" (tk "By athlete")] ["task" (tk "By task")]] [:set-ui :costs-split]))
+      :legend-items (for [g groups] {:label (:label g) :color (:color g)})
       :chart (c/echart
-              {:key "cost-daily" :class "h240"
+              {:key (str "cost-daily-" split) :class "h240"
                :option-fn
                (fn []
                  (merge (c/base {:x-type "category" :y-min 0 :grid-left 52
                                  :y-fmt (fn [v] (str "$" (.toFixed v (if (< v 10) 2 0))))
-                                 :x-fmt (fn [d] (ui/date-short d))
+                                 :x-fmt (fn [x] (ui/date-short x))
                                  :tooltip-fmt
                                  (fn [params]
-                                   (let [d (.-name (first params))
-                                         rows (for [task (reverse shown) :let [v (get cost [d (:id task)])] :when v]
-                                                {:label (t (:label task)) :value (usd v)
-                                                 :color (c/css-var (:color task))})]
-                                     (c/tooltip-rows (str (ui/date-long d) " · "
-                                                          (usd (reduce + (map #(get cost [d (:id %)] 0) shown))))
-                                                     rows)))})
+                                   (let [day  (.-name (first params))
+                                         rows (for [g (reverse groups) :let [v (get (:cost g) day)] :when v]
+                                                {:label (:label g) :value (usd v) :color (c/css-var (:color g))})]
+                                     (c/tooltip-rows (str (ui/date-long day) " · " (usd (total day))) rows)))})
                         {:xAxis (merge (:xAxis (c/base {:x-type "category" :x-fmt ui/date-short}))
-                                       {:data dates})
+                                       {:data days})
                          :series (c/stacked 4
-                                            (for [task shown]
-                                              (c/bars (t (:label task)) (:color task)
-                                                      (mapv #(get cost [% (:id task)]) dates)
+                                            (for [g groups]
+                                              (c/bars (:label g) (:color g)
+                                                      (mapv #(get (:cost g) %) days)
                                                       :stack "cost" :barMaxWidth 28
-                                                      :itemStyle {:color (c/css-var (:color task))})))}))})
-      :footer [:div.sub (t "Days are in local time.")]})))
+                                                      :itemStyle {:color (c/css-var (:color g))})))}))})
+      :footer [:div.sub (t "Today {0} · last 7 days {1} a day" (usd (total today) 2) (usd week 2))
+               " · " (t "Days are in local time.")]})))
 
 (defn- token-columns []
   [{:label (t "Input") :align :r :value #(ui/thousands (:input_tokens %))}
@@ -124,7 +164,7 @@
    {:label (t "Output") :align :r :value #(ui/thousands (:output_tokens %))}])
 
 (defn- by-task-card [{:keys [by_task totals]}]
-  (ui/card {}
+  (ui/card {:flex "1 1 520px"}
            [:div.lab (t "By task")]
            (ui/table (concat
                       [{:label (t "Task") :render #(let [task (task-by-id (:key %))]
@@ -142,7 +182,7 @@
   requests cost in this range (from their own databases)."
   [{:keys [by_athlete usd_chf]}]
   (let [total (reduce + 0 (keep :cost_usd by_athlete))]
-    (ui/card {}
+    (ui/card {:flex "1 1 420px"}
              [:div.lab (t "By athlete")]
              (ui/table [{:label (t "Athlete")
                          :render #(list (or (:label %) (:name %) (t "Main athlete"))
@@ -161,7 +201,7 @@
                           (usd total 2) (chf total usd_chf))])))
 
 (defn- by-model-card [{:keys [by_model]}]
-  (ui/card {}
+  (ui/card {:flex "1 1 520px"}
            [:div.lab (t "By model")]
            (ui/table (concat
                       [{:label (t "Model") :value :key}
@@ -191,10 +231,10 @@
      (ui/thousands (:cache_read r 0))))
 
 (defn- requests-card [{:keys [requests]} show-all?]
-  (let [rows (if show-all? requests (take 25 requests))]
+  (let [rows (if show-all? requests (take 10 requests))]
     (ui/card {}
              (ui/label-row {:label (t "Requests")
-                            :right (when (> (count requests) 25)
+                            :right (when (> (count requests) 10)
                                      [:button.pill {:on {:click [[:set-ui :costs-all (not show-all?)]]}}
                                       (if show-all? (t "Show fewer") (t "Show all {0}" (count requests)))])})
              (ui/table (concat
@@ -224,19 +264,20 @@
                              (#{"claude-fable-5-1" "claude-opus-5-5" "claude-sonnet-5-5" "claude-haiku-5-5"} m))]
                (assoc p :model m))]
     (ui/card {}
-             [:div.lab (t "How costs are worked out")]
-             [:div.sub (t "Each request's token counts, as the API reports them, times that model's list price. A request that fell back to another model is priced per model. Anthropic bills in USD; CHF uses a fixed rate of {0}. The Claude Console's billing page is the final word (taxes, credits)." usd_chf)]
-             (ui/table [{:label (t "Model ($ per million tokens)") :value :model}
+             [:details.connect-replace
+              [:summary (t "How costs are worked out")]
+              [:div.sub (t "Each request's token counts, as the API reports them, times that model's list price. A request that fell back to another model is priced per model. Anthropic bills in USD; CHF uses a fixed rate of {0}. The Claude Console's billing page is the final word (taxes, credits)." usd_chf)]
+              (ui/table [{:label (t "Model ($ per million tokens)") :value :model}
                         {:label (t "Input") :align :r :value #(usd (:input %) 2)}
                         {:label (t "Cache write 5 min") :align :r :value #(usd (:cache_write_5m %) 2)}
                         {:label (t "Cache write 1 h") :align :r :value #(usd (:cache_write_1h %) 2)}
                         {:label (t "Cache read") :align :r :value #(usd (:cache_read %) 2)}
                         {:label (t "Output") :align :r :value #(usd (:output %) 2)}]
                        rows {:key-fn :model})
-             (when imported_until
-               [:div.sub (t "Logged from {0} on. Before that only plans and adjustments kept their usage; athlete chat and summary requests from then aren't included." (local-time imported_until))])
-             (when (pos? unpriced)
-               [:div.error (t "{0} request(s) used a model without a known price and show no cost." unpriced)]))))
+              (when imported_until
+                [:div.sub (t "Logged from {0} on. Before that only plans and adjustments kept their usage; athlete chat and summary requests from then aren't included." (local-time imported_until))])
+              (when (pos? unpriced)
+                [:div.error (t "{0} request(s) used a model without a known price and show no cost." unpriced)])])))
 
 (defn- short-model [m] (some-> m (.replace #"^claude-" "")))
 
@@ -285,7 +326,7 @@
                           :value (or (get-in edits [(or (:name r) "") field]) (some-> (k r) str) "")
                           :on {:input [[:set-in-ui :claude-limits (or (:name r) "") field :event/target-value]]}}]
             (or (usd (k r) 2) (t "No limit"))))]
-    (ui/card {}
+    (ui/card {:flex "1 1 600px"}
              [:div.lab (t "Spending limits")]
              (ui/table (filterv some?
                                 [(when several
@@ -399,8 +440,9 @@
                           [:span.muted "—"])]])]]])))
 
 (defn view
-  "The model settings and the cost overview; shown in Settings (Claude & API
-  costs), so it has no page title of its own."
+  "The cost overview and the model settings; shown in Settings (Claude & API
+  costs, the main athlete only), so it has no page title of its own. The daily
+  chart comes first, then the tiles, the tables, the settings and the requests."
   [{:keys [data errors route flash] ui-state :ui} u]
   (let [d     (get data u)
         st    (get data settings-url)
@@ -411,18 +453,23 @@
       (ui/seg range ranges [:set-param :range])]
      (when flash [:div.error flash])
      (some (fn [x] (when-let [e (get errors x)] [:div.error (t "Could not load: {0}" e)])) [u settings-url])
-     (when (:limits d) [:div {:replicant/key "limits"} (limits-card (:limits d) (:claude-limits ui-state))])
-     (when (and st d) [:div {:replicant/key "settings"} (settings-card st d)])
      (when d
        (if (zero? (get-in d [:totals :requests] 0))
          (ui/card {} [:div.empty (if (pos? (get-in d [:all_time :requests] 0))
                                    (t "No Claude requests in this range.")
                                    (t "No Claude requests yet. Costs appear here after the first plan or athlete chat."))])
          (list
+          [:div {:replicant/key "daily"}
+           (daily-chart d (:costs-split ui-state) (when (not= "all" range) (js/parseInt range)))]
           (kpis d)
-          (when (seq (:by_athlete d)) [:div {:replicant/key "athletes"} (by-athlete-card d)])
-          [:div {:replicant/key "daily"} (daily-chart (:daily d))]
-          [:div {:replicant/key "task"} (by-task-card d)]
-          [:div {:replicant/key "model"} (by-model-card d)]
-          [:div {:replicant/key "reqs"} (requests-card d (:costs-all ui-state))]
-          [:div {:replicant/key "prices"} (prices-card d)])))]))
+          [:div.row {:replicant/key "who"}
+           (when (seq (:by_athlete d)) (by-athlete-card d))
+           (when (:limits d) (limits-card (:limits d) (:claude-limits ui-state)))]
+          [:div.row {:replicant/key "split"} (by-task-card d) (by-model-card d)])))
+     (when (and d (:limits d) (zero? (get-in d [:totals :requests] 0)))
+       [:div {:replicant/key "limits"} (limits-card (:limits d) (:claude-limits ui-state))])
+     (when (and st d) [:div {:replicant/key "settings"} (settings-card st d)])
+     (when (and d (pos? (get-in d [:totals :requests] 0)))
+       (list
+        [:div {:replicant/key "reqs"} (requests-card d (:costs-all ui-state))]
+        [:div {:replicant/key "prices"} (prices-card d)]))]))

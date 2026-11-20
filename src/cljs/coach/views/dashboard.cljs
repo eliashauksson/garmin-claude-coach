@@ -100,7 +100,9 @@
                 [:span (t "Loads the last 4 weeks (a few minutes).") " " (status/sync-button sync)]
                 (t "After Garmin is connected.")))
         (step "claude" claude (t "Connect Claude")
-              [:span (t "With your own API key.") " " [:a {:href "#/settings"} (t "How to connect")]])
+              (if (false? (:admin sync))
+                (t "Ask {0} to add the Claude key." (or (:admin_name sync) (t "the main athlete")))
+                [:span (t "With your own API key.") " " [:a {:href "#/settings"} (t "How to connect")]]))
         (step "history" history (t "Load your full history")
               (cond
                 (and running (= "history" job)) (t "Loading… you can use the dashboard meanwhile.")

@@ -51,7 +51,7 @@
 (defn- connect-banners
   "Before Garmin or Claude is connected. Not on the Dashboard or Settings,
   whose setup checklist and connect cards say the same."
-  [{:keys [setup]} page]
+  [{:keys [setup admin admin_name]} page]
   (when (and setup (not (#{:dashboard :settings} page)))
     (list
      (when (false? (:garmin setup))
@@ -61,7 +61,9 @@
      (when (false? (:claude setup))
        (banner "warn" (t "Claude isn't connected yet")
                (t "Planning, adjustments and the athlete chat need a Claude API key.")
-               [:a {:href "#/settings"} (t "Add it in Settings › General")])))))
+               (if (false? admin)
+                 (t "Ask {0} to add the Claude key." (or admin_name (t "the main athlete")))
+                 [:a {:href "#/settings"} (t "Add it in Settings › General")]))))))
 
 (defn- auth-banner
   "Shown only in the final week of the login, once a sync failed on it, or past

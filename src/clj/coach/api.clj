@@ -298,6 +298,15 @@
       (handler req)
       (json-response 403 {:error (i18n/t "This action needs the dashboard token. Reload the page and try again.")}))))
 
+(defn- admin-only
+  "Wraps a handler so it answers only the main athlete; the extra athletes on a
+  server get a 403."
+  [handler]
+  (fn [req]
+    (if (paths/instance)
+      (json-response 403 {:error (i18n/t "Only {0} can do this." (paths/main-name))})
+      (handler req))))
+
 (defn- guarded
   "Turns bad input (ex-info) into a 400 instead of a 500."
   [handler]
@@ -436,6 +445,8 @@
    :server           (paths/server?)
    :instance         (paths/instance)
    :instance_label   (paths/instance-label)
+   :admin            (nil? (paths/instance))
+   :admin_name       (paths/main-name)
    :update           (coach-app/update-status)
    :notice           (coach-app/notice-message)})
 
@@ -465,7 +476,8 @@
    ["/update" {:post (guarded (token-guard (fn [_] (ok (coach-app/start-update! @current-port)))))}]
    ;; {:path "…"} moves the data there; {:path "…" :use_existing true} switches
    ;; to the coach data already in that folder. Both restart the app.
-   ["/data-dir" {:post (fn [req]
+   ["/data-dir" {:post (admin-only
+                        (fn [req]
                          (or (busy-response)
                              (let [{:keys [path use_existing]} (body req)
                                    {:keys [existing to error] :as r} (coach-app/check-data-dir path)]
@@ -474,7 +486,7 @@
                                  (and existing (not use_existing)) (ok r)
                                  :else (do (coach-app/set-pending! (if existing {:use-data to} {:move-data to}))
                                            (restart-soon!)
-                                           (ok {:restarting true}))))))}]])
+                                           (ok {:restarting true})))))))}]])
 
 (defn routes [ds]
   [["/api"
@@ -595,23 +607,23 @@
     ["/thresholds"  {:get (fn [_] (ok (db/thresholds ds)))}]
     ["/ai-settings"
      ["" {:get    (fn [_] (ok (ai/overview ds)))
-          :delete (fn [_] (ai/reset-all! ds) (ok (ai/overview ds)))}]
-     ["/:task" {:put (guarded (fn [{:keys [path-params] :as req}]
-                                (ai/save! ds (:task path-params) (body req))
-                                (ok (ai/overview ds))))}]]
-    ["/costs"       {:get (fn [{:keys [query-params]}]
-                            (ok (costs/overview ds (get query-params "from"))))}]
-    ["/claude/limits" {:put (guarded
-                             (fn [req]
-                               (if (paths/instance)
-                                 (json-response 403 {:error (i18n/t "Only the main athlete can change these limits.")})
-                                 (do (costs/save-limits! (:limits (body req)))
-                                     (ok (costs/limits-overview ds))))))}]
+          :delete (admin-only (fn [_] (ai/reset-all! ds) (ok (ai/overview ds))))}]
+     ["/:task" {:put (admin-only
+                      (guarded (fn [{:keys [path-params] :as req}]
+                                 (ai/save! ds (:task path-params) (body req))
+                                 (ok (ai/overview ds)))))}]]
+    ["/costs"       {:get (admin-only (fn [{:keys [query-params]}]
+                                        (ok (costs/overview ds (get query-params "from")))))}]
+    ["/claude/limits" {:put (admin-only
+                             (guarded
+                              (fn [req]
+                                (costs/save-limits! (:limits (body req)))
+                                (ok (costs/limits-overview ds)))))}]
     ["/claude/check" {:post (fn [_] (ok (claude-check! ds)))}]
     ;; the Claude API key: saved in ~/.config/coach/anthropic-key, never sent back
     ["/claude/key"   {:get    (fn [_] (ok (claude/key-status)))
-                      :put    (guarded (fn [req] (ok (claude-key-saved! ds (:key (body req))))))
-                      :delete (fn [_] (ok (claude/remove-key!)))}]
+                      :put    (admin-only (guarded (fn [req] (ok (claude-key-saved! ds (:key (body req)))))))
+                      :delete (admin-only (fn [_] (ok (claude/remove-key!))))}]
     ["/claude/test"  {:post (fn [_] (ok (assoc (claude-check! ds) :key (claude/key-status))))}]
     ;; everything before the first sync, in the background
     ["/history"      {:post (fn [_] (json-response 202 (run-history! ds)))}]
@@ -629,6 +641,7 @@
                                        (ok {:lang lang}))))}]
     ["/sync"        {:get  (fn [_] (ok (assoc @sync-state :auth (auth-status ds) :claude (claude-status ds)
                                           :coros (coros-status ds)
+                                          :admin (nil? (paths/instance)) :admin_name (paths/main-name)
                                           :started_at started-at ; the page notices a restart by this
                                           :update (coach-app/update-status)
                                           :translating (translate/running?)

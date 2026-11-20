@@ -18,7 +18,8 @@
   the Claude key is shared."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [coach.i18n :as i18n])
   (:import (java.io File RandomAccessFile)
            (java.nio.channels FileLock)))
 
@@ -197,6 +198,25 @@
                   (clean-label (slurp f))))
               (catch Exception _ nil))
          inst))))
+
+(defn main-label
+  "The first athlete's display name (\"Elías\"), from <app folder>/label; nil
+  when none is set."
+  []
+  (try (let [f (app-file "label")]
+         (when (.isFile f) (clean-label (slurp f))))
+       (catch Exception _ nil)))
+
+(defn athlete-label
+  "The display name of athlete `inst` (nil = the first athlete); nil for the
+  first athlete without a name."
+  [inst]
+  (if inst (instance-label inst) (main-label)))
+
+(defn main-name
+  "How messages refer to the first athlete: their display name, else \"the main athlete\"."
+  []
+  (or (main-label) (i18n/t "the main athlete")))
 
 (defn athletes
   "Every athlete on this install, for comparing costs: [{:name nil-or-instance

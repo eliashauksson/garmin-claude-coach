@@ -419,7 +419,14 @@ sync). A 2 GB server is enough; more athletes make it slower, not unstable:
 get a daily and a monthly limit in US dollars, counted against their own requests only. Once one
 is reached, that athlete's new Claude requests stop until the next day or month (local server
 time). A request already running still finishes, so a limit can be passed by that last request.
-The other athletes see their own limits there but can't change them.
+The other athletes don't see that tab at all.
+
+**What only the main athlete sees.** The Claude key card, the data folder card and the whole
+Settings › Claude & API costs tab (all athletes' costs, limits and the model choice per task) are
+the main athlete's. The server refuses those requests from the other athletes too (HTTP 403).
+Messages that mention the main athlete use their display name, read from the file `label` in the
+app folder (`~/.local/share/garmin-coach/label`), like `athletes/<name>/label` for the others:
+`printf 'Elías\n' > ~/.local/share/garmin-coach/label`. Without it they say "the main athlete".
 
 **Coros** sends you back to the address you connected from, with its port. If that fails, use
 the SSH tunnel from [step 5](#coros-if-you-use-it) with this athlete's local port (8081 for the
