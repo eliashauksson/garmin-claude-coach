@@ -41,7 +41,9 @@
 (deftest weeks-to-plan-test
   (let [f  (java.io.File/createTempFile "coach-test" ".db")
         ds (coach.db/datasource (.getPath f))]
-    (try
+    ;; the weeks in this test lie in the past by now: pin today, or their sessions count as missed
+    (with-redefs [coach.plan/today (constantly "2026-11-09")]
+     (try
       (coach.db/migrate! ds)
       (testing "nothing without a season plan"
         (is (= [] (coach.planner/weeks-to-plan ds "2026-10-31"))))
@@ -73,7 +75,7 @@
       (testing "nothing after race week"
         (is (= ["2027-03-22"] (coach.planner/weeks-to-plan ds "2027-03-17")))
         (is (= [] (coach.planner/weeks-to-plan ds "2027-03-23"))))
-      (finally (.delete f)))))
+      (finally (.delete f))))))
 
 (deftest backups-test
   (let [f  (java.io.File/createTempFile "coach-test" ".db")
