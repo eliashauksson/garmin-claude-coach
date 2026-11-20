@@ -132,7 +132,7 @@ cat > "$DIR/garmin-coach" <<EOF
 #!/bin/sh
 # Starts Garmin Coach (or, if it's already running, just opens it).
 cd "\$(dirname "\$0")" || exit 1
-exec ./runtime/jre/bin/java -cp app/garmin-coach.jar clojure.main -m coach.api $PORT --open "\$@"
+exec ./runtime/jre/bin/java -XX:+UseSerialGC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=25 -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=48m -Xss512k -cp app/garmin-coach.jar clojure.main -m coach.api $PORT --open "\$@"
 EOF
 chmod +x "$DIR/garmin-coach"
 
@@ -195,7 +195,7 @@ EOF
   {
     echo "[Service]"
     echo "Environment=MALLOC_ARENA_MAX=2"
-    echo "Environment=\"JDK_JAVA_OPTIONS=-XX:+UseSerialGC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=25\""
+    echo "Environment=\"JDK_JAVA_OPTIONS=-XX:+UseSerialGC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=25 -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=48m -Xss512k\""
   } > "$UNIT_DIR/garmin-.service.d/memory.conf"
 
   wait_started() { # port: the next app starts once this one answers, or after two minutes anyway

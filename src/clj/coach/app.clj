@@ -8,6 +8,7 @@
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [coach.context :as context]
             [coach.i18n :refer [t tk]]
             [coach.paths :as paths])
   (:import (java.io File)
@@ -273,7 +274,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Pending actions, done at the next start
 
-(defonce notice (atom nil)) ; what the last pending action did, for Settings: {:ok :kind :text :args}
+;; what the last pending action did, for Settings: {:ok :kind :text :args}
+(defonce notice (context/per-athlete-atom nil))
 
 (defn notice-message
   "The notice with its text in the current language (it's written before

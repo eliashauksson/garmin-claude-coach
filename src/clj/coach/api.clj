@@ -12,6 +12,7 @@
             [coach.auth :as auth]
             [coach.backup :as backup]
             [coach.claude :as claude]
+            [coach.context :as context]
             [coach.coros-auth :as coros-auth]
             [coach.costs :as costs]
             [coach.db :as db]
@@ -36,7 +37,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Sync runs in the background; one at a time.
 
-(defonce sync-state (atom {:running false}))
+(defonce sync-state (context/per-athlete-atom {:running false}))
 
 (defn- coros-last-sync [ds]
   (db/state-json ds :coros_last_sync))
@@ -419,8 +420,8 @@
 
 (declare stop!)
 (defonce started-at (str (java.time.Instant/now)))
-(defonce current-port (atom 8080))
-(defonce syncing? (atom true)) ; false with --no-sync; kept on a restart
+(defonce current-port (context/per-athlete-atom 8080))
+(defonce syncing? (context/per-athlete-atom true)) ; false with --no-sync; kept on a restart
 
 (defn- busy-response
   "Restoring or moving the data waits for a running sync or history load."
@@ -487,6 +488,21 @@
                                  :else (do (coach-app/set-pending! (if existing {:use-data to} {:move-data to}))
                                            (restart-soon!)
                                            (ok {:restarting true})))))))}]])
+
+(def activities-default-limit "How many activities /api/activities lists without a date range or limit." 200)
+(def activities-max-limit "The most /api/activities ever lists in one answer." 1000)
+
+(defn activities-limit
+  "Pure: how many activities /api/activities lists for these query params
+  (the newest ones). The whole history in one answer grows with every
+  activity, so without a date range it is the newest `activities-default-limit`,
+  and never more than `activities-max-limit`."
+  [{:strs [limit from to]}]
+  (let [n (some-> limit parse-long)]
+    (min activities-max-limit
+         (cond (and n (pos? n)) n
+               (or from to) activities-max-limit
+               :else activities-default-limit))))
 
 (defn routes [ds]
   [["/api"
@@ -558,9 +574,9 @@
                                       (System/exit 0))
                               (ok {:ok true}))}]
     ["/activities"  {:get (fn [{:keys [query-params]}]
-                            (let [{:strs [sport from to limit]} query-params]
+                            (let [{:strs [sport from to]} query-params]
                               (ok (analysis/activities ds {:sport sport :from from :to to
-                                                           :limit (some-> limit parse-long)}))))}]
+                                                           :limit (activities-limit query-params)}))))}]
     ;; every GPS track, for the Map tab's heatmap
     ["/heatmap"     {:get (fn [_] (ok (analysis/heatmap ds)))}]
     ;; recent activities waiting for "How did it go?"
@@ -775,6 +791,13 @@
         (and r (not (str/starts-with? (:uri req "") "/api/")))
         (assoc-in [:headers "Cache-Control"] "no-cache")))))
 
+(defn- wrap-athlete
+  "Everything a request does is done for the athlete this server belongs to
+  (one app can serve several athletes, each on its own port)."
+  [handler]
+  (let [athlete (context/athlete)]
+    (fn [req] (context/with-athlete athlete #(handler req)))))
+
 (defn app [ds]
   (-> (ring/ring-handler
        (ring/router (conj (routes ds) ["/" {:get index}]))
@@ -786,20 +809,23 @@
       wrap-revalidate
       wrap-errors
       wrap-params
-      wrap-local-only))
+      wrap-local-only
+      wrap-athlete))
 
-(defonce server (atom nil))
-(defonce scheduler (atom nil))
-(defonce batch-poller (atom nil))
+(defonce server (context/per-athlete-atom nil))
+(defonce scheduler (context/per-athlete-atom nil))
+(defonce batch-poller (context/per-athlete-atom nil))
+(defonce ^{:doc "The athletes this app started (nil: the first), for stop!."} started-athletes (atom []))
 
 (defn- start-batch-poller!
   "Collects half-price batch results every minute (and right away, for
   results that came in while the dashboard was off)."
   [ds]
   (let [ex (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
-    (.scheduleWithFixedDelay ex #(try (let [n (claude/poll-batches! ds)]
-                                        (when (pos? n) (println "Collected" n "batch result(s)")))
-                                      (catch Throwable e (println "Batch check failed:" (ex-message e))))
+    (.scheduleWithFixedDelay ex (context/athlete-fn
+                                 #(try (let [n (claude/poll-batches! ds)]
+                                         (when (pos? n) (println "Collected" n "batch result(s)")))
+                                       (catch Throwable e (println "Batch check failed:" (ex-message e)))))
                              0 60 java.util.concurrent.TimeUnit/SECONDS)
     (reset! batch-poller ex)))
 
@@ -833,7 +859,7 @@
   "Checks every 15 minutes; syncs when the last sync is over 2 h old (06-22 h)."
   [ds]
   (let [ex (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
-    (.scheduleAtFixedRate ex #(try (when (due-for-sync?) (run-sync! ds)) (catch Throwable _))
+    (.scheduleAtFixedRate ex (context/athlete-fn #(try (when (due-for-sync?) (run-sync! ds)) (catch Throwable _)))
                           15 15 java.util.concurrent.TimeUnit/MINUTES)
     (reset! scheduler ex)))
 
@@ -846,7 +872,7 @@
    (reset! syncing? sync?)
    (let [ds (doto (db/datasource) db/migrate!)]
      (token/ensure!) ; the loopback token exists before the first page load
-     (reset! server (jetty/run-jetty (app ds) {:port port :host "127.0.0.1" :join? false}))
+     (reset! server (jetty/run-jetty (app ds) {:port port :host "127.0.0.1" :join? false :max-threads 16}))
      (println (str "Dashboard on http://127.0.0.1:" port "/"))
      (println (auth/describe (auth/status ds)))
      (load-sync-state! ds)
@@ -867,17 +893,25 @@
                     (when (pos? n) (println "Heatmap tracks computed for" n "activities")))
                   (catch Throwable e (println "Heatmap tracks failed:" (ex-message e)))))
      (start-batch-poller! ds)
-     (start-update-checker!)
+     (when-not @update-checker (start-update-checker!)) ; once, however many athletes
+     (swap! started-athletes #(vec (distinct (conj % (context/athlete)))))
      (when sync?
        (run-sync! ds)
        (start-background-sync! ds))
      @server)))
 
-(defn stop! []
-  (when-let [ex @update-checker] (.shutdownNow ex) (reset! update-checker nil))
+(defn- stop-athlete! []
   (when-let [ex @scheduler] (.shutdownNow ex) (reset! scheduler nil))
   (when-let [ex @batch-poller] (.shutdownNow ex) (reset! batch-poller nil))
   (when-let [s @server] (.stop s) (reset! server nil)))
+
+(defn stop!
+  "Stops the dashboard of every athlete this app started."
+  []
+  (when-let [ex @update-checker] (.shutdownNow ex) (reset! update-checker nil))
+  (doseq [a @started-athletes] (context/with-athlete a stop-athlete!))
+  (stop-athlete!) ; started without start! (tests)
+  (reset! started-athletes []))
 
 (defn- open-browser!
   "Opens `url` in the default browser."
@@ -910,7 +944,10 @@
         _  (io/make-parents f)
         _  (paths/trim-log! f)
         ps (java.io.PrintStream. (java.io.FileOutputStream. f true) true "UTF-8")
-        w  (java.io.PrintWriter. (java.io.OutputStreamWriter. ps java.nio.charset.StandardCharsets/UTF_8) true)]
+        ;; a server with several athletes logs in one file: their lines say whose they are
+        w  (java.io.PrintWriter.
+            (context/prefixing-writer (java.io.OutputStreamWriter. ps java.nio.charset.StandardCharsets/UTF_8))
+            true)]
     (System/setOut ps)
     (System/setErr ps)
     (alter-var-root #'*out* (constantly w))
@@ -929,6 +966,21 @@
                             {:after-switch (when log? log-to-file!)})
   (start! opts))
 
+(defn- start-athletes!
+  "One app for all the athletes of athletes.edn (coach.paths/server-athletes):
+  each gets its own port, data folder, database and jobs. An athlete that
+  can't start is reported and the others go on. Returns how many started."
+  [athletes opts]
+  (count (filter true?
+                 (for [{:keys [name port]} athletes]
+                   (context/with-athlete
+                     name
+                     #(try (start-app! (assoc opts :port port) (nil? name))
+                           true
+                           (catch Throwable e
+                             (println "Couldn't start" (or name "the first athlete") "-" (ex-message e))
+                             false)))))))
+
 (defn -main
   "clojure -M -m coach.api [port] [--no-sync] [--open | --background | --server]
 
@@ -937,7 +989,9 @@
   browser. --background does the same without the browser (starting with
   the computer, restarts). --server (or COACH_SERVER=1) is the server
   install under systemd (docs/server.md): logs to app.log, and exits on a
-  failed start or a restart, for systemd to start it again."
+  failed start or a restart, for systemd to start it again. With an
+  athletes.edn in the app folder (and no $COACH_INSTANCE) it serves all
+  those athletes, each on their own port, from this one process."
   [& args]
   (when (some #{"--server"} args) (paths/use-server-mode! true))
   (let [port (or (some parse-long args) 8080)
@@ -950,7 +1004,10 @@
       (paths/server?)
       (do (log-to-file!)
           (println "Server mode; allowed hosts:" (str/join ", " (sort (paths/allowed-hosts))))
-          (try (start-app! opts true)
+          (try (if-let [athletes (and (nil? (paths/instance)) (paths/server-athletes))]
+                 (when (zero? (start-athletes! athletes opts))
+                   (throw (ex-info "No athlete could start." {})))
+                 (start-app! opts true))
                (catch Throwable e
                  (println "Couldn't start:" (ex-message e))
                  (System/exit 1))))

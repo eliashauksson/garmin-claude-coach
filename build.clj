@@ -30,6 +30,7 @@
     (b/write-file {:path (str class-dir "/coach/version.txt") :string (version)})
     ;; compiled ahead of time, so the app starts in seconds
     (b/compile-clj {:basis basis :ns-compile '[coach.api coach.sync coach.backup coach.auth coach.garmin-mcp]
+                    :compile-opts {:direct-linking true :elide-meta [:doc :file :line :added]}
                     :class-dir class-dir})
     (b/uber {:class-dir class-dir :uber-file jar-file :basis basis})
     (println "Built" jar-file (version))))

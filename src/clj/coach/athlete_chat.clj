@@ -5,6 +5,7 @@
   (:require [clojure.string :as str]
             [coach.athlete :as athlete]
             [coach.claude :as claude]
+            [coach.context :as context]
             [coach.i18n :as i18n]
             [coach.translate :as translate]))
 
@@ -155,7 +156,7 @@ empty and `edits` must be [].")
 ;; Automatic summary: started in the background when the file has none.
 ;; One at a time; a failure isn't retried for the same text (the card offers a retry).
 
-(defonce summary-job (atom {:running false :failed nil}))
+(defonce summary-job (context/per-athlete-atom {:running false :failed nil}))
 
 (defn ensure-summary!
   "Starts a background summary when the file has none. Returns the job state

@@ -19,6 +19,7 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [coach.context :as context]
             [coach.i18n :as i18n])
   (:import (java.io File RandomAccessFile)
            (java.nio.channels FileLock)))
@@ -60,13 +61,15 @@
         s
         (throw (ex-info (str "COACH_INSTANCE must be letters, digits and dashes, not: " s) {}))))))
 
-(def ^:private instance* (delay (parse-instance (System/getenv "COACH_INSTANCE"))))
+(defonce env-instance
+  (reset! context/env-athlete (parse-instance (System/getenv "COACH_INSTANCE"))))
 
 (defn instance
-  "This copy's athlete name on a server with several athletes; nil for the
-  usual single install."
+  "The current athlete's name on a server with several athletes (this
+  process's $COACH_INSTANCE, or the one a request or job runs for, see
+  coach.context); nil for the usual single install and the first athlete."
   []
-  @instance*)
+  (context/athlete))
 
 (defn per-instance
   "\"name.ext\" for the usual install, \"name-<instance>.ext\" for an extra athlete."
@@ -159,14 +162,24 @@
 
 (defn default-data-dir ^File [] (app-file "data"))
 
-(defn env-data-dir [] (not-empty (System/getenv "COACH_DATA_DIR")))
+(defn env-data-dir
+  "$COACH_DATA_DIR, for the athlete of this process only (one app serving
+  several athletes keeps the others' folders apart)."
+  []
+  (when (= (context/athlete) @context/env-athlete)
+    (not-empty (System/getenv "COACH_DATA_DIR"))))
 
 (defn configured-data-dir
-  "The data folder as configured now (before any restart)."
+  "The data folder as configured now (before any restart): $COACH_DATA_DIR,
+  the folder chosen in Settings, else data/ in the app folder, or
+  athletes/<name>/data for an extra athlete."
   ^File []
-  (.getAbsoluteFile ^File (io/file (or (env-data-dir) (:data-dir (read-config)) (default-data-dir)))))
+  (.getAbsoluteFile ^File (io/file (or (env-data-dir)
+                                       (:data-dir (read-config))
+                                       (when-let [i (instance)] (app-file "athletes" i "data"))
+                                       (default-data-dir)))))
 
-(def ^:private data-dir* (atom nil))
+(def ^:private data-dir* (context/per-athlete-atom nil))
 
 (defn data-dir
   "The data folder this run uses."
@@ -245,7 +258,7 @@
 ;; ---------------------------------------------------------------------------
 ;; One app per data folder
 
-(defonce ^:private lock (atom nil))
+(defonce ^:private lock (context/per-athlete-atom nil))
 
 (defn lock-data-dir!
   "Takes the data folder's lock, waiting up to `wait-ms` for another app (or
@@ -261,17 +274,26 @@
               (< (System/currentTimeMillis) deadline) (do (Thread/sleep 500) (recur))
               :else (do (.close raf) false))))))
 
+(defonce ^:private turn (java.util.concurrent.locks.ReentrantLock. true))
+
 (defn one-at-a-time
   "Runs `f` while holding the lock file `lock-name` in the app folder, which
-  every copy of the app shares (all athletes on a server). Another copy
-  holding it makes this wait: `on-wait` runs once first. So on a small
-  server the athletes' syncs take turns instead of competing for memory."
+  every copy of the app shares, and a lock inside this app (a file lock
+  can't be taken twice by one process, and one app serves all athletes on a
+  server). Another athlete holding either makes this wait: `on-wait` runs
+  once first. So on a small server the athletes' syncs take turns instead of
+  competing for memory."
   [lock-name on-wait f]
-  (let [file (app-file lock-name)]
-    (with-open [raf (RandomAccessFile. file "rw")]
-      (let [ch (.getChannel raf)
-            ^FileLock l (or (.tryLock ch) (do (on-wait) (.lock ch)))]
-        (try (f) (finally (.release l)))))))
+  (let [waited? (volatile! false)
+        wait!   #(when-not @waited? (vreset! waited? true) (on-wait))
+        file    (app-file lock-name)]
+    (when-not (.tryLock turn) (wait!) (.lock turn))
+    (try
+      (with-open [raf (RandomAccessFile. file "rw")]
+        (let [ch (.getChannel raf)
+              ^FileLock l (or (.tryLock ch) (do (wait!) (.lock ch)))]
+          (try (f) (finally (.release l)))))
+      (finally (.unlock turn)))))
 
 (def log-max-bytes "A log is trimmed once it is bigger than this…" (* 1024 1024))
 (def log-keep-bytes "…to about its newest this much." (* 256 1024))
@@ -327,13 +349,31 @@
        (remove str/blank?)
        set))
 
-(def ^:private allowed-hosts*
-  (delay (into (parse-hosts (System/getenv "COACH_ALLOWED_HOSTS"))
-               (parse-hosts (:allowed-hosts (read-config))))))
+(def ^:private allowed-hosts* (atom {}))
 
 (defn allowed-hosts
   "Host names besides this computer's that may open the dashboard: from
-  $COACH_ALLOWED_HOSTS (comma-separated) and :allowed-hosts in config.edn.
-  Read once per run."
+  $COACH_ALLOWED_HOSTS (comma-separated) and :allowed-hosts in the athlete's
+  config.edn. Read once per run and athlete."
   []
-  @allowed-hosts*)
+  (let [k (instance)]
+    (or (get @allowed-hosts* k)
+        (get (swap! allowed-hosts* assoc k
+                    (into (parse-hosts (System/getenv "COACH_ALLOWED_HOSTS"))
+                          (parse-hosts (:allowed-hosts (read-config)))))
+             k))))
+
+;; ---------------------------------------------------------------------------
+;; All athletes of a server in one app (athletes.edn in the app folder)
+
+(defn server-athletes
+  "The athletes this app serves, each on its own port, from athletes.edn in
+  the app folder: [{:name nil-or-instance :port n}], the first athlete's name
+  being nil. nil when there is no such file (one athlete per app)."
+  []
+  (let [f (app-file "athletes.edn")]
+    (when (.isFile f)
+      (try (not-empty (mapv (fn [{:keys [name port]}] {:name (parse-instance name) :port (long port)})
+                            (:athletes (edn/read-string (slurp f)))))
+           (catch Exception e
+             (throw (ex-info (str "athletes.edn can't be read: " (ex-message e)) {})))))))

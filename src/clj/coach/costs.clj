@@ -10,6 +10,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [coach.context :as context]
             [coach.db :as db]
             [coach.i18n :as i18n]
             [coach.paths :as paths]
@@ -99,7 +100,7 @@
 
 (defonce ^{:doc "The DB requests are logged to; set by the dashboard on start.
   nil (tests, REPL) means requests aren't logged."}
-  log-ds (atom nil))
+  log-ds (context/per-athlete-atom nil))
 
 (defn use-db! [ds] (reset! log-ds ds))
 

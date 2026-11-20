@@ -6,16 +6,20 @@
   Pure except for reading/writing the token file."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [coach.context :as context]
             [coach.paths :as paths])
   (:import (java.security MessageDigest SecureRandom)
            (java.util Base64)))
 
-(def token-file
-  "dashboard-token; dashboard-token-<instance> for an extra athlete on a server."
-  (str (System/getProperty "user.home") "/.config/coach/" (paths/per-instance "dashboard-token")))
-(def ^:dynamic *token-file* token-file)
+(def ^:dynamic *token-file* "nil: the athlete's own file (token-file)." nil)
 
-(defonce ^:private cached (atom nil))
+(defn token-file
+  "dashboard-token; dashboard-token-<instance> for an extra athlete on a server."
+  []
+  (or *token-file*
+      (str (System/getProperty "user.home") "/.config/coach/" (paths/per-instance "dashboard-token"))))
+
+(defonce ^:private cached (context/per-athlete-atom nil))
 
 (defn- generate []
   (let [b (byte-array 24)]
@@ -23,7 +27,7 @@
     (.encodeToString (.withoutPadding (Base64/getUrlEncoder)) b)))
 
 (defn- read-token []
-  (let [f (io/file *token-file*)]
+  (let [f (io/file (token-file))]
     (when (.isFile f) (not-empty (str/trim (slurp f))))))
 
 (defn ensure!
@@ -32,7 +36,7 @@
   (or @cached
       (reset! cached (or (read-token)
                          (let [t (generate)]
-                           (paths/secure-spit! *token-file* t)
+                           (paths/secure-spit! (token-file) t)
                            t)))))
 
 (defn valid?

@@ -266,3 +266,13 @@
         (is (= 403 (first (send-json app :put "/api/claude/limits" {:limits []}))))
         (is (= 200 (first (get-json app "/api/ai-settings"))) "reading the settings stays open")
         (is (= 200 (first (get-json app "/api/claude/key"))) "the key's status stays open")))))
+
+(deftest activities-limit-test
+  (is (= api/activities-default-limit (api/activities-limit {})) "the whole history isn't one answer")
+  (is (= api/activities-max-limit (api/activities-limit {"from" "2026-10-01" "to" "2026-10-31"}))
+      "a date range is as wide as asked, up to the maximum")
+  (is (= 10 (api/activities-limit {"limit" "10"})))
+  (is (= 10 (api/activities-limit {"limit" "10" "from" "2026-10-01"})))
+  (is (= api/activities-max-limit (api/activities-limit {"limit" "5000"})) "never more than the maximum")
+  (is (= api/activities-default-limit (api/activities-limit {"limit" "0"})))
+  (is (= api/activities-default-limit (api/activities-limit {"limit" "many"}))))

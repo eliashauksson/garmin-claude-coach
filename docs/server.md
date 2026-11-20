@@ -388,9 +388,10 @@ curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/m
 
 The name may have letters, digits and dashes; as typed (`Nadine`) it is the name the dashboards
 show, while services and folders use it in lower case (`nadine`). To show another name later, run
-it again with `--label "Nadine M."`. The script runs a second copy of the installed app
-as a service (`garmin-coach-athlete-anna`), passes it on with `tailscale serve`, and prints the
-address. Then, on that address:
+it again with `--label "Nadine M."`. The script lists the athlete in `athletes.edn` (in the app
+folder, `~/.local/share/garmin-coach/`), restarts the one installed app, which serves all athletes
+from a single process, each on their own port, passes the new port on with `tailscale serve`, and
+prints the address. The other athletes are back within seconds. Then, on that address:
 1. Settings › General: log in to Garmin and connect Coros with **anna's** accounts. The Claude
    key is already there.
 2. The Athlete tab: write anna's profile.
@@ -403,15 +404,24 @@ their own Tailscale account, share just the server: in the
 dashboard is open to everyone who reaches the server: anna could also open yours at the address
 without a port. The app has no login of its own.
 
-**Memory.** Each athlete runs their own app (about 400 MB, plus the Garmin connector during a
-sync). A 2 GB server is enough; more athletes make it slower, not unstable:
+**One app for all.** Servers set up before this change run one app per athlete
+(`garmin-coach-athlete-<name>` services). Update the app (Settings › Update now), then run
+`sudo bash add-athlete.sh --migrate`: it moves them into one app. Ports, addresses and data stay the same;
+the extra services are removed. The first run of `add-athlete.sh` with a name does this by itself.
+An app that is older than that refuses and says to update first.
+
+**Log.** All athletes write to one log, `~/.local/share/garmin-coach/data/app.log` (the first
+athlete's data folder). Lines of the other athletes start with their name: `[anna] sync done`.
+
+**Memory.** One app serves all athletes (about 150 MB for each athlete, plus the Garmin connector
+during a sync). A 2 GB server is enough; more athletes make it slower, not unstable:
 - **The syncs take turns.** While one athlete syncs, the others wait. Their **Sync now** button
   says *"Waiting for another athlete…"* and their sync starts as soon as the other one is done.
 - **Swap.** On a server under 4 GB, the script adds a swap file (about 1 GB per athlete, at least
   2 GB; `/swapfile-garmin-coach`). Short of memory, the system moves what isn't used right now
   to the disk, so things get slower instead of a process being killed.
-- **Memory is handed back.** After a sync the app returns what it no longer needs, and an update
-  restarts the athletes one at a time.
+- **Memory is handed back.** After a sync the app returns what it no longer needs. An update or a
+  restart restarts all athletes together.
 - If a dashboard feels slow, `free -h` shows memory and swap use. More memory (Hetzner: power
   off, **Rescale**) makes it fast again.
 

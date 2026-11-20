@@ -14,6 +14,7 @@
             [clojure.walk :as walk]
             [coach.ai-settings :as ai]
             [coach.athlete :as athlete]
+            [coach.context :as context]
             [coach.db :as db]
             [coach.i18n :as i18n]
             [coach.plan :as plan]
@@ -178,14 +179,14 @@ Rules:
                   (translate-chunk! ds chunk targets request)))))
 
 (defonce ^{:doc "The dashboard's DB; set on start. nil (tests, REPL): nothing is translated."}
-  ds-ref (atom nil))
+  ds-ref (context/per-athlete-atom nil))
 
 (defn use-db! [ds] (reset! ds-ref ds))
 
 (def ^:private lock (Object.))
 
 (defonce ^{:doc "How many translation runs are under way (the dashboard shows a note)."}
-  running (atom 0))
+  running (context/per-athlete-atom 0))
 
 (defn soon!
   "Translates what's missing in the background, one run at a time (results

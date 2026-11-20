@@ -3,6 +3,7 @@
   API costs page. Stored in sync_state (so backups carry it); tasks without a
   choice use `defaults`."
   (:require [clojure.data.json :as json]
+            [coach.context :as context]
             [coach.db :as db]
             [coach.i18n :as i18n :refer [tk]]))
 
@@ -80,7 +81,7 @@
 
 (defonce ^{:doc "The DB the choices live in; set by the dashboard on start.
   nil (tests, REPL) means the defaults apply."}
-  settings-ds (atom nil))
+  settings-ds (context/per-athlete-atom nil))
 
 (defn use-db! [ds] (reset! settings-ds ds))
 

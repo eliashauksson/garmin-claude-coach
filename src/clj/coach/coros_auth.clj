@@ -10,6 +10,7 @@
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [coach.context :as context]
             [coach.i18n :refer [t]]
             [coach.paths :as paths])
   (:import (java.net URI URLEncoder)
@@ -26,10 +27,13 @@
 
 (def scope "openid mcp.tools offline_access")
 
-(def token-file
+(def ^:dynamic *token-file* "nil: the athlete's own file (token-file)." nil)
+
+(defn token-file
   "~/.config/coach/coros.json; coros-<instance>.json for an extra athlete on a server."
-  (str (System/getProperty "user.home") "/.config/coach/" (paths/per-instance "coros.json")))
-(def ^:dynamic *token-file* token-file)
+  []
+  (or *token-file*
+      (str (System/getProperty "user.home") "/.config/coach/" (paths/per-instance "coros.json"))))
 
 ;; ---------------------------------------------------------------------------
 ;; HTTP
@@ -94,14 +98,14 @@
 ;; Token file
 
 (defn read-tokens []
-  (let [f (io/file *token-file*)]
+  (let [f (io/file (token-file))]
     (when (.isFile f)
       (try (json/read-str (slurp f) :key-fn keyword) (catch Exception _ nil)))))
 
 (defn- write-tokens!
   "Writes the token file, readable only by this user."
   [m]
-  (paths/secure-spit! *token-file* (json/write-str m))
+  (paths/secure-spit! (token-file) (json/write-str m))
   m)
 
 (defn connected?
@@ -149,8 +153,8 @@
       client_id
       (register! redirect-uri))))
 
-(defonce ^:private pending (atom nil))
-(defonce ^:private last-error (atom nil))
+(defonce ^:private pending (context/per-athlete-atom nil))
+(defonce ^:private last-error (context/per-athlete-atom nil))
 
 (defn authorize-url
   "Pure: Coros's sign-in page URL for one login attempt."
@@ -239,7 +243,7 @@
 (defn disconnect!
   "Forgets the login (the synced rides stay)."
   []
-  (io/delete-file (io/file *token-file*) true)
+  (io/delete-file (io/file (token-file)) true)
   (reset! pending nil)
   {:connected false})
 

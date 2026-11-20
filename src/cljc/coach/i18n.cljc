@@ -10,6 +10,7 @@
   The language is a setting on the server (sync_state :lang), so background
   jobs, Claude's instructions and the dashboard always agree."
   (:require [clojure.string :as str]
+            #?(:clj [coach.context :as context])
             [coach.i18n-de :as de]
             [coach.i18n-fr :as fr]))
 
@@ -21,9 +22,9 @@
 
 (def dictionaries {"de" de/de "fr" fr/fr})
 
-(defonce ^{:doc "The current language: \"en\" or \"de\"."} lang
-  (atom #?(:cljs (let [saved (.getItem js/localStorage "lang")] (if (language-ids saved) saved "en"))
-           :clj "en")))
+(defonce ^{:doc "The current language: \"en\", \"de\" or \"fr\" (on the server, each athlete's own)."} lang
+  #?(:cljs (atom (let [saved (.getItem js/localStorage "lang")] (if (language-ids saved) saved "en")))
+     :clj (context/per-athlete-atom "en")))
 
 (defn fill
   "Pure: replaces {0}, {1}, ... in `template` with `args`."

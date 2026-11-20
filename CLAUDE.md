@@ -17,8 +17,13 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - api: JSON API under /api + static files, 127.0.0.1 only; runs sync/backup jobs; `-main` entry point
 - app: installed app: version/updates, autostart, restart, :pending actions in config.edn
 - paths: app/data folder resolution, lock file, server mode + allowed hosts (docs/server.md); `instance`: an extra
-  athlete on a server ($COACH_INSTANCE, installer/add-athlete.sh) gets its own config-<name>.edn, data,
-  Garmin/Coros logins and dashboard token (`per-instance`); only the Claude key and sync.lock (syncs take turns) are shared
+  athlete on a server (installer/add-athlete.sh) gets its own config-<name>.edn, data (athletes/<name>/data),
+  Garmin/Coros logins and dashboard token (`per-instance`); only the Claude key and sync.lock (syncs take turns) are shared.
+  One app serves all athletes: athletes.edn in the app folder lists name + port, `server-athletes`, started by `api/-main --server`
+  (without it, $COACH_INSTANCE runs one app per athlete as before)
+- context: the current athlete (`*athlete*`, bound per request/job: `with-athlete`, `athlete-fn` for executors; futures carry it) and
+  `per-athlete-atom`, an atom with one value per athlete. State that is per athlete (sync state, DB handles, language, tokens) uses it;
+  a new global `atom` that holds an athlete's data must too
 - source: `DataSource` protocol (read-only), `ActivitySource` for activity-only sources · garmin-mcp: DataSource over a local garmin_mcp server · mcp: minimal MCP client (stdio, Streamable HTTP)
 - coros-mcp: ActivitySource over COROS's official remote MCP server (rides from FIT files) · coros-auth: Coros OAuth (PKCE, token in ~/.config/coach/coros.json) · fit: FIT file decoding (Garmin FIT SDK)
 - sync: incremental + backfill from a DataSource into the DB (upserts); `activities-only!`/`coros!` for Coros

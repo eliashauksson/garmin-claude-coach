@@ -7,6 +7,7 @@
   count down from that. It's an estimate: a failing sync is the real signal."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [coach.context :as context]
             [coach.db :as db]
             [coach.garmin-mcp :as gm]
             [coach.i18n :refer [t]]
@@ -101,7 +102,7 @@
   "The first login also downloads Python and the Garmin server: give it time."
   (* 5 60 1000))
 
-(defonce ^:private login-job (atom nil))
+(defonce ^:private login-job (context/per-athlete-atom nil))
 
 (defn failure-message
   "Pure: garmin-mcp-auth's reason for a failed login, from its output: the

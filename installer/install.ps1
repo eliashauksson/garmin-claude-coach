@@ -111,7 +111,7 @@ function Install-GarminCoach {
   # Shortcuts: Start menu and desktop. javaw.exe runs without a console window.
   $shell = New-Object -ComObject WScript.Shell
   $javaw = "$Dir\runtime\jre\bin\javaw.exe"
-  $appArgs = "-cp app\garmin-coach.jar clojure.main -m coach.api $Port --open"
+  $appArgs = "-XX:+UseSerialGC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=25 -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=48m -Xss512k -cp app\garmin-coach.jar clojure.main -m coach.api $Port --open"
   $startMenu = [Environment]::GetFolderPath('Programs')
   $desktop   = [Environment]::GetFolderPath('Desktop')
   foreach ($folder in @($startMenu, $desktop)) {
