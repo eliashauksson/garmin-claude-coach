@@ -647,6 +647,7 @@
    "{0} le {1} est à moins de 48 h de {2} le {3} (Strength / ME)."
 
    ;; --- server errors -------------------------------------------------------------
+   "Not a date: {0}" "Pas une date : {0}"
    "No athlete information yet. Add it on the Plan page first." "Pas encore d'informations sur l'athlète. Ajoute-les d'abord sur la page Plan."
    "The model stopped early: {0}" "Le modèle s'est arrêté trop tôt : {0}"
    "Claude couldn't process it: {0}" "Claude n'a pas pu la traiter : {0}"

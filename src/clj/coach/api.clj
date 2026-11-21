@@ -246,6 +246,13 @@
   [params default-days]
   [(get params "from" (days-ago default-days)) (get params "to" (season/today))])
 
+(defn- iso-date!
+  "`s` when it is a YYYY-MM-DD date, else an error for the athlete."
+  [s]
+  (if (and (string? s) (re-matches #"\d{4}-\d{2}-\d{2}" s))
+    s
+    (throw (ex-info (i18n/t "Not a date: {0}" s) {}))))
+
 (defn- auth-status [ds] (auth/status ds))
 
 (defn- claude-status
@@ -508,9 +515,7 @@
   [["/api"
     ["/day/:date"   {:get (guarded
                            (fn [{:keys [path-params]}]
-                             (let [date (:date path-params)]
-                               (when-not (re-matches #"\d{4}-\d{2}-\d{2}" date)
-                                 (throw (ex-info (str "Not a date: " date) {})))
+                             (let [date (iso-date! (:date path-params))]
                                (ok-tr ds (cond-> (assoc (analysis/day-summary ds date)
                                                   :season (plan/week-info ds date)
                                                   :planned (plan/workouts ds date date)
@@ -521,14 +526,12 @@
     ;; the dashboard's coach overview (coach-dashboard-spec.md)
     ["/overview"    {:get (guarded
                            (fn [{:keys [query-params]}]
-                             (let [date (get query-params "date" (season/today))]
-                               (when-not (re-matches #"\d{4}-\d{2}-\d{2}" date)
-                                 (throw (ex-info (str "Not a date: " date) {})))
-                               ;; the goal time and race legs come from the athlete summary:
-                               ;; an older summary without them is rewritten in the background
-                               (let [job (when (claude/api-key?) (athlete-chat/ensure-summary!))]
-                                 (ok (cond-> (overview/overview ds date)
-                                       (:summarising job) (assoc :summarising true)))))))}]
+                             ;; the goal time and race legs come from the athlete summary:
+                             ;; an older summary without them is rewritten in the background
+                             (let [date (iso-date! (get query-params "date" (season/today)))
+                                   job  (when (claude/api-key?) (athlete-chat/ensure-summary!))]
+                               (ok (cond-> (overview/overview ds date)
+                                     (:summarising job) (assoc :summarising true))))))}]
     (plan-routes ds)
     (athlete-routes ds)
     (app-routes)
