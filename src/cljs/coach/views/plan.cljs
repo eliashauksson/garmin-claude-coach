@@ -272,25 +272,27 @@
          [:div {:replicant/key (:monday wk)}
           (week-card wk (:workouts p) prop ui-state (some? (:plan (get data season-url))))])))))
 
+(defn- view-switch [route] (ui/seg (view-of route) views [:set-param :view] {:big? true}))
+
 (defn- head [{:keys [route data]} urls]
   (let [[plan-url _ _ season-url] urls
-        p    (get data plan-url)
-        view (view-of route)]
+        p (get data plan-url)]
     [:div.page-head
      [:div.title
-      [:div.sub (when (and p (= "week" view)) (season-line (:season p) (:race (get data season-url))))]
+      [:div.sub (when p (season-line (:season p) (:race (get data season-url))))]
       [:h1 (t "Plan")]]
-     (ui/seg view views [:set-param :view] {:big? true})]))
+     (view-switch route)]))
 
 (defn view
   "The page for the route's view; `urls` is what (urls route ui) gave."
   [{:keys [data errors flash route] ui-state :ui :as s} urls]
   (let [view (view-of route)]
     [:div {:style {:display "contents"}}
-     (head s urls)
-     (when flash [:div.error flash])
+     ;; the calendar scrolls, so its header (with the switch) is the sticky one
+     (when-not (= "calendar" view) (head s urls))
+     (when (and flash (not= "calendar" view)) [:div.error flash])
      (case view
-       "calendar" (calendar/view s)
+       "calendar" (calendar/view s (view-switch route))
        "season"   (let [u (first urls)]
                     (list (when-let [e (get errors u)] [:div.error (t "Could not load: {0}" e)])
                           (when-let [x (get data u)] (season/card x (:season ui-state)))))
