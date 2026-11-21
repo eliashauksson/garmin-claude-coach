@@ -458,7 +458,7 @@ only).
 
 ## 7. Page compositions
 
-### Today
+### Today (start page)
 
 - Header: sub line with the full date ("Thursday, 29 October"), `h1` greeting by hour (Good
   morning < 12, Good afternoon < 18, Good evening), then the login status pill and **Sync now**.
@@ -513,11 +513,16 @@ only).
 - Weekly volume: white card, a `.seg.soft` Hours / Distance / TSS switch in the label row, family
   legend pills, 240px stacked bars.
 
-### Calendar and Plan
+### Plan, Trends and More
 
-- Calendar uses `main.wide` (1600px) and the week grid in §5.
-- Plan: athlete card, coach signals card (amber pulse chip, soft), week cards with plan rows and
-  proposals.
+- Navigation: five tabs, Today · Plan · Trends · Map · More (bottom tab bar with five columns on phones).
+- Plan has a segmented control (Week · Calendar · Season, `?view=`). Calendar uses `main.wide` (1600px)
+  and the week grid in §5; Week has the coach signals card (amber pulse chip, soft) and week cards with
+  plan rows and proposals; Season has the season card.
+- Trends: sections (training load, goal race, recovery, training, cycling power, fitness) under a sticky
+  jump bar of pills.
+- More: large rows (icon chip, title, one line, chevron), 64px tall. Athlete, Metrics and Settings open
+  from it with a "← More" link.
 
 ---
 

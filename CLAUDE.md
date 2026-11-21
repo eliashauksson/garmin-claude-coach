@@ -44,8 +44,14 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 
 ## Namespaces (src/cljs, src/cljc)
 - app: state, routing, `fetch!` of /api URLs · ui: formatters + shared components · charts: ECharts/Leaflet mount
+  Tabs: Today `#/`, Plan `#/plan?view=…`, Trends `#/trends`, Map `#/map`, More `#/more` (opens `#/athlete`, `#/metrics`,
+  `#/settings`; their active tab is More). Activity, Day and Session pages light up Plan. Old links: `#/calendar` →
+  Plan calendar view, `#/costs` → Settings' Claude tab, `#/activities` and unknown routes → Today
 - heat: the Map tab's heatmap (canvas), 2D on Leaflet, 3D terrain on MapLibre GL 6 (not bundled: resources/public/vendor/maplibre/, copied by `npm install`, loaded on first 3D use)
-- views/: dashboard (start page; its sections in views/dashboard/), calendar, heatmap (Map tab), day, activity, feedback, load, plan, season, athlete, settings, costs, metrics (explains every metric), status (error banner), workout (a planned session's card), structure (block profile/list, planned vs actual bits)
+- views/: today (start page; its cards in views/dashboard/), trends (long-term sections, jump bar), plan (`?view=week|calendar|season`),
+  calendar (the Plan page's calendar view), heatmap (Map tab), more (the More tab's list), athlete, settings, costs,
+  metrics (explains every metric), day, activity, feedback, load, season, status (error banner), workout (a planned
+  session's card), structure (block profile/list, planned vs actual bits)
 - cljc i18n: `t`/`tk`, language from server · i18n-de / i18n-fr: dictionaries keyed by English text
 - cljc sky: pure, the night sky behind the 3D globe (sidereal time, precession, camera frame, galactic coords); data in resources/public/sky/ (`make sky`)
 - cljc track: pure, GPS tracks for the heatmap (split, simplify, encoded polyline); stored in `activity_metrics.track`

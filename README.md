@@ -5,21 +5,25 @@ Garmin data comes from a local [garmin_mcp](https://github.com/Taxuspt/garmin_mc
 only ever **read**: nothing is written back to Garmin.
 
 ## Pages
-- **Dashboard** (start page): this morning's readiness and vitals, the goal race against Garmin's
-  race predictions, recovery over 30 days, training over 28 days and 26 weeks, the training load
-  (CTL/ATL/TSB), and VO₂ max and endurance score. See `coach-dashboard-spec.md`.
-- **Calendar**: activities and planned sessions per week, with a small health block per day. It
-  opens the **day page**: that day's health data, including heart rate, stress, Body Battery and
-  steps through the day.
+- **Today** (start page): what to do today and whether you are ready: today's session, this morning's
+  readiness and vitals (a tap opens a vital's history), "How did it go?", the week so far and the last
+  activity. See `coach-dashboard-spec.md`.
+- **Plan**: a switch at the top picks the view (`?view=`): **Week** (default) has the week plans drafted
+  by Claude, with adjustments when training, feedback or wellness call for it; **Calendar** shows
+  activities and planned sessions per week, with a small health block per day, and opens the **day
+  page** (that day's health data, including heart rate, stress, Body Battery and steps); **Season** is
+  the season plan to race day.
+- **Trends**: the long term, with a bar that jumps between the sections: training load (CTL/ATL/TSB, form
+  forecast, weekly volume), the goal race against Garmin's race predictions, recovery over 30 days,
+  training over 28 days and 26 weeks, cycling power, and VO₂ max and endurance score.
 - **Map**: a heatmap of every activity with GPS, by time range and sport, in five colour schemes on a
   dark, light or satellite map. In 3D the heat lies on the terrain; zoomed out the map becomes a globe
   in front of the real night sky (stars, Milky Way, sun and moon where they are now).
-- **Plan**: the athlete document, the season plan to race day, and week plans drafted by Claude,
-  with adjustments when training, feedback or wellness call for it.
-- **Settings**: language, appearance, backup and Garmin login (**General**), and Claude's models
-  and costs (**Claude & API costs**).
+- **More**: **Athlete** (the athlete document, edited with Claude), **Metrics explained**, **Settings**
+  (language, appearance, backup and Garmin login under **General**; Claude's models and costs under
+  **Claude & API costs**).
 
-Each activity has its own page, opened from the dashboard, the calendar or a day.
+Each activity has its own page, opened from Today, the calendar or a day.
 
 ## How it works
 
@@ -30,7 +34,7 @@ predictions and endurance score are only available for today, so each sync store
 their trends fill in over time.
 
 **Planning.** The planner reads `training-principles.md` (the general method) and the athlete
-document (the athlete, goal race and season outline, edited with Claude on the Plan page). Claude
+document (the athlete, goal race and season outline, edited with Claude on the Athlete page (More)). Claude
 drafts the season plan to race day; the coach then keeps the next two weeks planned. Rule checks
 in code guard every plan.
 
