@@ -265,6 +265,7 @@
   (let [p     (get data plan-url)
         props (map #(get data %) proposal-urls)]
     (list
+     (when p [:div.sub {:replicant/key "season-line"} (season-line (:season p) (:race (get data season-url)))])
      (when-let [e (get errors plan-url)] [:div.error (t "Could not load: {0}" e)])
      (when p (coach-card (get data signals-url) (get data adjust-url) (:workouts p) ui-state))
      (when p
@@ -272,27 +273,23 @@
          [:div {:replicant/key (:monday wk)}
           (week-card wk (:workouts p) prop ui-state (some? (:plan (get data season-url))))])))))
 
-(defn- view-switch [route] (ui/seg (view-of route) views [:set-param :view] {:big? true}))
-
-(defn- head [{:keys [route data]} urls]
-  (let [[plan-url _ _ season-url] urls
-        p (get data plan-url)]
-    [:div.page-head
-     [:div.title
-      [:div.sub (when p (season-line (:season p) (:race (get data season-url))))]
-      [:h1 (t "Plan")]]
-     (view-switch route)]))
+(defn- head
+  "Title and view switch: in the same place on every view."
+  [route]
+  [:div.page-head
+   [:div.title [:h1 (t "Plan")]]
+   (ui/seg (view-of route) views [:set-param :view] {:big? true})])
 
 (defn view
   "The page for the route's view; `urls` is what (urls route ui) gave."
   [{:keys [data errors flash route] ui-state :ui :as s} urls]
   (let [view (view-of route)]
     [:div {:style {:display "contents"}}
-     ;; the calendar scrolls, so its header (with the switch) is the sticky one
-     (when-not (= "calendar" view) (head s urls))
+     ;; the calendar scrolls, so it carries the head in its sticky header
+     (when-not (= "calendar" view) (head route))
      (when (and flash (not= "calendar" view)) [:div.error flash])
      (case view
-       "calendar" (calendar/view s (view-switch route))
+       "calendar" (calendar/view s (head route))
        "season"   (let [u (first urls)]
                     (list (when-let [e (get errors u)] [:div.error (t "Could not load: {0}" e)])
                           (when-let [x (get data u)] (season/card x (:season ui-state)))))

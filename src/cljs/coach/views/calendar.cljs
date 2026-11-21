@@ -261,8 +261,8 @@
         (sort-by first (conj (vec all) [shown (label (.getFullYear d) (.getMonth d))]))))))
 
 (defn view
-  "`lead` goes first in the sticky header (the Plan page's view switch): the calendar scrolls
-  under it, so it stays in reach."
+  "`lead` goes first in the sticky header (the Plan page's title and view switch, as on its other
+  views): the calendar scrolls under it, so it stays in reach."
   [{:keys [data errors route ui sync] :as s} lead]
   (let [[from to] (cal-range route ui)
         chunks  (map chunk-urls (chunk-starts from (ui/add-days to 6)))
@@ -278,8 +278,8 @@
         shown   (or (get-in ui [:cal :month]) (subs (ui/add-days (anchor route) 3) 0 7))]
     [:div {:style {:display "contents"}}
      [:div.cal-sticky
+      lead
       [:div.page-head
-       [:div.title lead]
        (status/auth-pill (:auth sync))
        (status/sync-button sync)
        [:select {:aria-label (t "Month") :on {:change [[:cal-month :event/target-value]]}}
