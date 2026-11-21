@@ -519,6 +519,7 @@
    :cal-jump          (fn [[d]] (calendar/jump! state fetch! d))
    :cal-month         (fn [[m]] (calendar/jump! state fetch! (calendar/month-monday m)))
    :scroll-to         scroll-to!
+   :scroll-top        (fn [_] (js/window.scrollTo 0 0))
    :back              back!
    :set-lang          (fn [[lang]] (set-lang! lang))
    :athlete-chat-send (fn [_] (send-athlete-chat!))
@@ -575,7 +576,8 @@
       [:div.brand [:span.logo] "Coach"]
       (for [[k href label icon] nav-items]
         [:a {:replicant/key k :href href :class (when (= k active) "active")
-             :aria-current (when (= k active) "page")}
+             :aria-current (when (= k active) "page")
+             :on {:click [[:scroll-top]]}}
          (ui/nav-icon icon) [:span (t label)]])]
      [:main {:class (remove nil? [(when (and (seq loading) (not (and (calendar-view? s) (calendar/loaded? s))))
                                    "loading")
