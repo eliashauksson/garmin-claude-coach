@@ -1,10 +1,11 @@
 (ns coach.views.plan
-  "Plan page: the planned sessions, and the AI proposal review.
+  "Plan page, in three views (?view=): this week's planned sessions with the AI
+  proposal review (week, the default), the endless calendar, and the season plan.
   Nothing enters the plan without an explicit accept."
   (:require [clojure.string :as str]
-            [coach.i18n :refer [t]]
+            [coach.i18n :refer [t tk]]
             [coach.ui :as ui]
-            [coach.views.athlete :as athlete]
+            [coach.views.calendar :as calendar]
             [coach.views.season :as season]
             [coach.views.structure :as st]))
 
@@ -16,14 +17,23 @@
 (defn mondays []
   (let [m (ui/monday (ui/iso-today))] (mapv #(ui/add-days m (* 7 %)) (range weeks-shown))))
 
-(defn urls []
+(def views [["week" (tk "Week")] ["calendar" (tk "Calendar")] ["season" (tk "Season")]])
+
+(defn view-of [route] (get-in route [:params :view] "week"))
+
+(defn urls
+  "What the page loads for the view in the route. The week view's list ends with
+  one proposal per week; the season's plan is also in it for the header line."
+  [route ui-state]
   (let [ms (mondays)]
-    (into [(str "/api/plan?from=" (first ms) "&to=" (ui/add-days (peek ms) 6))
-           "/api/plan/signals"
-           (str "/api/plan/proposals?kind=adjust&monday=" (first ms))
-           athlete/url
-           season/url]
-          (map #(str "/api/plan/proposals?monday=" %) ms))))
+    (case (view-of route)
+      "calendar" (calendar/urls route ui-state)
+      "season"   [season/url]
+      (into [(str "/api/plan?from=" (first ms) "&to=" (ui/add-days (peek ms) 6))
+             "/api/plan/signals"
+             (str "/api/plan/proposals?kind=adjust&monday=" (first ms))
+             season/url]
+            (map #(str "/api/plan/proposals?monday=" %) ms)))))
 
 (defn- short-date [iso]
   (let [d (ui/parse-date iso)] (str (ui/weekdays (.getDay d)) " " (ui/day-month d))))
@@ -251,19 +261,37 @@
                      running? (t "Adjusting…") :else (t "Re-plan rest of week"))]]
              (when open? (proposal-panel adjust workouts ui-state (:monday adjust))))))
 
-(defn view [{:keys [data errors flash] ui-state :ui}
-            [plan-url signals-url adjust-url athlete-url season-url & proposal-urls]]
+(defn- week-view [{:keys [data errors] ui-state :ui} [plan-url signals-url adjust-url season-url & proposal-urls]]
   (let [p     (get data plan-url)
         props (map #(get data %) proposal-urls)]
-    [:div {:style {:display "contents"}}
-     [:div.page-head
-      [:div.title [:div.sub (when p (season-line (:season p) (:race (get data season-url))))] [:h1 (t "Plan")]]]
-     (when flash [:div.error flash])
+    (list
      (when-let [e (get errors plan-url)] [:div.error (t "Could not load: {0}" e)])
-     (when-let [a (get data athlete-url)] (athlete/card a (:athlete ui-state)))
-     (when-let [s (get data season-url)] (season/card s (:season ui-state)))
      (when p (coach-card (get data signals-url) (get data adjust-url) (:workouts p) ui-state))
      (when p
        (for [[wk prop] (map vector (:weeks p) props)]
          [:div {:replicant/key (:monday wk)}
-          (week-card wk (:workouts p) prop ui-state (some? (:plan (get data season-url))))]))]))
+          (week-card wk (:workouts p) prop ui-state (some? (:plan (get data season-url))))])))))
+
+(defn- head [{:keys [route data]} urls]
+  (let [[plan-url _ _ season-url] urls
+        p    (get data plan-url)
+        view (view-of route)]
+    [:div.page-head
+     [:div.title
+      [:div.sub (when (and p (= "week" view)) (season-line (:season p) (:race (get data season-url))))]
+      [:h1 (t "Plan")]]
+     (ui/seg view views [:set-param :view] {:big? true})]))
+
+(defn view
+  "The page for the route's view; `urls` is what (urls route ui) gave."
+  [{:keys [data errors flash route] ui-state :ui :as s} urls]
+  (let [view (view-of route)]
+    [:div {:style {:display "contents"}}
+     (head s urls)
+     (when flash [:div.error flash])
+     (case view
+       "calendar" (calendar/view s)
+       "season"   (let [u (first urls)]
+                    (list (when-let [e (get errors u)] [:div.error (t "Could not load: {0}" e)])
+                          (when-let [x (get data u)] (season/card x (:season ui-state)))))
+       (week-view s urls))]))

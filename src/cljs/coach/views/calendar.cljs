@@ -1,5 +1,5 @@
 (ns coach.views.calendar
-  "Week-per-row calendar, the start page: a summary of the week on the left,
+  "Week-per-row calendar, a view of the Plan page: a summary of the week on the left,
   then Monday to Sunday with each day's health data, activities and planned
   sessions (dashed). A day's health block or date opens the day page."
   (:require [clojure.string :as str]
@@ -276,7 +276,7 @@
     [:div {:style {:display "contents"}}
      [:div.cal-sticky
       [:div.page-head
-       [:div.title [:h1 (t "Calendar")]]
+       [:div.title]
        (status/auth-pill (:auth sync))
        (status/sync-button sync)
        [:select {:aria-label (t "Month") :on {:change [[:cal-month :event/target-value]]}}

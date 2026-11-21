@@ -322,7 +322,7 @@
         [:div.title [:div.sub (if today? (t "Today") (ui/date-short date))] [:h1 (header-date date)]]
         [:div.seg
          [:button {:on {:click [[:navigate (str "#/day/" (ui/add-days date -1))]]}} (t "← Previous day")]
-         [:button {:on {:click [[:navigate (str "#/calendar?week=" (ui/monday date))]]}} (t "Calendar")]
+         [:button {:on {:click [[:navigate (str "#/plan?view=calendar&week=" (ui/monday date))]]}} (t "Calendar")]
          [:button {:disabled (not (neg? (compare date today)))
                    :on {:click [[:navigate (str "#/day/" (ui/add-days date 1))]]}} (t "Next day →")]]]
        (when-let [e (get errors url)] [:div.error (t "Could not load: {0}" e)])
