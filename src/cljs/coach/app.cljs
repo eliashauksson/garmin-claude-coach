@@ -325,146 +325,211 @@
 ;; ---------------------------------------------------------------------------
 ;; Actions (Replicant dispatches data; this interprets it)
 
-(defn handle [action]
-  (let [[kind & args] action]
-    (case kind
-      :navigate     (set! (.-hash js/location) (first args))
-      :set-param    (let [[k v] args]
-                      (set! (.-hash js/location)
-                            (route-hash (assoc-in (:route @state) [:params k] v))))
-      :set-ui       (swap! state assoc-in [:ui (first args)] (second args))
-      :set-in-ui    (swap! state assoc-in (into [:ui] (butlast args)) (last args))
-      :api          (let [[method url body] args]
-                      (swap! state dissoc :flash)
-                      (api! method url body))
-      :sync         (start-sync!)
-      :sync-coros   (start-sync! "/api/coros/sync")
-      :ai-setting   (let [[task field value] args
-                          current (some #(when (= task (:id %)) %)
-                                        (get-in @state [:data costs/settings-url :tasks]))]
-                      (swap! state dissoc :flash)
-                      (api! "PUT" (str costs/settings-url "/" task)
-                            (assoc (select-keys current [:model :effort :delivery :scope]) field value)))
-      :claude-limits (let [{:keys [ui data route]} @state
-                           edits (:claude-limits ui)
-                           value (fn [r field k] (get-in edits [(or (:name r) "") field] (k r)))]
-                       (swap! state dissoc :flash)
-                       (api! "PUT" costs/limits-url
-                             {:limits (vec (for [r (get-in data [(costs/url route) :limits :athletes])]
-                                             {:name        (:name r)
-                                              :daily_usd   (value r :daily :daily_usd)
-                                              :monthly_usd (value r :monthly :monthly_usd)}))}))
-      :claude-check (do (swap! state assoc-in [:ui :claude-check] {:checking true})
-                        (-> (js/fetch "/api/claude/check" #js {:method "POST"})
-                            (.then #(.json %))
-                            (.then (fn [body]
-                                     (let [{:keys [ok error claude]} (js->clj body :keywordize-keys true)]
-                                       (swap! state assoc-in [:ui :claude-check]
-                                              (if ok nil {:checking false :result error
-                                                          :still-out (boolean (:credits_out claude))}))
-                                       (poll-sync!))))
-                            (.catch #(swap! state assoc-in [:ui :claude-check]
-                                            {:checking false :result (.-message %)}))))
-      :claude-key   (let [op   (first args)
-                          path [:ui :claude-key]
-                          [method url body] (case op
-                                              :save   ["PUT" settings/key-url {:key (get-in @state (conj path :input))}]
-                                              :test   ["POST" "/api/claude/test" nil]
-                                              :remove ["DELETE" settings/key-url nil])
-                          done (fn [r]
-                                 (swap! state #(-> %
-                                                   (assoc-in path (cond-> {:result (when (not= op :remove) r)}
-                                                                    (and (= op :save) (not (:ok r)))
-                                                                    (assoc :input (get-in % (conj path :input)))))
-                                                   (cond-> (:key r) (assoc-in [:data settings/key-url] (:key r)))
-                                                   (cond-> (= op :remove) (assoc-in [:data settings/key-url] r))))
-                                 (poll-sync!))]
-                      (swap! state update-in path assoc :busy true :result nil)
-                      (-> (js/fetch url #js {:method method :headers #js {"Content-Type" "application/json"}
-                                             :body (when body (js/JSON.stringify (clj->js body)))})
-                          (.then (fn [res] (.then (.json res) #(let [r (js->clj % :keywordize-keys true)]
-                                                                 (if (.-ok res) r {:ok false :error (:error r)})))))
-                          (.then done)
-                          (.catch #(done {:ok false :error (.-message %)}))))
-      ;; Garmin login from Settings: email + password, then the code if Garmin sends one
-      :garmin-login (let [op   (first args)
-                          path [:ui :garmin-login]
-                          {:keys [email password code]} (get-in @state path)
-                          done (fn [{:keys [status error]}]
-                                 (swap! state update-in path
-                                        #(case status
-                                           "ok"  {:done true}
-                                           "mfa" (assoc % :busy false :step :mfa :code "" :error error)
-                                           (assoc % :busy false :step nil :password "" :error error)))
-                                 (poll-sync!))]
-                      (case op
-                        :cancel (do (swap! state assoc-in path {})
-                                    (js/fetch "/api/garmin/login" #js {:method "DELETE"}))
-                        (do (swap! state update-in path assoc :busy true :error nil :done nil)
-                            (-> (if (= op :code)
-                                  (post-json "/api/garmin/code" {:code code})
-                                  (post-json "/api/garmin/login" {:email email :password password}))
-                                (.then done)
-                                (.catch #(done {:status "error" :error (.-message %)}))))))
-      ;; Coros: off to the Coros sign-in page, which sends the browser back to Settings
-      :coros-login  (do (swap! state assoc-in [:ui :coros] {:busy true})
-                        (-> (post-json "/api/coros/login" {})
-                            (.then #(set! (.-location js/window) (:url %)))
-                            (.catch #(swap! state assoc-in [:ui :coros] {:error (.-message %)}))))
-      :coros-disconnect (when (js/confirm (t "Disconnect Coros? The rides already loaded stay."))
-                          (-> (js/fetch "/api/coros/login" #js {:method "DELETE"})
-                              (.then #(do (swap! state assoc-in [:ui :coros] {}) (poll-sync!)))))
-      :garmin-login-key (let [[op ev] args] (when (= "Enter" (.-key ev)) (handle [:garmin-login op])))
-      ;; the installed app: update, data folder, restore, start with the computer
-      :app-update   (app-request! :app-update "POST" "/api/app/update" nil)
-      :data-dir     (app-request! :data-dir "POST" "/api/app/data-dir"
-                                  {:path (get-in @state [:ui :data-dir :input]) :use_existing (= :use (first args))})
-      :data-dir-cancel (swap! state assoc-in [:ui :data-dir] {})
-      :autostart    (-> (app-request! :autostart "PUT" "/api/app/autostart" {:on (first args)})
-                        (.then #(when (map? %) (swap! state assoc-in [:data settings/app-url] %))))
-      :autostart-set (handle [:autostart (= "on" (first args))])
-      :dismiss-notice (-> (js/fetch "/api/app/notice" #js {:method "DELETE"})
-                          (.then #(fetch! settings/app-url {:force true})))
-      :restore      (when (js/confirm (t "Restore the backup from {0}? The current state is backed up first, and the app restarts." (second args)))
-                      (app-request! :restore "POST" (str status/backup-url "/restore") {:name (first args)}))
-      :restore-file (let [file (some-> ^js (first args) .-target .-files (aget 0))]
-                      (when (and file
-                                 (js/confirm (t "Restore the backup {0}? The current state is backed up first, and the app restarts." (.-name file))))
-                        (swap! state update-in [:ui :restore] assoc :busy true :error nil)
-                        (-> (js/fetch (str status/backup-url "/restore-upload")
-                                      #js {:method "POST" :body file :headers #js {"Content-Type" "application/zip"}})
-                            (.then (fn [res] (.then (.json res) #(if (.-ok res) % (throw (js/Error. (.-error %)))))))
-                            (.then (fn [_] (swap! state assoc-in [:ui :restore :busy] false) (restarting! :restore)))
-                            (.catch (fn [e]
-                                      (swap! state update-in [:ui :restore] assoc
-                                             :busy false :error (.-message e)))))))
-      :quit         (-> (js/fetch "/api/quit" #js {:method "POST"})
-                        (.then #(swap! state assoc :quit true :server-down true)))
-      :load-history (-> (js/fetch "/api/history" #js {:method "POST"})
-                        (.then (fn [_] (poll-sync!))))
-      :backup-started (doseq [ms [3000 10000 30000]] ; the download starts once the zip is written
-                        (js/setTimeout #(fetch! status/backup-url {:force true}) ms))
-      :set-theme    (set-theme! (first args))
-      :heat-show    (do (.setItem js/localStorage "heat-show" (first args))
-                        (swap! state assoc-in [:ui :heat-show] (first args)))
-      :heat-dim     (do (.setItem js/localStorage "heat-dim" (first args))
-                        (swap! state assoc-in [:ui :heat-dim] (first args)))
-      :heat-base    (do (.setItem js/localStorage "heat-base" (first args))
-                        (swap! state assoc-in [:ui :heat-base] (first args)))
-      :heat-colors  (do (.setItem js/localStorage "heat-colors" (first args))
-                        (swap! state assoc-in [:ui :heat-colors] (first args)))
-      :cal-extend   (calendar/extend! state fetch! (first args))
-      :cal-jump     (calendar/jump! state fetch! (first args))
-      :cal-month    (calendar/jump! state fetch! (calendar/month-monday (first args)))
-      :scroll-to    (some-> (js/document.getElementById (first args))
-                            (.scrollIntoView #js {:behavior "smooth" :block "start"}))
-      :back         (if (> (.-length js/history) 1) (.back js/history) (set! (.-hash js/location) "#/"))
-      :set-lang     (set-lang! (first args))
-      :athlete-chat-send (send-athlete-chat!)
-      :athlete-chat-key  (when (= "Enter" (.-key (first args))) (send-athlete-chat!))
-      :athlete-summary   (summarise-athlete!)
-      :athlete-upload    (read-athlete-file! (first args))
-      (js/console.warn "unknown action" (pr-str action)))))
+;; Each action is a function of its arguments (the rest of the action vector);
+;; `actions` maps the action's keyword to it, and `handle` looks it up.
+
+(defn- set-hash! [h] (set! (.-hash js/location) h))
+
+(defn- set-param! [[k v]]
+  (set-hash! (route-hash (assoc-in (:route @state) [:params k] v))))
+
+(defn- api-action! [[method url body]]
+  (swap! state dissoc :flash)
+  (api! method url body))
+
+(defn- ai-setting! [[task field value]]
+  (let [current (some #(when (= task (:id %)) %)
+                      (get-in @state [:data costs/settings-url :tasks]))]
+    (swap! state dissoc :flash)
+    (api! "PUT" (str costs/settings-url "/" task)
+          (assoc (select-keys current [:model :effort :delivery :scope]) field value))))
+
+(defn- claude-limits! [_]
+  (let [{:keys [ui data route]} @state
+        edits (:claude-limits ui)
+        value (fn [r field k] (get-in edits [(or (:name r) "") field] (k r)))]
+    (swap! state dissoc :flash)
+    (api! "PUT" costs/limits-url
+          {:limits (vec (for [r (get-in data [(costs/url route) :limits :athletes])]
+                          {:name        (:name r)
+                           :daily_usd   (value r :daily :daily_usd)
+                           :monthly_usd (value r :monthly :monthly_usd)}))})))
+
+(defn- claude-check! [_]
+  (swap! state assoc-in [:ui :claude-check] {:checking true})
+  (-> (js/fetch "/api/claude/check" #js {:method "POST"})
+      (.then #(.json %))
+      (.then (fn [body]
+               (let [{:keys [ok error claude]} (js->clj body :keywordize-keys true)]
+                 (swap! state assoc-in [:ui :claude-check]
+                        (if ok nil {:checking false :result error
+                                    :still-out (boolean (:credits_out claude))}))
+                 (poll-sync!))))
+      (.catch #(swap! state assoc-in [:ui :claude-check]
+                      {:checking false :result (.-message %)}))))
+
+(defn- claude-key! [[op]]
+  (let [path [:ui :claude-key]
+        [method url body] (case op
+                            :save   ["PUT" settings/key-url {:key (get-in @state (conj path :input))}]
+                            :test   ["POST" "/api/claude/test" nil]
+                            :remove ["DELETE" settings/key-url nil])
+        done (fn [r]
+               (swap! state #(-> %
+                                 (assoc-in path (cond-> {:result (when (not= op :remove) r)}
+                                                  (and (= op :save) (not (:ok r)))
+                                                  (assoc :input (get-in % (conj path :input)))))
+                                 (cond-> (:key r) (assoc-in [:data settings/key-url] (:key r)))
+                                 (cond-> (= op :remove) (assoc-in [:data settings/key-url] r))))
+               (poll-sync!))]
+    (swap! state update-in path assoc :busy true :result nil)
+    (-> (js/fetch url #js {:method method :headers #js {"Content-Type" "application/json"}
+                           :body (when body (js/JSON.stringify (clj->js body)))})
+        (.then (fn [res] (.then (.json res) #(let [r (js->clj % :keywordize-keys true)]
+                                               (if (.-ok res) r {:ok false :error (:error r)})))))
+        (.then done)
+        (.catch #(done {:ok false :error (.-message %)})))))
+
+;; Garmin login from Settings: email + password, then the code if Garmin sends one
+(defn- garmin-login! [[op]]
+  (let [path [:ui :garmin-login]
+        {:keys [email password code]} (get-in @state path)
+        done (fn [{:keys [status error]}]
+               (swap! state update-in path
+                      #(case status
+                         "ok"  {:done true}
+                         "mfa" (assoc % :busy false :step :mfa :code "" :error error)
+                         (assoc % :busy false :step nil :password "" :error error)))
+               (poll-sync!))]
+    (case op
+      :cancel (do (swap! state assoc-in path {})
+                  (js/fetch "/api/garmin/login" #js {:method "DELETE"}))
+      (do (swap! state update-in path assoc :busy true :error nil :done nil)
+          (-> (if (= op :code)
+                (post-json "/api/garmin/code" {:code code})
+                (post-json "/api/garmin/login" {:email email :password password}))
+              (.then done)
+              (.catch #(done {:status "error" :error (.-message %)})))))))
+
+;; Coros: off to the Coros sign-in page, which sends the browser back to Settings
+(defn- coros-login! [_]
+  (swap! state assoc-in [:ui :coros] {:busy true})
+  (-> (post-json "/api/coros/login" {})
+      (.then #(set! (.-location js/window) (:url %)))
+      (.catch #(swap! state assoc-in [:ui :coros] {:error (.-message %)}))))
+
+(defn- coros-disconnect! [_]
+  (when (js/confirm (t "Disconnect Coros? The rides already loaded stay."))
+    (-> (js/fetch "/api/coros/login" #js {:method "DELETE"})
+        (.then #(do (swap! state assoc-in [:ui :coros] {}) (poll-sync!))))))
+
+;; the installed app: update, data folder, restore, start with the computer
+(defn- data-dir! [[mode]]
+  (app-request! :data-dir "POST" "/api/app/data-dir"
+                {:path (get-in @state [:ui :data-dir :input]) :use_existing (= :use mode)}))
+
+(defn- autostart! [[on]]
+  (-> (app-request! :autostart "PUT" "/api/app/autostart" {:on on})
+      (.then #(when (map? %) (swap! state assoc-in [:data settings/app-url] %)))))
+
+(defn- restore! [[backup-name from]]
+  (when (js/confirm (t "Restore the backup from {0}? The current state is backed up first, and the app restarts." from))
+    (app-request! :restore "POST" (str status/backup-url "/restore") {:name backup-name})))
+
+(defn- restore-file! [[ev]]
+  (let [file (some-> ^js ev .-target .-files (aget 0))]
+    (when (and file
+               (js/confirm (t "Restore the backup {0}? The current state is backed up first, and the app restarts." (.-name file))))
+      (swap! state update-in [:ui :restore] assoc :busy true :error nil)
+      (-> (js/fetch (str status/backup-url "/restore-upload")
+                    #js {:method "POST" :body file :headers #js {"Content-Type" "application/zip"}})
+          (.then (fn [res] (.then (.json res) #(if (.-ok res) % (throw (js/Error. (.-error %)))))))
+          (.then (fn [_] (swap! state assoc-in [:ui :restore :busy] false) (restarting! :restore)))
+          (.catch (fn [e]
+                    (swap! state update-in [:ui :restore] assoc
+                           :busy false :error (.-message e))))))))
+
+(defn- quit! [_]
+  (-> (js/fetch "/api/quit" #js {:method "POST"})
+      (.then #(swap! state assoc :quit true :server-down true))))
+
+(defn- load-history! [_]
+  (-> (js/fetch "/api/history" #js {:method "POST"})
+      (.then (fn [_] (poll-sync!)))))
+
+(defn- backup-started! [_]
+  (doseq [ms [3000 10000 30000]] ; the download starts once the zip is written
+    (js/setTimeout #(fetch! status/backup-url {:force true}) ms)))
+
+(defn- heat-setting
+  "An action that stores a heatmap setting in localStorage and in the UI state."
+  [k]
+  (fn [[v]]
+    (.setItem js/localStorage (name k) v)
+    (swap! state assoc-in [:ui k] v)))
+
+(defn- scroll-to! [[id]]
+  (some-> (js/document.getElementById id)
+          (.scrollIntoView #js {:behavior "smooth" :block "start"})))
+
+(defn- back! [_]
+  (if (> (.-length js/history) 1) (.back js/history) (set-hash! "#/")))
+
+(defn- on-enter
+  "An action for a key event: runs `f` on Enter only."
+  [f]
+  (fn [[ev :as args]] (when (= "Enter" (.-key ev)) (f args))))
+
+(def actions
+  "Action keyword -> function of the action's arguments. Replicant's event
+  handlers dispatch these as data (see `dispatch`)."
+  {:navigate          (fn [[h]] (set-hash! h))
+   :set-param         set-param!
+   :set-ui            (fn [[k v]] (swap! state assoc-in [:ui k] v))
+   :set-in-ui         (fn [args] (swap! state assoc-in (into [:ui] (butlast args)) (last args)))
+   :api               api-action!
+   :sync              (fn [_] (start-sync!))
+   :sync-coros        (fn [_] (start-sync! "/api/coros/sync"))
+   :ai-setting        ai-setting!
+   :claude-limits     claude-limits!
+   :claude-check      claude-check!
+   :claude-key        claude-key!
+   :garmin-login      garmin-login!
+   :garmin-login-key  (fn [[op ev]] (when (= "Enter" (.-key ev)) (garmin-login! [op])))
+   :coros-login       coros-login!
+   :coros-disconnect  coros-disconnect!
+   :app-update        (fn [_] (app-request! :app-update "POST" "/api/app/update" nil))
+   :data-dir          data-dir!
+   :data-dir-cancel   (fn [_] (swap! state assoc-in [:ui :data-dir] {}))
+   :autostart         autostart!
+   :autostart-set     (fn [[v]] (autostart! [(= "on" v)]))
+   :dismiss-notice    (fn [_] (-> (js/fetch "/api/app/notice" #js {:method "DELETE"})
+                                  (.then #(fetch! settings/app-url {:force true}))))
+   :restore           restore!
+   :restore-file      restore-file!
+   :quit              quit!
+   :load-history      load-history!
+   :backup-started    backup-started!
+   :set-theme         (fn [[choice]] (set-theme! choice))
+   :heat-show         (heat-setting :heat-show)
+   :heat-dim          (heat-setting :heat-dim)
+   :heat-base         (heat-setting :heat-base)
+   :heat-colors       (heat-setting :heat-colors)
+   :cal-extend        (fn [[n]] (calendar/extend! state fetch! n))
+   :cal-jump          (fn [[d]] (calendar/jump! state fetch! d))
+   :cal-month         (fn [[m]] (calendar/jump! state fetch! (calendar/month-monday m)))
+   :scroll-to         scroll-to!
+   :back              back!
+   :set-lang          (fn [[lang]] (set-lang! lang))
+   :athlete-chat-send (fn [_] (send-athlete-chat!))
+   :athlete-chat-key  (on-enter (fn [_] (send-athlete-chat!)))
+   :athlete-summary   (fn [_] (summarise-athlete!))
+   :athlete-upload    (fn [[ev]] (read-athlete-file! ev))})
+
+(defn handle [[kind & args :as action]]
+  (if-let [f (actions kind)]
+    (f args)
+    (js/console.warn "unknown action" (pr-str action))))
 
 (defn- open-vital!
   "A click, or Enter/Space, on a dashboard card opens its history; a link
