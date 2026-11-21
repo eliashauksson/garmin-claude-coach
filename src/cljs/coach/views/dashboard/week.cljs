@@ -1,6 +1,7 @@
 (ns coach.views.dashboard.week
-  "The start page's \"Today\" and \"This week\" cards: what to train today (with
-  the readiness suggestions) and how the week stands, planned against done."
+  "The start page's \"Today\", \"This week\" and \"Last activity\" cards: what to
+  train today (with the readiness suggestions), how the week stands, planned
+  against done, and the newest activity."
   (:require [clojure.string :as str]
             [coach.i18n :refer [t]]
             [coach.ui :as ui]
@@ -101,3 +102,21 @@
                       :target (when (pos? planned-min) (hours planned-min)) :unit "h"})
                 (bar {:label (t "Training load (TSS)") :done (Math/round done-tss)
                       :target tss_target :unit ""})])))))
+
+;; ---------------------------------------------------------------------------
+;; Last activity
+
+(defn last-activity-card
+  "The newest activity of the overview's :recent list, linking to its page."
+  [{:keys [recent]}]
+  (when-let [{:keys [id date sport name km duration_s avg_hr load]} (first recent)]
+    (let [href (str "#/activities/" id)]
+      (keyed "last-activity"
+             [:section.card.clickable.last-activity {:on {:click [[:navigate href]]}}
+              (ui/label-row {:icon :mountain :accent "--text" :tint "--surface-2" :soft? true
+                             :label (t "Last activity") :right [:span.sub (ui/date-short date)]})
+              [:div.last-activity-head (ui/sport-chip sport) [:a.last-activity-name {:href href} name]]
+              (ui/pills (when km (ui/pill (str (ui/fixed km 1) " km")))
+                        (when (ui/num? duration_s) (ui/pill (ui/h-mm duration_s)))
+                        (when avg_hr (ui/pill (str avg_hr " bpm")))
+                        (when load (ui/pill (t "Load {0}" load))))]))))

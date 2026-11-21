@@ -1,19 +1,15 @@
-(ns coach.views.dashboard
-  "The start page (coach-dashboard-spec.md): how ready am I today, and how is
-  training going toward the goal race? From today to the long term: this
-  morning's readiness and vitals, the goal race, recovery over 30 days,
-  training (with the CTL/ATL/TSB training load), and fitness over 6 months.
-  Everything is worked out on the server (/api/overview); this only formats
-  and draws. Each section is its own namespace under coach.views.dashboard."
+(ns coach.views.today
+  "The start page: what do I do today, and am I ready? The takeaway, today's
+  session, this morning's readiness and vitals, \"How did it go?\", the week
+  and the last activity. The long-term sections are on the Trends page
+  (coach.views.trends). Everything is worked out on the server
+  (/api/overview); this only formats and draws. The cards are namespaces under
+  coach.views.dashboard."
   (:require [coach.i18n :refer [t tk]]
             [coach.ui :as ui]
             [coach.views.dashboard.common :refer [lower tone]]
             [coach.views.dashboard.detail :as detail]
-            [coach.views.dashboard.fitness :as fitness]
             [coach.views.dashboard.morning :as morning]
-            [coach.views.dashboard.race :as race]
-            [coach.views.dashboard.recovery :as recovery]
-            [coach.views.dashboard.training :as training]
             [coach.views.dashboard.week :as week]
             [coach.views.feedback :as feedback]
             [coach.views.load :as load]
@@ -22,14 +18,13 @@
 (def url "/api/overview")
 
 (defn urls
-  "The overview, the training load's (load/urls), the activities
-  waiting for \"How did it go?\", the cycling power, today's readiness
-  check, this week's plan, the form forecast, then the open card's history."
+  "The overview, the training load's (the week card needs its daily TSS), the
+  activities waiting for \"How did it go?\", today's readiness check, this
+  week's plan, then the open card's history."
   [route]
   (let [vital (get-in route [:params :vital])
         trend (detail/url vital (detail/range-of route))]
-    (cond-> (conj (into [url] (load/urls route)) feedback/due-url load/power-url week/readiness-url (week/plan-url)
-                  load/forecast-url)
+    (cond-> [url (first (load/urls route)) feedback/due-url week/readiness-url (week/plan-url)]
       trend (conj trend))))
 
 ;; Garmin's enums as shown (ui/enum); listed so each has a translation.
@@ -111,22 +106,21 @@
                 :else (t "After the first sync.")))
         (step "athlete" athlete (t "Tell the coach about yourself")
               [:span (t "Your goal race, availability and history, in a chat with Claude.") " "
-               [:a {:href "#/plan"} (t "Open the Plan page")]])
+               [:a {:href "#/athlete"} (t "Open your athlete profile")]])
         (step "season" season (t "Create the season plan")
               [:span (t "From then on the coach keeps the next two weeks planned.") " "
-               [:a {:href "#/plan"} (t "Open the Plan page")]])]])))
+               [:a {:href "#/plan?view=season"} (t "Open the season plan")]])]])))
 
 ;; ---------------------------------------------------------------------------
 
 (defn- skeleton []
   [:div.skeleton {:aria-hidden "true"}
+   [:div.skel {:style {:height "140px"}}]
    [:div.row [:div.skel {:style {:flex "1 1 360px" :height "300px"}}]
-    [:div.skel {:style {:flex "1 1 360px" :height "300px"}}]]
-   [:div.skel {:style {:height "260px"}}]
-   [:div.skel {:style {:height "320px"}}]])
+    [:div.skel {:style {:flex "1 1 360px" :height "300px"}}]]])
 
 (defn view [{:keys [data errors sync route] ui-state :ui :as s}]
-  (let [[ov-url load-url volume-url due-url power-url check-url plan-url forecast-url] (urls route)
+  (let [[ov-url load-url due-url check-url plan-url] (urls route)
         d     (get data ov-url)
         plan  (get data plan-url)
         today (or (:date d) (ui/iso-today))]
@@ -144,22 +138,10 @@
        (list
         (takeaway d)
         (week/today-card (get data check-url) plan today)
-        (feedback/due-card ui-state (get data due-url))
         [:div.morning {:replicant/key "morning"}
          (morning/readiness-card (:readiness d))
          (morning/vitals-grid d)]
-        (when plan (week/week-card plan d (get data load-url) today))))
-     [:div {:replicant/key "load" :style {:display "contents"}}
-      (load/section s [load-url volume-url forecast-url])]
-     (when d
-       (list
-        [:div.section-head {:replicant/key "race-head"} [:h2.section-title (t "Goal race")]]
-        [:div.race {:replicant/key "race"}
-         (race/race-hero (:race d))
-         (race/prediction-cards (:race d))]
-        (recovery/recovery d)
-        (training/training d)))
-     [:div {:replicant/key "power" :style {:display "contents"}}
-      (load/power-section s power-url)]
-     (when d (fitness/fitness d))
+        (feedback/due-card ui-state (get data due-url))
+        (when plan (week/week-card plan d (get data load-url) today))
+        (week/last-activity-card d)))
      (when-let [v (get-in route [:params :vital])] (detail/modal s v))]))
