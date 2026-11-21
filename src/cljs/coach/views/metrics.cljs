@@ -8,7 +8,7 @@
 ;; as it comes; :app = calculated here from your data), :what, :how, :read.
 (def groups
   [{:id "morning" :title (tk "This morning")
-    :intro (tk "The cards at the top of the Dashboard. All of them come from your Garmin watch.")
+    :intro (tk "The cards on the Today page. All of them come from your Garmin watch.")
     :items
     [{:id "readiness" :name (tk "Training readiness") :src :garmin
       :what (tk "A score from 0 to 100 for how ready you are for hard training today.")
@@ -67,7 +67,7 @@
       :how (tk "From your VO₂ max trend and your training load.")
       :read (tk "Depends on activities recorded with Garmin, so rides recorded only on another device are missing from it.")}]}
 
-   {:id "training" :title (tk "Training on the Dashboard")
+   {:id "training" :title (tk "Training on the Trends page")
     :intro (tk "The Training cards use Garmin's training load per activity, or the app's estimate for rides Garmin never saw. The Training load section below them uses the app's own TSS.")
     :items
     [{:id "garmin-load" :name (tk "Garmin training load") :src :garmin
@@ -241,7 +241,7 @@
 
 (defn view [{:keys [route]}]
   [:div {:style {:display "contents"}}
-   [:div.page-head [:div [:h1 (t "Metrics")]]]
+   [:div.page-head [:div.title (ui/back-link) [:h1 (t "Metrics")]]]
    (ui/card {}
             [:p
              (t "What each number in the app means, where it comes from and how to read it. Values marked \"From Garmin\" are Garmin's own, shown as they come. Values marked \"Calculated by the app\" are worked out here from your activities, including rides from Coros.")]

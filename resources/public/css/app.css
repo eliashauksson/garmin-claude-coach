@@ -732,7 +732,7 @@ a.info:hover, a.info:focus-visible { color: var(--text); }
 @media (max-width: 760px) {
   /* the main navigation is a tab bar fixed to the bottom: icon over a short label */
   nav.side { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 1100; max-width: none; max-height: none;
-    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; padding: 4px 4px env(safe-area-inset-bottom);
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; padding: 4px 4px env(safe-area-inset-bottom);
     background: var(--surface); border-top: 1px solid var(--line); overflow: visible; }
   nav.side .brand { display: none; }
   nav.side a { flex-direction: column; justify-content: center; gap: 2px; min-width: 0; min-height: 50px; padding: 6px 0;
@@ -793,6 +793,28 @@ a.info:hover, a.info:focus-visible { color: var(--text); }
   .plan-edit input { width: 64px; }
   .map { height: 280px; }
 }
+/* Trends: a bar that jumps between the sections, sticky at the top of the page */
+.jump-bar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; background: var(--page); }
+.jump-bar .pill { min-height: 44px; padding: 0 16px; border: 0; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; background: var(--surface); }
+[id^="tr-"] { scroll-margin-top: 72px; }
+@media (max-width: 480px) { [id^="tr-"] { scroll-margin-top: 112px; } }
+/* "← More": the way back from the pages opened from the More tab */
+a.back { display: inline-flex; align-items: center; min-height: 44px; margin-top: -8px; color: var(--text-2); font-size: 13px; font-weight: 600; text-decoration: none; }
+a.back:hover { color: var(--text); }
+/* the Plan page's view switch: finger-sized buttons */
+.seg.big button { min-height: 44px; padding: 0 16px; }
+/* More: a list of large rows */
+.more-list { display: flex; flex-direction: column; gap: 10px; }
+.more-row { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 12px 18px; border-radius: var(--radius); background: var(--surface); color: var(--text); text-decoration: none; box-shadow: var(--shadow-card); }
+.more-row:hover { background: var(--row-hover); }
+.more-row .ic { width: 36px; height: 36px; border-radius: 10px; flex: none; }
+.more-row .ic svg { width: 20px; height: 20px; }
+.more-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.more-text b { font-size: 15px; font-weight: 700; }
+.more-chevron { font-size: 24px; color: var(--text-3); line-height: 1; }
+/* Today: the last activity */
+.last-activity-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.last-activity-name { font-size: 18px; font-weight: 800; color: var(--text); text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
 /* fingers, not a mouse pointer: bigger targets for the small pill buttons */
 @media (pointer: coarse) {
   button.pill, a.pill, label.pill.upload { padding: 8px 12px; font-size: 13px; }

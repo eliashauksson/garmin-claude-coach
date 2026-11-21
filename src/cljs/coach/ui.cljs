@@ -186,6 +186,8 @@
 (def icon-paths
   {:nav-home       [[:path {:d "M3 11l9-8 9 8"}] [:path {:d "M5 10v10h14V10"}] [:path {:d "M10 20v-6h4v6"}]]
    :nav-calendar   [[:rect {:x 3 :y 5 :width 18 :height 16 :rx 2}] [:path {:d "M3 10h18M8 3v4M16 3v4"}]]
+   :nav-trends     [[:path {:d "M3 17l6-6 4 4 8-8"}] [:path {:d "M15 7h6v6"}]]
+   :nav-more       [[:circle {:cx 5 :cy 12 :r 1.5}] [:circle {:cx 12 :cy 12 :r 1.5}] [:circle {:cx 19 :cy 12 :r 1.5}]]
    :nav-map        [[:path {:d "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"}]]
    :nav-plan       [[:rect {:x 5 :y 4 :width 14 :height 17 :rx 2}] [:path {:d "M9 3h6v3H9zM9 11h6M9 15h6"}]]
    :nav-metrics    [[:path {:d "M5 21V11M12 21V4M19 21v-7"}]]
@@ -256,6 +258,11 @@
    [:span.sp]
    right])
 
+(defn back-link
+  "\"← More\": the way back from a page opened from the More tab."
+  []
+  [:a.back {:href "#/more"} (t "← More")])
+
 (defn card
   "A bento card. :tint is a token suffix (\"green\", \"blue\"…) or nil for white."
   [{:keys [tint flex class]} & children]
@@ -273,8 +280,8 @@
 
 (defn seg
   "Segmented control. `options` is [[value label] ...]; `action` gets the value appended."
-  [current options action & [{:keys [soft?]}]]
-  [:div.seg {:class (when soft? "soft")}
+  [current options action & [{:keys [soft? big?]}]]
+  [:div.seg {:class (remove nil? [(when soft? "soft") (when big? "big")])}
    (for [[v label] options]
      [:button {:replicant/key v
                :class (when (= v current) "on")

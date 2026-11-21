@@ -6,17 +6,19 @@
             [coach.views.athlete :as athlete]
             [coach.views.calendar :as calendar]
             [coach.views.costs :as costs]
-            [coach.views.dashboard :as dashboard]
             [coach.views.day :as day]
             [coach.views.heatmap :as heatmap]
             [coach.views.metrics :as metrics]
+            [coach.views.more :as more]
             [coach.views.plan :as plan]
             [coach.views.settings :as settings]
             [coach.views.status :as status]
+            [coach.views.today :as today]
+            [coach.views.trends :as trends]
             [coach.views.workout :as workout]
             [replicant.dom :as r]))
 
-(defonce state (atom {:route {:page :dashboard} :data {} :loading #{} :errors {} :ui {}}))
+(defonce state (atom {:route {:page :today} :data {} :loading #{} :errors {} :ui {}}))
 
 ;; ---------------------------------------------------------------------------
 ;; Routing (hash based: #/activities?range=90)
@@ -33,24 +35,28 @@
       ;; an activity's page; the activities list and the Data page are gone
       "activities" (if-let [id (second segs)]
                      {:page :activity :id id}
-                     {:page :dashboard :params {}})
-      "calendar"   {:page :calendar :params params}
+                     {:page :today :params {}})
+      ;; old link: the calendar is a view of the Plan page
+      "calendar"   {:page :plan :params (assoc params :view "calendar")}
       "map"        {:page :map :params params}
       ;; one planned session's card
       "workouts"   (if-let [id (second segs)] {:page :workout :id id} {:page :plan :params {}})
       "plan"       {:page :plan :params params}
+      "trends"     {:page :trends :params params}
+      "more"       {:page :more :params {}}
+      "athlete"    {:page :athlete :params {}}
       "day"        {:page :day :date (second segs)}
       "settings"   {:page :settings :params params}
       "metrics"    {:page :metrics :params params}
       ;; old links: the costs now live in Settings
       "costs"      {:page :settings :params (assoc params :tab "claude")}
-      ;; the dashboard is the start page
-      {:page :dashboard :params params})))
+      ;; Today is the start page
+      {:page :today :params params})))
 
 (defn route-hash [{:keys [page id params]}]
   (let [qs (str/join "&" (for [[k v] params :when (some? v)]
                            (str (name k) "=" (js/encodeURIComponent v))))]
-    (str "#/" (case page :dashboard "" :activity (str "activities/" id) :workout (str "workouts/" id) (name page))
+    (str "#/" (case page :today "" :activity (str "activities/" id) :workout (str "workouts/" id) (name page))
          (when (seq qs) (str "?" qs)))))
 
 (defn urls [{:keys [page id] :as route}]
@@ -58,10 +64,11 @@
     :day        [(day/url (:date route))]
     :activity   [(str "/api/activities/" id "?streams=true")]
     :workout    [(workout/url id)]
-    :calendar   (calendar/urls route (:ui @state))
     :map        [heatmap/url]
-    :plan       (plan/urls)
-    :dashboard  (dashboard/urls route)
+    :plan       (plan/urls route (:ui @state))
+    :today      (today/urls route)
+    :trends     (trends/urls route)
+    :athlete    [athlete/url]
     :settings   (settings/urls route (:sync @state))
     []))
 
@@ -285,7 +292,9 @@
       (.then (fn [body]
                (let [lang (.-lang body)]
                  ;; an extra athlete on a server: its name in the tab and on the home screen
-                 (when-let [inst (.-instance body)] (set! (.-title js/document) (str "Coach · " inst)))
+                 (when-let [inst (.-instance body)]
+                   (set! (.-title js/document) (str "Coach · " inst))
+                   (swap! state assoc :instance inst))
                  (when (not= lang @i18n/lang)
                    (apply-lang! lang)
                    (reload-in-lang!)))))
@@ -484,16 +493,18 @@
 ;; ---------------------------------------------------------------------------
 ;; Shell
 
-(def nav-items [[:dashboard "#/" (i18n/tk "Dashboard") :nav-home]
-                [:calendar "#/calendar" (i18n/tk "Calendar") :nav-calendar]
-                [:map "#/map" (i18n/tk "Map") :nav-map]
+(def nav-items [[:today "#/" (i18n/tk "Today") :nav-home]
                 [:plan "#/plan" (i18n/tk "Plan") :nav-plan]
-                [:metrics "#/metrics" (i18n/tk "Metrics") :nav-metrics]
-                [:settings "#/settings" (i18n/tk "Settings") :nav-settings]])
+                [:trends "#/trends" (i18n/tk "Trends") :nav-trends]
+                [:map "#/map" (i18n/tk "Map") :nav-map]
+                [:more "#/more" (i18n/tk "More") :nav-more]])
+
+(defn- calendar-view? [{:keys [route]}]
+  (and (= :plan (:page route)) (= "calendar" (plan/view-of route))))
 
 (defn view [{:keys [route loading] :as s}]
   (let [page (:page route)
-        active (case page :activity :dashboard :day :calendar :workout :plan page)]
+        active (case page (:activity :day :workout) :plan (:metrics :settings :athlete) :more page)]
     [:div.shell
      [:nav.side {:aria-label (t "Main")}
       [:div.brand [:span.logo] "Coach"]
@@ -501,19 +512,21 @@
         [:a {:replicant/key k :href href :class (when (= k active) "active")
              :aria-current (when (= k active) "page")}
          (ui/nav-icon icon) [:span (t label)]])]
-     [:main {:class (remove nil? [(when (and (seq loading) (not (and (= page :calendar) (calendar/loaded? s))))
+     [:main {:class (remove nil? [(when (and (seq loading) (not (and (calendar-view? s) (calendar/loaded? s))))
                                    "loading")
-                                 (when (#{:calendar :map} page) "wide")
+                                 (when (or (calendar-view? s) (= :map page)) "wide")
                                  (when (= :map page) "full")])}
       (status/view s)
       (case page
         :day        (day/view s (first (urls route)) (:date route))
         :activity   (activity/view s (first (urls route)))
         :workout    (workout/view s (first (urls route)))
-        :calendar   (calendar/view s)
         :map        (heatmap/view s)
         :plan       (plan/view s (urls route))
-        :dashboard  (dashboard/view s)
+        :today      (today/view s)
+        :trends     (trends/view s)
+        :athlete    (athlete/view s)
+        :more       (more/view s)
         :settings   (settings/view s (theme-choice))
         :metrics    (metrics/view s))]]))
 

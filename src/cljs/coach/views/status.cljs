@@ -49,10 +49,10 @@
         (banner level (t title) (t "Details: {0}" message) (t hint) (data-up-to last_ok))))))
 
 (defn- connect-banners
-  "Before Garmin or Claude is connected. Not on the Dashboard or Settings,
+  "Before Garmin or Claude is connected. Not on Today or Settings,
   whose setup checklist and connect cards say the same."
   [{:keys [setup admin admin_name]} page]
-  (when (and setup (not (#{:dashboard :settings} page)))
+  (when (and setup (not (#{:today :settings} page)))
     (list
      (when (false? (:garmin setup))
        (banner "warn" (t "Garmin isn't connected yet")
@@ -130,7 +130,7 @@
             [:div.sub.translating {:role "status"} [:span.spinner {:aria-hidden "true"}] " "
              (t "Claude's texts are being translated; they appear here when done.")])
           (connect-banners sync (:page route))
-          (when (and (get-in sync [:update :available]) (= :dashboard (:page route)))
+          (when (and (get-in sync [:update :available]) (= :today (:page route)))
             (banner "warn" (t "A new version is available: {0}" (get-in sync [:update :latest]))
                     nil [:a {:href "#/settings"} (t "Update in Settings › General")]))
           (credits-banner (:claude sync) (:claude-check ui-state))
