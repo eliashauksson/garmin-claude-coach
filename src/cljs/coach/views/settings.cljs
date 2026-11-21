@@ -338,7 +338,7 @@
         tb    (if admin (tab route) "general")]
     [:div {:style {:display "contents"}}
      [:div.page-head
-      [:h1.title (t "Settings")]
+      [:div.title (ui/back-link) [:h1 (t "Settings")]]
       (when admin (ui/seg tb tabs [:set-param :tab]))]
      (if (= "claude" tb)
        (costs/view s (first (urls route sync)))

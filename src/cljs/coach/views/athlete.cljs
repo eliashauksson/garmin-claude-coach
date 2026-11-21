@@ -1,5 +1,5 @@
 (ns coach.views.athlete
-  "Athlete card on the Plan page: a summary of athlete.md, creating or
+  "Athlete page: a summary of athlete.md, creating or
   editing it as a chat with Claude, in a plain text editor or by uploading
   a file, and delete / restore with backups."
   (:require [clojure.string :as str]
@@ -170,3 +170,10 @@
              (when chat (chat-block chat))
              (when editor (editor-block editor (:exists athlete)))
              (backups-block athlete))))
+
+(defn view [{:keys [data errors] ui-state :ui}]
+  (let [a (get data url)]
+    [:div {:style {:display "contents"}}
+     [:div.page-head [:div.title (ui/back-link) [:h1 (t "Athlete")]]]
+     (when-let [e (get errors url)] [:div.error (t "Could not load: {0}" e)])
+     (when a (card a (:athlete ui-state)))]))
