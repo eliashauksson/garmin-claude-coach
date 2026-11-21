@@ -63,7 +63,7 @@
 
 (defn fitness [{:keys [vo2 endurance]}]
   (list
-   [:div.section-head {:replicant/key "fit-head"}
+   [:div.section-head {:replicant/key "fit-head" :id "tr-fitness"}
     [:h2.section-title (t "Fitness") [:span.section-note (t "Last 6 months")]]]
    [:div.chart-grid {:replicant/key "fit"}
     (chart-card {:key "vo2" :info "vo2max" :title (t "VO₂ max (running)")

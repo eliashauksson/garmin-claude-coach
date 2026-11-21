@@ -96,7 +96,7 @@
     [(str "/api/load?from=" from) (str "/api/volume?from=" from)]))
 
 (defn section
-  "The training load, as a section of the Dashboard."
+  "The training load, as a section of the Trends page."
   [{:keys [data errors route] ui-state :ui} [load-url volume-url forecast-url]]
   (let [pmc    (get data load-url)
         fc     (when forecast-url (get data forecast-url))
@@ -109,7 +109,7 @@
         fams   (filter (fn [f] (some #(get % (:id f)) (vals weeks))) ui/families)
         any?   (some #(pos? (:tss %)) pmc)]
     [:div {:style {:display "contents"}}
-     [:div.section-head {:replicant/key "load-head"}
+     [:div.section-head {:replicant/key "load-head" :id "tr-load"}
       [:h2.section-title (t "Training load")]
       (ui/seg range ranges [:set-param :range])]
      (some (fn [u] (when-let [e (get errors u)] [:div.error (t "Could not load: {0}" e)])) [load-url volume-url])

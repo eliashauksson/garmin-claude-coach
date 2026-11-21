@@ -202,7 +202,7 @@
 
 (defn recovery [{:keys [nights days]}]
   (list
-   [:div.section-head {:replicant/key "rec-head"}
+   [:div.section-head {:replicant/key "rec-head" :id "tr-recovery"}
     [:h2.section-title (t "Recovery") [:span.section-note (t "Last 30 days")]]]
    [:div.chart-grid {:replicant/key "rec"}
     (chart-card {:key "hrv" :info "hrv" :wide? true :title (t "Overnight HRV against your baseline")
