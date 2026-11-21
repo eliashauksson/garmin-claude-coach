@@ -276,7 +276,7 @@
 (defn- head
   "Title and view switch: in the same place on every view."
   [route]
-  [:div.page-head
+  [:div.page-head.plan-head
    [:div.title [:h1 (t "Plan")]]
    (ui/seg (view-of route) views [:set-param :view] {:big? true})])
 

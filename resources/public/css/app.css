@@ -124,18 +124,18 @@ h2 { font-size: 13px; font-weight: 600; margin: 0; color: var(--text-2); }
 nav.side { flex: 1 1 200px; max-width: 200px; padding: 24px 14px; align-self: flex-start; position: sticky; top: 0; max-height: 100vh; overflow-y: auto; }
 nav.side .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; padding: 0 14px 20px; }
 nav.side .brand .logo { width: 26px; height: 26px; border-radius: 8px; background: var(--ink); flex: none; }
-nav.side a { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--radius-sm); text-decoration: none; color: var(--text-2); font-weight: 500; }
+nav.side a { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 10px 14px; border-radius: var(--radius-sm); text-decoration: none; color: var(--text-2); font-weight: 500; }
 nav.side a:hover { color: var(--text); }
 nav.side a.active { background: var(--surface); color: var(--text); font-weight: 700; box-shadow: var(--shadow-nav); }
 nav.side .theme-toggle { display: flex; align-items: center; gap: 10px; margin-top: 18px; padding: 8px 14px; border: 0; border-radius: var(--radius-sm); background: none; font: inherit; font-size: 13px; color: var(--text-3); cursor: pointer; }
 nav.side .theme-toggle:hover { color: var(--text); background: var(--surface); }
-main { flex: 999 1 560px; min-width: 0; padding: 24px 28px 48px; max-width: 1100px; display: flex; flex-direction: column; gap: 14px; }
+main { --pad-top: 24px; flex: 999 1 560px; min-width: 0; padding: var(--pad-top) 28px 48px; max-width: 1100px; display: flex; flex-direction: column; gap: 14px; }
 main.loading { opacity: .55; transition: opacity .15s; }
 main.wide { max-width: 1600px; }
 @media (max-width: 760px) {
   .shell:has(main.full) { flex-direction: column; flex-wrap: nowrap; height: 100dvh; }
   .shell main.full { flex: 1; min-height: 0; height: auto; padding: 0 0 calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
-  main { padding: 16px 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 24px); }
+  main { --pad-top: 16px; padding: var(--pad-top) 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 24px); }
 }
 
 /* Page header */
@@ -325,7 +325,7 @@ code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--
 
 /* Calendar: one row per week, summary on the left */
 .card.cal { padding: 14px; gap: 6px; }
-.cal-sticky { position: sticky; top: 0; z-index: 5; background: var(--page); padding: 6px 0 4px; display: flex; flex-direction: column; gap: 8px; }
+.cal-sticky { position: sticky; top: 0; z-index: 5; background: var(--page); margin-top: calc(-1 * var(--pad-top)); padding: var(--pad-top) 0 4px; display: flex; flex-direction: column; gap: 8px; }
 .cal-sticky .cal-head { padding: 0 14px; }
 .card.cal { overflow-anchor: none; }
 .cal-week { scroll-margin-top: 150px; }
@@ -554,7 +554,7 @@ a.btn-ink.inline:hover { color: var(--on-ink); }
 .grow-x { transform-origin: left center; animation: grow-x .6s ease-out both; }
 @keyframes grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .vitals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-@media (max-width: 400px) { .vitals { grid-template-columns: 1fr; } }
+
 .card.vital { min-height: 170px; }
 .vital-visual { margin-top: auto; height: 44px; display: flex; flex-direction: column; justify-content: flex-end; }
 .vital-visual .stages { height: 14px; }
@@ -743,7 +743,7 @@ a.info:hover, a.info:focus-visible { color: var(--text); }
   body:has(input:not([type=checkbox], [type=radio], [type=range]):focus, textarea:focus) nav.side { display: none; }
 }
 @media (max-width: 480px) {
-  main { padding: 12px 12px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 20px); gap: 12px; }
+  main { --pad-top: 12px; padding: var(--pad-top) 12px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 20px); gap: 12px; }
   .row, .chart-grid, .morning, .race, .kpis, .predictions, .vitals { gap: 10px; }
   .card { padding: 16px 16px; }
   h1 { font-size: 26px; }
@@ -793,13 +793,16 @@ a.info:hover, a.info:focus-visible { color: var(--text); }
   .plan-edit input { width: 64px; }
   .map { height: 280px; }
 }
+/* Plan: the title and view switch are in the same place on every view (also in the calendar's sticky header),
+   on one row even on a phone; the scrollbar gutter keeps the width the same whether or not the page scrolls */
+.plan-head .title { min-width: 0; }
+html:has(main.plan) { scrollbar-gutter: stable; }
 /* Trends: a bar that jumps between the sections, sticky at the top of the page */
 .jump-bar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; background: var(--page); }
 .jump-bar .pill { min-height: 44px; padding: 0 16px; border: 0; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; background: var(--surface); }
 [id^="tr-"] { scroll-margin-top: 72px; }
-@media (max-width: 480px) { [id^="tr-"] { scroll-margin-top: 112px; } }
 /* "← More": the way back from the pages opened from the More tab */
-a.back { display: inline-flex; align-items: center; min-height: 44px; margin-top: -8px; color: var(--text-2); font-size: 13px; font-weight: 600; text-decoration: none; }
+a.back { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; margin-top: -8px; color: var(--text-2); font-size: 13px; font-weight: 600; text-decoration: none; }
 a.back:hover { color: var(--text); }
 /* the Plan page's view switch: finger-sized buttons */
 .seg.big button { min-height: 44px; padding: 0 16px; }

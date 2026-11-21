@@ -514,7 +514,8 @@
          (ui/nav-icon icon) [:span (t label)]])]
      [:main {:class (remove nil? [(when (and (seq loading) (not (and (calendar-view? s) (calendar/loaded? s))))
                                    "loading")
-                                 (when (or (calendar-view? s) (= :map page)) "wide")
+                                 (when (= :map page) "wide")
+                                 (when (= :plan page) "plan")
                                  (when (= :map page) "full")])}
       (status/view s)
       (case page

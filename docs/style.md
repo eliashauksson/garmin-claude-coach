@@ -197,7 +197,7 @@ an em dash "—".
     background or border, 13px, `--text-3`. Hover: `--text` on `--surface`. It shows a 16px moon
     icon and "Dark theme" in light mode, a sun and "Light theme" in dark mode.
 - **Main** `main`: `flex: 999 1 560px`, `min-width: 0`, padding 24px 28px 48px, max-width 1100px
-  (1600px with `.wide`, used by the calendar), a flex column with a 14px gap. While loading it
+  (`.wide` lifts it for the Map only), a flex column with a 14px gap. While loading it
   fades to opacity .55 (0.15s).
 - **≤ 760px:** the sidebar becomes a full-width top bar (padding 16px 16px 0) with its links in a
   wrapping row (4px gap); the brand takes its own line (padding 0 0 8px). Main padding becomes
@@ -516,8 +516,8 @@ only).
 ### Plan, Trends and More
 
 - Navigation: five tabs, Today · Plan · Trends · Map · More (bottom tab bar with five columns on phones).
-- Plan has a segmented control (Week · Calendar · Season, `?view=`). Calendar uses `main.wide` (1600px)
-  and the week grid in §5; Week has the coach signals card (amber pulse chip, soft) and week cards with
+- Plan has a segmented control (Week · Calendar · Season, `?view=`). Calendar has the same 1100px column as the
+  other views (so the title and switch never move) and the week grid in §5; Week has the coach signals card (amber pulse chip, soft) and week cards with
   plan rows and proposals; Season has the season card.
 - Trends: sections (training load, goal race, recovery, training, cycling power, fitness) under a sticky
   jump bar of pills.
