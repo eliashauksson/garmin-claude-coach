@@ -28,7 +28,7 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   a new global `atom` that holds an athlete's data must too
 - source: `DataSource` protocol (read-only), `ActivitySource` for activity-only sources · garmin-mcp: DataSource over a local garmin_mcp server · mcp: minimal MCP client (stdio, Streamable HTTP)
 - coros-mcp: ActivitySource over COROS's official remote MCP server (rides from FIT files) · coros-auth: Coros OAuth (PKCE, token in ~/.config/coach/coros.json) · fit: FIT file decoding (Garmin FIT SDK)
-- sync: incremental + backfill from a DataSource into the DB (upserts); `activities-only!`/`coros!` for Coros
+- sync: incremental + backfill from a DataSource into the DB (upserts) · sync.sources: rides from activity-only sources (`activities-only!`, `coros!`), merged with the same ride on Garmin
 - db: SQLite schema/queries; raw source JSON kept on every row
 - metrics: pure TSS/NP/IF/CTL/ATL/TSB, power curve/eFTP/cycling VO2 max etc. · analysis: glue between db and metrics, API queries, eFTP stored as bike FTP (source "estimate")
 - overview: everything behind the dashboard start page (/api/overview)

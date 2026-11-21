@@ -7,7 +7,7 @@
             [coach.fit :as fit]
             [coach.mcp :as mcp]
             [coach.source :as source]
-            [coach.sync :as sync])
+            [coach.sync.sources :as sources])
   (:import (java.time Instant)))
 
 (def records-text
@@ -173,32 +173,32 @@
 (def big 470392722419646469) ; a real Coros id: too big for JavaScript
 
 (deftest local-ids
-  (is (= (+ sync/local-id-base 1790419085) (sync/local-id "2026-09-26T10:38:05")))
-  (is (< (sync/local-id "2099-12-31T23:59:59") 9007199254740991) "the browser can still count it"))
+  (is (= (+ sources/local-id-base 1790419085) (sources/local-id "2026-09-26T10:38:05")))
+  (is (< (sources/local-id "2099-12-31T23:59:59") 9007199254740991) "the browser can still count it"))
 
 (deftest activities-only-sync
   (let [ds      (temp-ds)
         fetched (atom [])
         rides   [{:id (+ big 1) :date "2026-10-01"} {:id (+ big 2) :date "2026-10-02"}]
-        id1     (sync/local-id "2026-10-01T10:00:00")
-        id2     (sync/local-id "2026-10-02T10:00:00")
-        id3     (sync/local-id "2026-10-03T10:00:00")]
+        id1     (sources/local-id "2026-10-01T10:00:00")
+        id2     (sources/local-id "2026-10-02T10:00:00")
+        id3     (sources/local-id "2026-10-03T10:00:00")]
     (testing "new rides are stored under a browser-safe id, with their stream, and scored"
       (is (= [id1 id2]
-             (sync/activities-only! (fake-source rides fetched nil) ds "coros" :coros_synced_through "2026-01-01")))
+             (sources/activities-only! (fake-source rides fetched nil) ds "coros" :coros_synced_through "2026-01-01")))
       (is (= [id1 id2] (ids ds)))
       (is (= [120 121 122] (:hr (db/load-stream ds id2))))
       (is (some? (first (db/query ds ["SELECT * FROM activity_metrics WHERE activity_id = ?" id2]))))
       (is (some? (db/get-state ds :coros_synced_through))))
     (testing "rides already stored aren't fetched again"
       (reset! fetched [])
-      (is (= [id3] (sync/activities-only! (fake-source (conj rides {:id (+ big 3) :date "2026-10-03"}) fetched nil)
+      (is (= [id3] (sources/activities-only! (fake-source (conj rides {:id (+ big 3) :date "2026-10-03"}) fetched nil)
                                           ds "coros" :coros_synced_through "2026-01-01")))
       (is (= [(+ big 3)] @fetched)))
     (testing "a failure halfway keeps what came before and doesn't move the sync date"
       (db/set-state! ds :coros_synced_through "2026-10-01")
       (is (thrown? clojure.lang.ExceptionInfo
-                   (sync/activities-only! (fake-source (into rides
+                   (sources/activities-only! (fake-source (into rides
                                                              [{:id (+ big 4) :date "2026-10-04"}
                                                               {:id (+ big 5) :date "2026-10-05"}])
                                                        fetched (+ big 5))
@@ -207,7 +207,7 @@
       (is (= "2026-10-01" (db/get-state ds :coros_synced_through))))
     (testing "the failure says how many new rides are still missing"
       (let [e (try
-                (sync/activities-only! (fake-source [{:id (+ big 5) :date "2026-10-05"}
+                (sources/activities-only! (fake-source [{:id (+ big 5) :date "2026-10-05"}
                                                      {:id (+ big 6) :date "2026-10-06"}]
                                                     fetched (+ big 5))
                                        ds "coros" :coros_synced_through "2026-01-01")
@@ -224,21 +224,21 @@
       (db/upsert-activities! ds [garmin-copy])
       (db/save-stream! ds (:id garmin-copy) nil "no FIT file")
       (is (= [(:id garmin-copy)]
-             (sync/activities-only! (fake-source [{:id big :date "2025-03-05" :time "10:10:30"}] fetched nil)
+             (sources/activities-only! (fake-source [{:id big :date "2025-03-05" :time "10:10:30"}] fetched nil)
                                     ds "coros" :coros_synced_through "2025-01-01")))
       (is (= [(:id garmin-copy)] (ids ds)))
       (is (= [120 121 122] (:hr (db/load-stream ds (:id garmin-copy)))))
       (testing "and isn't downloaded again"
         (reset! fetched [])
-        (sync/activities-only! (fake-source [{:id big :date "2025-03-05" :time "10:10:30"}] fetched nil)
+        (sources/activities-only! (fake-source [{:id big :date "2025-03-05" :time "10:10:30"}] fetched nil)
                                ds "coros" :coros_synced_through "2025-01-01")
         (is (= [] @fetched)))))
   (testing "a Garmin activity that is a ride already stored from Coros isn't stored again"
     (let [ds (temp-ds)]
-      (sync/activities-only! (fake-source [{:id big :date "2025-03-05" :time "10:10:30"}] (atom []) nil)
+      (sources/activities-only! (fake-source [{:id big :date "2025-03-05" :time "10:10:30"}] (atom []) nil)
                              ds "coros" :coros_synced_through "2025-01-01")
-      (is (sync/garmin-duplicate? ds garmin-copy))
-      (is (not (sync/garmin-duplicate? ds (assoc garmin-copy :start_time_gmt "2025-03-05T16:00:00")))))))
+      (is (sources/garmin-duplicate? ds garmin-copy))
+      (is (not (sources/garmin-duplicate? ds (assoc garmin-copy :start_time_gmt "2025-03-05T16:00:00")))))))
 
 (deftest relink-rides-stored-under-coros-ids
   (let [ds    (temp-ds)
@@ -251,8 +251,8 @@
     (db/save-stream! ds big {:t [0 1] :hr [130 131]} nil)
     (db/save-stream! ds (inc big) {:t [0 1] :hr [140 141]} nil)
     (analysis/save-feedback! ds (inc big) {:rpe 6})
-    (let [new-id (sync/local-id "2025-06-14T17:12:24")]
-      (is (= #{(:id garmin-copy) new-id} (set (sync/relink-stored! ds))))
+    (let [new-id (sources/local-id "2025-06-14T17:12:24")]
+      (is (= #{(:id garmin-copy) new-id} (set (sources/relink-stored! ds))))
       (is (= [(:id garmin-copy) new-id] (ids ds)) "the double is gone, the other renumbered")
       (is (= [130 131] (:hr (db/load-stream ds (:id garmin-copy)))))
       (is (= [140 141] (:hr (db/load-stream ds new-id))))

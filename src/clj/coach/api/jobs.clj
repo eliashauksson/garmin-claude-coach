@@ -14,7 +14,8 @@
             [coach.planner :as planner]
             [coach.readiness-estimate :as readiness-estimate]
             [coach.season :as season]
-            [coach.sync :as sync]))
+            [coach.sync :as sync]
+            [coach.sync.sources :as sources]))
 
 (defonce sync-state (context/per-athlete-atom {:running false}))
 
@@ -36,7 +37,7 @@
   (let [prev (coros-last-sync ds)]
     (if (and (not force) (coros-paused? prev))
       (do (println "Coros: daily file limit reached, waiting until" (:paused_until prev)) prev)
-      (let [r    (try (merge {:ok true} (sync/coros! ds))
+      (let [r    (try (merge {:ok true} (sources/coros! ds))
                       (catch Throwable e
                         (println "Coros sync failed:" (ex-message e))
                         (merge {:ok false} (sync/failure e) (select-keys (ex-data e) [:remaining]))))

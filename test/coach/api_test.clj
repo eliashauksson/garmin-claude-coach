@@ -9,7 +9,7 @@
             [coach.db :as db]
             [coach.paths :as paths]
             [coach.plan]
-            [coach.sync :as sync]
+            [coach.sync.sources :as sources]
             [coach.token :as token]))
 
 (defn- temp-ds []
@@ -162,7 +162,7 @@
         calls (atom 0)
         run   (fn [& [opts]] (#'jobs/run-coros! ds opts))]
     (binding [*out* (java.io.StringWriter.)]
-      (with-redefs [sync/coros! (fn [_] (swap! calls inc)
+      (with-redefs [sources/coros! (fn [_] (swap! calls inc)
                                   (throw (ex-info "You have reached the daily limit of 50 activity FIT files."
                                                   {:kind :rate-limit :remaining 4})))]
         (testing "a daily-limit refusal says how many rides are missing and pauses until tomorrow"
