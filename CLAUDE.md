@@ -14,7 +14,9 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - Data folder: `$COACH_DATA_DIR`, else config.edn, else data/ (coach.paths)
 
 ## Namespaces (src/clj)
-- api: JSON API under /api + static files, 127.0.0.1 only; runs sync/backup jobs; `-main` entry point
+- api: JSON API under /api + static files, 127.0.0.1 only: the route table, server start/stop, `-main` entry point
+  - api.jobs: the background sync/Coros/history jobs and their state (`sync-state`) · api.security: which requests may
+    call the API (other websites, dashboard token, main athlete only) · api.http: JSON responses, request body, 400/500 handling
 - app: installed app: version/updates, autostart, restart, :pending actions in config.edn
 - paths: app/data folder resolution, lock file, server mode + allowed hosts (docs/server.md); `instance`: an extra
   athlete on a server (installer/add-athlete.sh) gets its own config-<name>.edn, data (athletes/<name>/data),

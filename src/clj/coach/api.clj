@@ -1,11 +1,14 @@
 (ns coach.api
   "Local JSON API for the dashboard. Binds to 127.0.0.1 only."
-  (:require [clojure.data.json :as json]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [coach.adapt :as adapt]
             [coach.ai-settings :as ai]
             [coach.analysis :as analysis]
+            [coach.api.http :as http :refer [athlete-tr body guarded iso-date! json-response ok ok-tr wrap-errors]]
+            [coach.api.jobs :as jobs]
+            [coach.api.security :as security
+             :refer [admin-only coros-callback-url same-origin-fetch? token-guard wrap-local-only]]
             [coach.app :as coach-app]
             [coach.athlete :as athlete]
             [coach.athlete-chat :as athlete-chat]
@@ -17,7 +20,6 @@
             [coach.costs :as costs]
             [coach.db :as db]
             [coach.i18n :as i18n]
-            [coach.load-model :as load-model]
             [coach.overview :as overview]
             [coach.paths :as paths]
             [coach.plan :as plan]
@@ -33,156 +35,6 @@
             [ring.adapter.jetty :as jetty]
             [ring.middleware.not-modified :refer [wrap-not-modified]]
             [ring.middleware.params :refer [wrap-params]]))
-
-;; ---------------------------------------------------------------------------
-;; Sync runs in the background; one at a time.
-
-(defonce sync-state (context/per-athlete-atom {:running false}))
-
-(defn- coros-last-sync [ds]
-  (db/state-json ds :coros_last_sync))
-
-(defn- coros-paused?
-  "Coros refused for its daily FIT file limit and the next day hasn't come:
-  asking again would only be refused (and may count against the limit)."
-  [{:keys [kind paused_until]}]
-  (and (= "rate-limit" (some-> kind name)) (string? paused_until)
-       (neg? (compare (season/today) paused_until))))
-
-(defn- run-coros!
-  "Syncs the Coros rides. {:ok true :new n} or {:ok false :kind :message}; a
-  daily-limit refusal adds :remaining and :paused_until (tomorrow), and until
-  then only `force` (the Coros card's Sync now) asks Coros again."
-  [ds & [{:keys [force]}]]
-  (let [prev (coros-last-sync ds)]
-    (if (and (not force) (coros-paused? prev))
-      (do (println "Coros: daily file limit reached, waiting until" (:paused_until prev)) prev)
-      (let [r    (try (merge {:ok true} (sync/coros! ds))
-                      (catch Throwable e
-                        (println "Coros sync failed:" (ex-message e))
-                        (merge {:ok false} (sync/failure e) (select-keys (ex-data e) [:remaining]))))
-            r    (cond-> r
-                   (= :rate-limit (:kind r)) (assoc :paused_until (season/add-days (season/today) 1)))
-            done (str (java.time.Instant/now))
-            r    (assoc r :finished_at done :last_ok (if (:ok r) done (:last_ok prev)))]
-        (try (db/set-state! ds :coros_last_sync (json/write-str r)) (catch Throwable _))
-        ;; new rides with power refine the power calibration (coach.epoc)
-        (when (and (:ok r) (pos? (or (:new r) 0)))
-          (try (load-model/calibrate-power! ds)
-               (catch Throwable e (println "Power calibration failed:" (ex-message e)))))
-        r))))
-
-(defn- coros-status
-  "For Settings: the login and the last Coros sync."
-  [ds]
-  (assoc (coros-auth/status)
-         :last_sync (coros-last-sync ds)))
-
-(defn- taking-turns
-  "Runs `f` when no other athlete on this server is syncing (coach.paths/
-  one-at-a-time); meanwhile the state says :waiting. A lock that can't be
-  taken (a read-only app folder) doesn't stop the sync."
-  [f]
-  (let [ran (atom false)
-        run #(do (swap! sync-state dissoc :waiting) (reset! ran true) (f))]
-    (try (paths/one-at-a-time "sync.lock" #(swap! sync-state assoc :waiting true) run)
-         (catch java.io.IOException e
-           (if @ran (throw e) (do (println "Sync lock unavailable:" (ex-message e)) (run)))))))
-
-(defn- in-background!
-  "Runs the sync job `f` in the background, taking turns with the other
-  athletes. Should it fail unexpectedly, the sync isn't left \"running\"."
-  [f]
-  (future
-    (try (taking-turns f)
-         (catch Throwable e
-           (println "Sync job failed:" (ex-message e))
-           (swap! sync-state assoc :running false :job nil :waiting false))
-         ;; a sync is the app's peak: hand that memory back to the others on the server now, not eventually
-         (finally (System/gc)))))
-
-(defn- run-job!
-  "Runs `f` with a Garmin source in the background unless a sync or history
-  load is already running (one Garmin session at a time), and records the
-  result like a sync. `job` names it (\"sync\" or \"history\"); `after` runs
-  on success and may add to the result. Nothing starts before Garmin is
-  connected. Returns the state."
-  [ds job f & [after]]
-  (if-not (auth/connected?)
-    @sync-state
-    (let [[old _] (swap-vals! sync-state #(if (:running %) % (assoc % :running true :job job
-                                                                      :started_at (str (java.time.Instant/now)))))]
-      (when-not (:running old)
-        (in-background!
-         (fn []
-           ;; first backup of the day, before anything is written
-           (try (backup/daily! ds)
-                (catch Throwable e (println "Daily backup failed:" (ex-message e))))
-           (let [result (try
-                          (let [src ((requiring-resolve 'coach.garmin-mcp/start!))]
-                            (try (f src)
-                                 (finally ((requiring-resolve 'coach.garmin-mcp/stop!) src))))
-                          {:ok true}
-                          (catch Throwable e
-                            (println (str job " failed:") (ex-message e))
-                            (merge {:ok false} (sync/failure e))))
-                 ;; rides from a Coros bike computer: on their own, so a Coros
-                 ;; problem never fails the Garmin sync (and the other way round)
-                 result (cond-> result (coros-auth/connected?) (assoc :coros (run-coros! ds)))
-                 result (if (and (:ok result) after) (after result) result)
-                 done   (str (java.time.Instant/now))
-                 result (assoc result :finished_at done)]
-             (try (sync/record-result! ds result) (catch Throwable _))
-             (swap! sync-state assoc :running false :job nil :finished_at done :last_result result
-                    :last_ok (if (:ok result) done (:last_ok @sync-state)))))))
-      @sync-state)))
-
-(defn- run-coros-sync!
-  "Starts a sync of the Coros rides alone (job \"coros\"), unless a sync is
-  running or Coros isn't connected. Needs no Garmin login. `force`: ask Coros
-  even while paused for its daily limit. Returns the state."
-  [ds & [force]]
-  (if-not (coros-auth/connected?)
-    @sync-state
-    (let [[old _] (swap-vals! sync-state #(if (:running %) % (assoc % :running true :job "coros"
-                                                                      :started_at (str (java.time.Instant/now)))))]
-      (when-not (:running old)
-        (in-background!
-         (fn []
-           (try (backup/daily! ds)
-                (catch Throwable e (println "Daily backup failed:" (ex-message e))))
-           (let [r (try (run-coros! ds {:force force})
-                        (catch Throwable e {:ok false :message (ex-message e)}))]
-             (swap! sync-state assoc :running false :job nil
-                    :finished_at (or (:finished_at r) (str (java.time.Instant/now))))))))
-      @sync-state)))
-
-(defn- run-sync!
-  "Starts an incremental sync unless one is running. Returns the state.
-  Without a Garmin login only the Coros rides sync (when connected)."
-  [ds]
-  (if (and (not (auth/connected?)) (coros-auth/connected?))
-    (run-coros-sync! ds)
-    (run-job! ds "sync" #(sync/incremental! % ds)
-              ;; new data may call for adapting the plan; a failure here isn't a sync failure.
-              ;; Without credits every Claude request would fail, so the check waits.
-              (fn [result]
-                ;; the readiness estimate learns from Garmin's newest scores
-                (try (readiness-estimate/refit! ds (season/today))
-                     (catch Throwable e (println "Readiness refit failed:" (ex-message e))))
-                ;; our training load (rides Garmin never saw) learns from Garmin's newest loads
-                (try (load-model/update! ds)
-                     (catch Throwable e (println "Training load refit failed:" (ex-message e))))
-                (cond
-                  (costs/credits-out ds) (assoc result :plan_check_skipped "no Claude credits")
-                  (costs/limit-reached ds) (assoc result :plan_check_skipped "Claude spending limit reached")
-                  :else (try (assoc result :proposals (:proposed (planner/check! ds)))
-                             (catch Throwable e (assoc result :plan_check_error (ex-message e)))))))))
-
-(defn- run-history!
-  "Loads everything before the first sync (coach.sync/load-history!)."
-  [ds]
-  (run-job! ds "history" #(sync/load-history! % ds)))
 
 (defn- setup
   "What a new install still needs, for the Dashboard's checklist and the
@@ -211,47 +63,12 @@
              :key (claude/key-status)})
         (assoc r :key (claude/key-status))))))
 
-(defn- load-sync-state!
-  "After a restart: the last recorded result, so a failure is still shown."
-  [ds]
-  (let [r (sync/last-result ds)]
-    (swap! sync-state merge
-           {:last_ok (db/get-state ds :last_ok_sync)}
-           (when r {:last_result r :finished_at (:finished_at r)}))))
-
-;; ---------------------------------------------------------------------------
-
-(defn- json-response [status body]
-  {:status  status
-   :headers {"Content-Type" "application/json; charset=utf-8"}
-   :body    (json/write-str body)})
-
-(defn- ok [body] (json-response 200 body))
-
-(defn- ok-tr
-  "ok, with Claude's texts in the current dashboard language (coach.translate)."
-  [ds body]
-  (ok (translate/localize ds @i18n/lang body)))
-
-(defn- athlete-tr
-  "The athlete status with its overview (Claude's) in the current language;
-  athlete.md itself is never translated."
-  [ds status]
-  (update status :summary #(when % (translate/localize ds @i18n/lang %))))
-
 (defn- days-ago [n] (season/add-days (season/today) (- n)))
 
 (defn- date-range
   "from/to query params with a default window ending today."
   [params default-days]
   [(get params "from" (days-ago default-days)) (get params "to" (season/today))])
-
-(defn- iso-date!
-  "`s` when it is a YYYY-MM-DD date, else an error for the athlete."
-  [s]
-  (if (and (string? s) (re-matches #"\d{4}-\d{2}-\d{2}" s))
-    s
-    (throw (ex-info (i18n/t "Not a date: {0}" s) {}))))
 
 (defn- auth-status [ds] (auth/status ds))
 
@@ -277,51 +94,6 @@
     {:ok true :claude (claude-status ds)}
     (catch Throwable e
       {:ok false :error (ex-message e) :claude (claude-status ds)})))
-
-(defn- body [req]
-  (some-> (:body req) slurp not-empty (json/read-str :key-fn keyword)))
-
-;; ---------------------------------------------------------------------------
-;; A loopback token for the two routes a mere local process must not reach:
-;; the bulk data export and the self-update. wrap-local-only already stops
-;; other *websites*; the token additionally stops header-less local clients
-;; (curl, a sandboxed process) that can't read this user's files. The page
-;; gets the token from GET /api/token, which answers only a same-origin fetch.
-
-(defn- request-token [req]
-  (or (get-in req [:headers "x-coach-token"])
-      (get (:query-params req) "token")))
-
-(defn- same-origin-fetch?
-  "A fetch the dashboard page itself made. Browsers set Sec-Fetch-Site on
-  every request; curl and other scripts don't, so they can't read the token."
-  [req]
-  (= "same-origin" (get-in req [:headers "sec-fetch-site"])))
-
-(defn- token-guard
-  "Wraps a handler so it answers only when the request carries the token."
-  [handler]
-  (fn [req]
-    (if (token/valid? (request-token req))
-      (handler req)
-      (json-response 403 {:error (i18n/t "This action needs the dashboard token. Reload the page and try again.")}))))
-
-(defn- admin-only
-  "Wraps a handler so it answers only the main athlete; the extra athletes on a
-  server get a 403."
-  [handler]
-  (fn [req]
-    (if (paths/instance)
-      (json-response 403 {:error (i18n/t "Only {0} can do this." (paths/main-name))})
-      (handler req))))
-
-(defn- guarded
-  "Turns bad input (ex-info) into a 400 instead of a 500."
-  [handler]
-  (fn [req]
-    (try (handler req)
-         (catch clojure.lang.ExceptionInfo e
-           (json-response 400 {:error (ex-message e)})))))
 
 (defn readiness-today
   "Readiness check (principles: Monitoring) for today's planned workouts."
@@ -433,7 +205,7 @@
 (defn- busy-response
   "Restoring or moving the data waits for a running sync or history load."
   []
-  (when (:running @sync-state)
+  (when (:running @jobs/sync-state)
     (json-response 409 {:error (i18n/t "Wait until the sync has finished, then try again.")})))
 
 (defn- restart-soon!
@@ -457,22 +229,6 @@
    :admin_name       (paths/main-name)
    :update           (coach-app/update-status)
    :notice           (coach-app/notice-message)})
-
-(declare host-name)
-
-(defn coros-callback-url
-  "Where Coros sends the browser back to after its sign-in: the address this
-  page was opened at when that is an allowed host (a phone on a server's
-  Tailscale address), else 127.0.0.1. Behind `tailscale serve` the Host has
-  no port and the page is HTTPS; a proxy's X-Forwarded-Proto wins."
-  [{:keys [headers server-port]}]
-  (let [host (some-> (get headers "host") str/trim str/lower-case)
-        name (host-name host)]
-    (if (and name ((paths/allowed-hosts) name))
-      (let [proto (or (some-> (get headers "x-forwarded-proto") (str/split #",") first str/trim not-empty)
-                      (if (= name host) "https" "http"))]
-        (str proto "://" host "/api/coros/callback"))
-      (str "http://127.0.0.1:" server-port "/api/coros/callback"))))
 
 (defn app-routes []
   ["/app"
@@ -545,22 +301,22 @@
     ["/garmin/login" {:post   (fn [req]
                                 (let [{:keys [email password]} (body req)
                                       r (auth/start-login! ds email password)]
-                                  (when (= "ok" (:status r)) (run-sync! ds))
+                                  (when (= "ok" (:status r)) (jobs/run-sync! ds))
                                   (ok r)))
                       :delete (fn [_] (auth/cancel-login!) (ok {:status "cancelled"}))}]
     ["/garmin/code"  {:post (fn [req]
                               (let [r (auth/submit-code! ds (:code (body req)))]
-                                (when (= "ok" (:status r)) (run-sync! ds))
+                                (when (= "ok" (:status r)) (jobs/run-sync! ds))
                                 (ok r)))}]
     ;; Coros: sign in on Coros's own page, which sends the browser back to
     ;; /coros/callback; a new login starts a sync
     ["/coros/login"    {:post   (fn [req]
                                   (ok (coros-auth/start-login! (coros-callback-url req))))
                         :delete (fn [_] (ok (coros-auth/disconnect!)))}]
-    ["/coros/sync"     {:post (fn [_] (json-response 202 (run-coros-sync! ds true)))}]
+    ["/coros/sync"     {:post (fn [_] (json-response 202 (jobs/run-coros-sync! ds true)))}]
     ["/coros/callback" {:get (fn [{:keys [query-params]}]
                                (try (coros-auth/finish-login! (update-keys query-params keyword))
-                                    (when @syncing? (run-sync! ds))
+                                    (when @syncing? (jobs/run-sync! ds))
                                     (catch clojure.lang.ExceptionInfo e
                                       (println "Coros login failed:" (ex-message e))))
                                ;; not a redirect: the browser would still count the next page as
@@ -645,7 +401,7 @@
                       :delete (admin-only (fn [_] (ok (claude/remove-key!))))}]
     ["/claude/test"  {:post (fn [_] (ok (assoc (claude-check! ds) :key (claude/key-status))))}]
     ;; everything before the first sync, in the background
-    ["/history"      {:post (fn [_] (json-response 202 (run-history! ds)))}]
+    ["/history"      {:post (fn [_] (json-response 202 (jobs/run-history! ds)))}]
     ;; the language of the dashboard, the server's messages and what Claude writes
     ["/lang"        {:get (fn [_] (ok {:lang @i18n/lang :languages i18n/languages
                                           :instance (paths/instance-label)}))
@@ -658,14 +414,14 @@
                                        ;; with "selected language only", fill in the new language
                                        (claude/translate-soon!)
                                        (ok {:lang lang}))))}]
-    ["/sync"        {:get  (fn [_] (ok (assoc @sync-state :auth (auth-status ds) :claude (claude-status ds)
-                                          :coros (coros-status ds)
+    ["/sync"        {:get  (fn [_] (ok (assoc @jobs/sync-state :auth (auth-status ds) :claude (claude-status ds)
+                                          :coros (jobs/coros-status ds)
                                           :admin (nil? (paths/instance)) :admin_name (paths/main-name)
                                           :started_at started-at ; the page notices a restart by this
                                           :update (coach-app/update-status)
                                           :translating (translate/running?)
                                           :setup (setup ds) :history (sync/history-status ds))))
-                     :post (fn [_] (json-response 202 (assoc (run-sync! ds) :auth (auth-status ds))))}]
+                     :post (fn [_] (json-response 202 (assoc (jobs/run-sync! ds) :auth (auth-status ds))))}]
     ["/backup"
      ["" {:get  (fn [_] (ok (backup/status)))
           :post (fn [_] (backup/create! ds) (ok (backup/status)))}]
@@ -711,78 +467,6 @@
                  (str/replace "\"/js/main.js\"" (str "\"/js/main.js?v=" v "\""))
                  (str/replace "\"/css/app.css\"" (str "\"/css/app.css?v=" v "\"")))})
     {:status 404 :body "index.html missing"}))
-
-(defn- wrap-errors
-  "Unexpected exceptions become a JSON 500 with the message (and a log line),
-  so the page can say what went wrong instead of \"HTTP 500\"."
-  [handler]
-  (fn [req]
-    (try (handler req)
-         (catch Throwable e
-           (println "Error on" (:request-method req) (:uri req) "-" (str e))
-           (json-response 500 {:error (str "Server error: " (or (ex-message e) (str (class e))))})))))
-
-(def ^:private loopback-hosts #{"127.0.0.1" "localhost" "[::1]"})
-
-(defn- local-hosts
-  "This computer's names, plus the host names allowed to open the dashboard
-  on a server (coach.paths/allowed-hosts, e.g. a Tailscale address)."
-  []
-  (into loopback-hosts (paths/allowed-hosts)))
-
-(defn- host-name
-  "\"127.0.0.1\" from a Host header like \"127.0.0.1:8080\"; also for [::1]:8080."
-  [h]
-  (when h (second (re-matches #"(?i)(\[[^\]]*\]|[^:]*)(?::\d+)?" (str/trim h)))))
-
-(defn- local-origin? [origin]
-  (boolean (some->> origin (re-matches #"(?i)https?://([^/]+)") second host-name str/lower-case ((local-hosts)))))
-
-(defn foreign-request?
-  "Pure: whether a request comes from another website rather than this page.
-  The server listens on 127.0.0.1 only (on a server, a proxy such as
-  `tailscale serve` passes the allowed host names on), but any website open in the browser
-  can still send requests there, or rename itself to 127.0.0.1 (DNS
-  rebinding) to read the answers. So:
-  - the Host must be this computer or an allowed host (a rebound site still
-    sends its own name);
-  - the browser's Sec-Fetch-Site must not say another site sent it;
-  - a changing request with an Origin must come from this computer.
-  Requests without those headers (curl, the installer) are fine.
-  Two exceptions to the second rule:
-  - opening the page itself (a top-level page load, not /api): a phone's
-    home-screen shortcut or a link elsewhere sends \"cross-site\". The other
-    site can't read the page or frame it, and the page's own requests are
-    same-origin again;
-  - Coros's sign-in page sending the browser back to /api/coros/callback.
-    That GET only completes a login this app started, with the one-time state
-    it made up (coach.coros-auth), and answers with nothing but a redirect."
-  [{:keys [headers request-method uri]}]
-  (let [host   (get headers "host")
-        site   (get headers "sec-fetch-site")
-        origin (get headers "origin")
-        get?   (#{:get :head} request-method)
-        page?  (and get?
-                    (= "navigate" (get headers "sec-fetch-mode"))
-                    (= "document" (get headers "sec-fetch-dest"))
-                    (not (str/starts-with? (or uri "") "/api/")))]
-    (boolean
-     (or (and host (not ((local-hosts) (some-> (host-name host) str/lower-case))))
-         (and (#{"cross-site" "same-site"} site)
-              (not page?)
-              (not (and (= :get request-method) (= "/api/coros/callback" uri))))
-         (and origin (not (#{:get :head} request-method)) (not (local-origin? origin)))))))
-
-(defn- wrap-local-only
-  "Refuses requests from other websites (see foreign-request?)."
-  [handler]
-  (fn [req]
-    (if (foreign-request? req)
-      (do (println "Refused a request from another website:" (:request-method req) (:uri req)
-                   (get-in req [:headers "origin"]) (get-in req [:headers "host"])
-                   (get-in req [:headers "sec-fetch-site"]))
-          (json-response 403 {:error "Requests from other websites are not allowed."}))
-      (handler req))))
 
 (defn- wrap-revalidate
   "The page and its files are checked with the server on every load (a 304
@@ -852,9 +536,9 @@
 
 (defn- due-for-sync? []
   (let [hour (.getHour (java.time.LocalTime/now))
-        last (some-> (:finished_at @sync-state) java.time.Instant/parse)]
+        last (some-> (:finished_at @jobs/sync-state) java.time.Instant/parse)]
     (and (<= 6 hour 21)
-         (not (:running @sync-state))
+         (not (:running @jobs/sync-state))
          (or (nil? last)
              (.isBefore last (.minus (java.time.Instant/now) (java.time.Duration/ofHours sync-every-hours)))))))
 
@@ -862,7 +546,7 @@
   "Checks every 15 minutes; syncs when the last sync is over 2 h old (06-22 h)."
   [ds]
   (let [ex (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
-    (.scheduleAtFixedRate ex (context/athlete-fn #(try (when (due-for-sync?) (run-sync! ds)) (catch Throwable _)))
+    (.scheduleAtFixedRate ex (context/athlete-fn #(try (when (due-for-sync?) (jobs/run-sync! ds)) (catch Throwable _)))
                           15 15 java.util.concurrent.TimeUnit/MINUTES)
     (reset! scheduler ex)))
 
@@ -878,7 +562,7 @@
      (reset! server (jetty/run-jetty (app ds) {:port port :host "127.0.0.1" :join? false :max-threads 16}))
      (println (str "Dashboard on http://127.0.0.1:" port "/"))
      (println (auth/describe (auth/status ds)))
-     (load-sync-state! ds)
+     (jobs/load-sync-state! ds)
      (costs/use-db! ds)
      (ai/use-db! ds)
      (translate/use-db! ds)
@@ -899,7 +583,7 @@
      (when-not @update-checker (start-update-checker!)) ; once, however many athletes
      (swap! started-athletes #(vec (distinct (conj % (context/athlete)))))
      (when sync?
-       (run-sync! ds)
+       (jobs/run-sync! ds)
        (start-background-sync! ds))
      @server)))
 
