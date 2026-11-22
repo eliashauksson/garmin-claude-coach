@@ -1,7 +1,6 @@
 (ns coach.summits
   "Pure. Peak bagging: which tiles an activity needs, which peaks a GPS stream bagged, which peaks to show,
-  the progress of a peak list, and how the names of other sources (peak lists, swisstopo, OpenStreetMap)
-  are matched to the summits of the prominence dataset."
+  how the names of other sources (swisstopo, OpenStreetMap) are matched to the summits of the prominence dataset."
   (:require [clojure.string :as str]))
 
 (def radius-m "A track bags a peak when it passes within this distance of it." 75.0)
@@ -200,22 +199,10 @@
 ;; What to show
 
 (defn visible?
-  "Whether a peak is shown: it is on a list, or its prominence (from the prominence dataset) reaches
-  `min-prominence`. A peak without a prominence is hidden."
-  [{:keys [prominence listed]} min-prominence]
-  (boolean (or listed
-               (and prominence (>= prominence (or min-prominence 0))))))
-
-(defn list-progress
-  "A peak list against the bagged peak ids: {:total :bagged :peaks [{… :bagged? bool}]}. A listed peak
-  says which peak it is in `:peak_id`."
-  [{:keys [peaks] :as lst} bagged-ids]
-  (let [bagged (set bagged-ids)
-        ps (mapv #(assoc % :bagged? (contains? bagged (:peak_id %))) peaks)]
-    (assoc (dissoc lst :peaks)
-           :total (count ps)
-           :bagged (count (filter :bagged? ps))
-           :peaks ps)))
+  "Whether a peak is shown: its prominence (from the prominence dataset) reaches `min-prominence`. A peak
+  without a prominence is hidden."
+  [{:keys [prominence]} min-prominence]
+  (boolean (and prominence (>= prominence (or min-prominence 0)))))
 
 ;; ---------------------------------------------------------------------------
 ;; The prominence dataset's summits (coach.peaks): ids, and which name belongs to which summit

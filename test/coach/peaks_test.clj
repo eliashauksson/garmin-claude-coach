@@ -126,24 +126,6 @@
     (peaks/set-min-prominence! ds 100)
     (is (= [id-big] (map :id (peaks/visible-peaks ds))))))
 
-(deftest listed-peaks
-  (let [ds (temp-ds) asked (atom [])]
-    (with-redefs [peaks/lists (fn [] [{:id "l" :name "L"
-                                       :peaks [{:osm_id 9 :name "Listed Horn" :ele 3001.0 :lat 46.5003 :lon 8.0}
-                                               {:osm_id 10 :name "Lonely" :ele 500.0 :lat 10.0 :lon 10.0}]}])]
-      (peaks/seed-lists!)
-      (testing "a listed peak is shown before any block is there, under its own id"
-        (is (= #{9 10} (set (map :id (peaks/visible-peaks ds))))))
-      (peaks/add-squares! ["46,8"])
-      (with-release (fake-release asked) #(#'peaks/load-datasets!))
-      (testing "the dataset's summit takes it over: named and listed; the placeholder is gone; the list follows"
-        (is (= #{id-big 10} (set (map :id (filter :listed (peaks/visible-peaks ds))))))
-        (is (= "Listed Horn" (:name (peak-named ds "Listed Horn"))) "the list's name outranks swisstopo's")
-        (let [l (first (:lists (peaks/summary ds)))]
-          (peaks/bag! ds id-big "2026-08-01")
-          (is (= 1 (:bagged (first (:lists (peaks/summary ds))))))
-          (is (= 2 (:total l))))))))
-
 (deftest detection-and-dismissing
   (let [[ds _] (set-up!)]
     (activity! ds 10 "hiking")
@@ -316,8 +298,8 @@
 
 (deftest compact-map-rows
   (let [[ds _] (set-up!)]
-    (is (= [[id-big 46.5 8.0 3000.0 400 0 false "Gross Horn" nil]
-            [id-bump 46.6 8.0 1200.0 35 0 false nil nil]]
+    (is (= [[id-big 46.5 8.0 3000.0 400 0 "Gross Horn" nil]
+            [id-bump 46.6 8.0 1200.0 35 0 nil nil]]
            (sort-by first (peaks/map-peaks ds {:zoom 12 :bbox [46.0 7.5 47.0 8.5]}))))))
 
 (deftest the-map-gets-what-its-zoom-draws

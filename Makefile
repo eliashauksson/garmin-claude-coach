@@ -1,4 +1,4 @@
-.PHONY: run start offline watch build app sync status test sky peak-lists prominence-data official-names lint hooks backup backups restore
+.PHONY: run start offline watch build app sync status test sky prominence-data official-names lint hooks backup backups restore
 
 # Dashboard on http://127.0.0.1:8081/, syncs on start and every 2 h.
 # (8080 is the installed app's.) Data: data/, or COACH_DATA_DIR=… make run
@@ -34,10 +34,6 @@ test:
 # The 3D map's night sky: star catalogue + Milky Way image into resources/public/sky/ (dev/sky_data.clj)
 sky:
 	clojure -M dev/sky_data.clj
-
-# The Peaks page's lists: resources/peaks/lists.edn from OSM + open elevation tiles (dev/peak_lists.clj), check by hand
-peak-lists:
-	clojure -M dev/peak_lists.clj
 
 # Cuts the world prominence results into the blocks of the peaks-data release (dev/prominence_data.clj)
 prominence-data:

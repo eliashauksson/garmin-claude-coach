@@ -20,7 +20,7 @@
     (row {:href "#/athlete" :icon :heart :accent "--blue" :tint "--tint-blue" :title (t "Athlete")
           :sub (t "Your goal race, availability and history for the coach")})
     (row {:href "#/peaks" :icon :mountain :accent "--green" :tint "--tint-green" :title (t "Peaks")
-          :sub (t "The summits you have reached, and your peak lists")})
+          :sub (t "The summits you have reached")})
     (row {:href "#/metrics" :icon :nav-metrics :accent "--purple" :tint "--tint-purple"
           :title (t "Metrics explained") :sub (t "What each number means and where it comes from")})
     (row {:href "#/settings" :icon :nav-settings :accent "--text-2" :tint "--surface-2" :title (t "Settings")

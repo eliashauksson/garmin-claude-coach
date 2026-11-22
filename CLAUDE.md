@@ -54,11 +54,9 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   Flow per requested 1° square (`run-once!`): `load-datasets!` (the square's block into `peaks`, Switzerland's official names
   once, then `rematch-square!`) → detection for activities whose blocks are loaded → `load-names!` (OSM `natural=peak` named
   nodes per tile through Overpass, then rematch) → `relink-summits!`. Rematching is from scratch and idempotent.
-  A dataset summit's id comes from its position (`summits/dataset-peak-id`, ≥ 10^13); a listed peak the dataset lacks keeps
-  its OSM id as a placeholder row. Names: peak lists > swisstopo (Switzerland only) > OSM, one donor per summit
+  A dataset summit's id comes from its position (`summits/dataset-peak-id`, ≥ 10^13). Names: swisstopo (Switzerland only) > OSM, one donor per summit
   (`summits/match-donors`, ≤ 250 m, donor height −60…+250 m over the dataset's, which runs low on sharp summits); a donor's
-  height replaces the dataset's `ele` (`ele_dem` keeps it). OSM/official points with no summit nearby are not shown (unless
-  listed); a summit nobody named shows unnamed with its height. `peak_links` (OSM id → summit) moves athletes' old bags
+  height replaces the dataset's `ele` (`ele_dem` keeps it). OSM/official points with no summit nearby are not shown; a summit nobody named shows unnamed with its height. `peak_links` (OSM id → summit) moves athletes' old bags
   (athlete `summits.osm_id` was renamed `peak_id`). The dataset's licence is not stated: ask the author before publishing a release.
   Squares come from three places: the default (Switzerland), the athlete's picks on the Peaks page map (≤ 100 at once, name
   search through Nominatim), and every athlete's tracks: the first round of each athlete queues all squares their activities
@@ -67,16 +65,16 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   CPU is above `peaks/cpu-limit` (60%); detection indexes the track in a grid, so a peak is only compared with nearby fixes.
   Square states: queued (block missing) → names (peaks loaded, OSM names to come) → ready; failed keeps the error and retries.
   `request!`/`work!` run one background worker per athlete (after each sync, at start, when squares are added). Shown: a peak
-  on a list or with prominence ≥ the athlete's minimum (30 m, `sync_state`).
+  with prominence ≥ the athlete's minimum (30 m, `sync_state`). The map gets only what its view draws (`/api/peaks?bbox&zoom&cell`:
+  `coach.peak-density` prominence floors per zoom, then the most prominent √n peaks per ~80 px cell; there are 11.9 M peaks in the
+  world, 1 M on the server): never load the whole `peaks` table. The `listed` columns are unused (peak lists were removed).
   Shared by all athletes: `peaks`, `dataset_blocks`, `official_peaks`, `peak_links`, `osm_peaks`, `peak_tiles`, `peak_squares`,
   `meta` live in shared/peaks.db (`$COACH_SHARED_DIR`, else shared/ in the app folder; `paths/shared-file`), so a block one
   athlete loads is there for everybody; downloads take turns (`paths/with-lock "peaks-fetch"`). Per athlete: `summits`
   (gps | manual | dismissed), `summits_checked`, the minimum prominence. No SQL joins across the two databases (merged in Clojure).
   `activity_metrics.peaks` is something else (best HR/power), hence "summits"
-  - summits: pure, detection (track within 75 m of the top and, with altitude, within 80 m below it), tiles/squares, list progress,
+  - summits: pure, detection (track within 75 m of the top and, with altitude, within 80 m below it), tiles/squares,
     dataset ids and `match-donors`
-  - lists: resources/peaks/lists.edn, made by `make peak-lists` (dev/peak_lists.clj); listed peaks skip the prominence filter.
-    The 4000er list is generated, not hand-checked
   - privacy: GitHub sees which 10° blocks are loaded, Overpass the tile/square boxes, Nominatim the search text; no elevation server any more; tracks never leave the machine
 
 ## Namespaces (src/cljs, src/cljc)
@@ -94,8 +92,8 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - cljc sky: pure, the night sky behind the 3D globe (sidereal time, precession, camera frame, galactic coords); data in resources/public/sky/ (`make sky`)
 - cljc peak-density: pure, which peaks the map draws at a zoom (prominence bands: 500 m at the world view … all at zoom 10); the 3D
   map's layers are made from its `tiers`
-- views/peaks: the Peaks page (`#/peaks`, under More): stats, the download map (`square_map.cljs`: 1° squares, search), lists, bagged peaks; the Map tab
-  draws peaks as triangles (bagged filled with a tick, listed amber, the rest grey)
+- views/peaks: the Peaks page (`#/peaks`, under More): stats, the download map (`square_map.cljs`: 1° squares, search), bagged peaks; the Map tab
+  draws peaks like komoot: rounded triangles with a white outline (grey, bagged crimson), under the activity pins
 - cljc track: pure, GPS tracks for the heatmap (split, simplify, encoded polyline); stored in `activity_metrics.track`
 - cljc workout: pure, a planned session's blocks (steps with hr/pace/power targets): expand, total time, compare with an activity stream
 

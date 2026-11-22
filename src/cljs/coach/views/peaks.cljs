@@ -1,6 +1,6 @@
 (ns coach.views.peaks
-  "The Peaks page (komoot-style peak bagging): the peaks the GPS tracks passed, the peak lists with
-  their progress, and how small a summit may be (prominence) to count."
+  "The Peaks page (komoot-style peak bagging): the peaks the GPS tracks passed, and how small a summit may be
+  (prominence) to count."
   (:require [clojure.string :as str]
             [coach.i18n :refer [t]]
             [coach.square-map :as square-map]
@@ -81,18 +81,6 @@
                                    :on {:click [[:square-download]]}}
                 (t "Download")]])]))
 
-(defn- list-card [{:keys [id name total bagged peaks]}]
-  [:div {:replicant/key id}
-   (ui/card {}
-            [:div.lab name [:span.sp] [:b (str bagged " / " total)]]
-            [:div.peak-progress [:span {:style {:width (str (if (pos? total) (* 100 (/ bagged total)) 0) "%")}}]]
-            [:details.peak-list
-             [:summary (t "All peaks of the list")]
-             [:ul
-              (for [{:keys [peak_id name ele bagged?]} peaks]
-                [:li {:replicant/key peak_id :class (when bagged? "done")}
-                 [:span.peak-tick (if bagged? "✓" "")] name [:span.sub (metres ele)]])]])])
-
 (defn view [{:keys [data errors route] ui-state :ui}]
   (let [d       (get data url)
         sq      (get data squares-url)
@@ -118,7 +106,6 @@
                   (when (pos? (:loading d))
                     [:div.sub (t "Adding names to {0} more squares in the background; the peaks are already on the map." (:loading d))]))]
         (when sq (download-card sq (:squares ui-state)))
-        (for [l (:lists d)] (list-card l))
         [:div {:replicant/key "peaks"}
          (ui/card {}
                   [:div.lab (t "Your peaks")]

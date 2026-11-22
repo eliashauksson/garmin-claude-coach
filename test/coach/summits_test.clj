@@ -53,14 +53,7 @@
 (deftest visibility
   (is (summits/visible? {:prominence 45.0} 30))
   (is (not (summits/visible? {:prominence 12.0} 30)))
-  (is (not (summits/visible? {:prominence nil} 30)) "unknown prominence stays hidden")
-  (is (summits/visible? {:prominence 5.0 :listed true} 30) "list peaks skip the filter"))
-
-(deftest progress
-  (let [p (summits/list-progress {:id "x" :name "X" :peaks [{:peak_id 1} {:peak_id 2} {:peak_id 3}]} [2 9])]
-    (is (= 3 (:total p)))
-    (is (= 1 (:bagged p)))
-    (is (= [false true false] (mapv :bagged? (:peaks p))))))
+  (is (not (summits/visible? {:prominence nil} 30)) "unknown prominence stays hidden"))
 
 (deftest squares
   (testing "keys are whole degrees rounded down"

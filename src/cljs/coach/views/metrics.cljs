@@ -370,11 +370,11 @@
     [{:id "peaks-bagged" :name (tk "Peaks bagged") :src :app
       :what (tk "The number of different summits you have reached. A summit counts as bagged when the GPS track of a hike, run or ride passes within 75 m of its top, at about its height. Virtual and indoor rides never count.")
       :how (tk "After each sync the app loads the peaks of the map areas your tracks touch (the world prominence dataset of Andrew Kirmse and Jonathan de Ferranti, from GitHub; names from swisstopo in Switzerland and from OpenStreetMap elsewhere), once per area, and checks every new track against them. Only coarse map blocks and squares are asked for, never your tracks. A peak you reached without recording (or one that was wrongly counted) can be added or removed by hand.")
-      :read (tk "A peak reached again counts as another visit, not as another peak. Peaks on a list (for example the four-thousanders) always show, even if they are below the prominence limit.")
+      :read (tk "A peak reached again counts as another visit, not as another peak.")
       :see ["prominence"]}
      {:id "prominence" :name (tk "Prominence") :src :app
       :what (tk "How far a summit stands above the lowest saddle that leads to higher ground. A 3000 m peak in a big range can have 50 m of prominence if it is only a shoulder of its neighbour; a 170 m hill in Denmark has little more than 10 m.")
-      :how (tk "The heights and prominences come from the world prominence dataset of Andrew Kirmse and Jonathan de Ferranti (2023), worked out from a 30 m elevation model; the app calculates nothing itself. Names and surveyed heights come from the peak lists, swisstopo's swissNAMES3D (Switzerland) and OpenStreetMap contributors.")
+      :how (tk "The heights and prominences come from the world prominence dataset of Andrew Kirmse and Jonathan de Ferranti (2023), worked out from a 30 m elevation model; the app calculates nothing itself. Names and surveyed heights come from swisstopo's swissNAMES3D (Switzerland) and OpenStreetMap contributors.")
       :read (tk "The usual rule for a summit of its own is 30 m, and that is the default (the dataset has nothing below it). Raise it to 100 m to keep only the real standalone hills and mountains. The elevation model is smoothed, so prominences of sharp alpine summits are a little low.")
       :see ["peaks-bagged"]}]}])
 

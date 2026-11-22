@@ -280,8 +280,8 @@
 (def ^:private peaks-ddl
   "The shared peaks database (coach.peaks): the same for every athlete of an install; what an athlete
   bagged is in their own database (`summits`)."
-  [;; peak bagging (coach.peaks): `peaks` are the summits of the prominence dataset (plus listed peaks the dataset
-   ;; lacks), named from the peak lists, swisstopo or OpenStreetMap; `osm_peaks` per 0.25° tile and
+  [;; peak bagging (coach.peaks): `peaks` are the summits of the prominence dataset, named from swisstopo or
+   ;; OpenStreetMap (the `listed` columns are unused: peak lists were removed); `osm_peaks` per 0.25° tile and
    ;; `official_peaks` are those name sources, `peak_links` says which summit an OSM peak is
    "CREATE TABLE IF NOT EXISTS peak_tiles (
       tile       TEXT PRIMARY KEY,
@@ -299,8 +299,8 @@
       tags           TEXT,
       fetched_at     TEXT NOT NULL)"
    "CREATE INDEX IF NOT EXISTS osm_peaks_pos ON osm_peaks(lat, lon)"
-   ;; id: made from the position for a dataset summit (summits/dataset-peak-id), the OSM id for a listed peak
-   ;; the dataset doesn't have; ele: the best height known, ele_dem: the dataset's own
+   ;; id: made from the position for a dataset summit (summits/dataset-peak-id); ele: the best height known,
+   ;; ele_dem: the dataset's own
    "CREATE TABLE IF NOT EXISTS peaks (
       id         INTEGER PRIMARY KEY,
       lat        REAL NOT NULL,

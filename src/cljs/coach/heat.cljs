@@ -225,19 +225,22 @@
   "An atom coach.app fills with its action handler: the popups are plain DOM, outside Replicant."
   (atom nil))
 
+(def peak-grey "A peak that isn't bagged (komoot's grey)." "#8f8c8a")
+(def peak-red "A bagged peak (komoot's crimson)." "#c91a59")
+
+(def ^:private peak-triangle
+  "The marker's rounded triangle, in a 26 x 24 box: a thick white outline round a flat colour, like komoot's."
+  "M13 6 20 18H6z")
+
 (def ^:private peak-svg
-  "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" aria-hidden=\"true\"><path d=\"m12 3 10 18H2z\"/></svg>")
+  (str "<svg viewBox=\"0 0 26 24\" width=\"26\" height=\"24\" aria-hidden=\"true\">"
+       "<path class=\"o\" d=\"" peak-triangle "\"/><path class=\"f\" d=\"" peak-triangle "\"/></svg>"))
 
-(def ^:private peak-svg-bagged
-  (str "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" aria-hidden=\"true\"><path d=\"m12 3 10 18H2z\"/>"
-       "<path class=\"tick\" d=\"m8.5 16.5 2.5 2.5 4.5-5.5\"/></svg>"))
-
-;; A peak travels as a short row: [id lat lon ele prominence visits listed? name last-visit] (coach.peaks/map-peaks)
+;; A peak travels as a short row: [id lat lon ele prominence visits name last-visit] (coach.peaks/map-peaks)
 (defn- row-bagged? [r] (pos? (or (nth r 5) 0)))
-(defn- row-listed? [r] (boolean (nth r 6)))
 
-(defn- row->peak [[id lat lon ele prominence visits listed name last]]
-  {:id id :lat lat :lon lon :ele ele :prominence prominence :visits visits :listed listed :name name :last last})
+(defn- row->peak [[id lat lon ele prominence visits name last]]
+  {:id id :lat lat :lon lon :ele ele :prominence prominence :visits visits :name name :last last})
 
 (defn- bagged? [p] (pos? (or (:visits p) 0)))
 
@@ -299,12 +302,12 @@
            (dom "div" {:class "map-peak-bag"} date bag)))))
 
 (defn- peak-marker
-  "Bagged: a filled triangle with a tick, on top; on a list: an amber outline; the rest: a grey outline."
+  "Komoot's marker: a grey rounded triangle with a white outline, crimson when bagged (and above the others).
+  In the `peaks` pane, which lies under the pins."
   [p zoom]
-  (let [cls (cond (bagged? p) "map-peak bagged" (:listed p) "map-peak listed" :else "map-peak")
-        mk (.marker L #js [(:lat p) (:lon p)]
-                    #js {:icon (pin-icon cls (str ">" (if (bagged? p) peak-svg-bagged peak-svg)) 22)
-                         :title (peak-title p) :zIndexOffset (cond (bagged? p) 1000 (:listed p) 500 :else 0)})]
+  (let [mk (.marker L #js [(:lat p) (:lon p)]
+                    #js {:icon (pin-icon (if (bagged? p) "map-peak bagged" "map-peak") (str ">" peak-svg) 26)
+                         :title (peak-title p) :pane "peaks" :zIndexOffset (if (bagged? p) 1000 0)})]
     (when (and (>= zoom 13) (not (str/blank? (:name p))))
       (.bindTooltip mk (:name p) #js {:permanent true :direction "right" :offset #js [8 0]
                                       :className "map-peak-label"}))
@@ -321,7 +324,7 @@
                   (.clearLayers group)
                   (let [b (.pad (.getBounds m) 0.2)
                         z (.getZoom m)
-                        rows (filter (fn [r] (and (density/shown? (row-bagged? r) (row-listed? r) (nth r 4) z)
+                        rows (filter (fn [r] (and (density/shown? (row-bagged? r) (nth r 4) z)
                                                   (.contains b #js [(nth r 1) (nth r 2)])))
                                      (.-__peaks node))]
                     (doseq [p (map row->peak (take max-peaks-2d (sort-by (fn [r] [(if (row-bagged? r) 0 1)
@@ -615,6 +618,8 @@
             (.on m "click" #(on-map-click! node %))
             (.on m "moveend" #(when (.-__pins node) ((.-refresh ^js (.-__pins-layer node)))))
             (sync-pins-2d! node)
+            ;; under the markers (600): the pins and clusters stay in front of the peaks
+            (set! (.. (.createPane m "peaks") -style -zIndex) "590")
             (set! (.-__peaks-layer node) (peaks-layer m node))
             (.on m "moveend" (fn []
                                (when (.-__peaks node)
@@ -1062,34 +1067,48 @@
   "GeoJSON points for the peak rows (none when they're off)."
   [peaks]
   (clj->js {:type "FeatureCollection"
-            :features (for [[id lat lon _ele prom visits listed] peaks]
+            :features (for [[id lat lon _ele prom visits] peaks]
                         {:type "Feature"
-                         :properties {:id id :prom (or prom 0) :bagged (pos? (or visits 0)) :listed (boolean listed)}
+                         :properties {:id id :prom (or prom 0) :bagged (pos? (or visits 0))}
                          :geometry {:type "Point" :coordinates [lon lat]}})}))
 
 (def ^:private peak-layer-ids
   "Top first: what a click on the map finds."
-  (conj (mapv #(str "peak-" (:min %)) (reverse (density/tiers))) "peak-listed" "peak-bagged"))
+  (conj (mapv #(str "peak-" (:min %)) (reverse (density/tiers))) "peak-bagged"))
+
+(defn- peak-image
+  "The 2D marker's rounded triangle as pixels (twice the size, for sharp screens), in `color`."
+  [color]
+  (let [canvas (js/document.createElement "canvas")
+        _      (set! (.-width canvas) 52)
+        _      (set! (.-height canvas) 48)
+        ctx    (.getContext canvas "2d")
+        tri    (js/Path2D. "M26 12 40 36H12z")] ; peak-triangle at twice the size
+    (set! (.-lineJoin ctx) "round")
+    (doseq [[w c] [[16 "#ffffff"] [6 color]]]
+      (set! (.-lineWidth ctx) w)
+      (set! (.-fillStyle ctx) c)
+      (set! (.-strokeStyle ctx) c)
+      (.fill ctx tri)
+      (.stroke ctx tri))
+    (.getImageData ctx 0 0 52 48)))
 
 (defn- add-peak-layers!
-  "Peaks as circles, like the 2D triangles: grey rings for the rest, drawn by prominence band so a zoomed-out
-  map shows only the big ones (`coach.peak-density/tiers`), amber rings for a list's, filled amber for bagged."
+  "Peaks like the 2D markers (komoot's rounded triangles, crimson when bagged), drawn by prominence band so a
+  zoomed-out map shows only the big ones (`coach.peak-density/tiers`); the biggest first, bagged on top."
   [^js m peaks]
-  (let [bagged ["get" "bagged"] listed ["get" "listed"]]
+  (let [bagged ["get" "bagged"]
+        layout {"icon-image" ["case" bagged "peak-bagged" "peak"] "icon-size" 0.85 "icon-allow-overlap" true
+                "symbol-sort-key" ["+" ["get" "prom"] ["case" bagged 100000 0]]}]
+    (.addImage m "peak" (peak-image peak-grey) #js {:pixelRatio 2})
+    (.addImage m "peak-bagged" (peak-image peak-red) #js {:pixelRatio 2})
     (.addSource m "peaks" #js {:type "geojson" :data (peak-collection peaks)})
     (doseq [{:keys [zoom min max]} (density/tiers)]
-      (.addLayer m (clj->js {:id (str "peak-" min) :type "circle" :source "peaks" :minzoom zoom
-                             :filter (cond-> ["all" ["!" bagged] ["!" listed] [">=" ["get" "prom"] min]]
+      (.addLayer m (clj->js {:id (str "peak-" min) :type "symbol" :source "peaks" :minzoom zoom
+                             :filter (cond-> ["all" ["!" bagged] [">=" ["get" "prom"] min]]
                                        max (conj ["<" ["get" "prom"] max]))
-                             :paint {"circle-color" "#ffffff" "circle-radius" 4
-                                     "circle-stroke-width" 1.5 "circle-stroke-color" "#6b7280"}})))
-    (.addLayer m (clj->js {:id "peak-listed" :type "circle" :source "peaks" :minzoom density/listed-zoom
-                           :filter ["all" ["!" bagged] listed]
-                           :paint {"circle-color" "#ffffff" "circle-radius" 6
-                                   "circle-stroke-width" 2.5 "circle-stroke-color" "#e08a12"}}))
-    (.addLayer m (clj->js {:id "peak-bagged" :type "circle" :source "peaks" :filter bagged
-                           :paint {"circle-color" "#e08a12" "circle-radius" 7.5
-                                   "circle-stroke-width" 2.5 "circle-stroke-color" "#ffffff"}}))))
+                             :layout layout})))
+    (.addLayer m (clj->js {:id "peak-bagged" :type "symbol" :source "peaks" :filter bagged :layout layout}))))
 
 (defn- load-peaks-3d!
   "Asks for the peaks of the part in view and puts them on the map."
@@ -1136,10 +1155,10 @@
   "A click: a cluster zooms in (or lists its activities at one spot), a pin opens its popup, else the
   track under the point (within 10 px) if the heat shows."
   [^js ml ^js node ^js m ^js e]
-  (let [^js pf  (aget (.queryRenderedFeatures m (.-point e) #js {:layers (clj->js peak-layer-ids)}) 0)
+  (let [^js f   (aget (.queryRenderedFeatures m (.-point e) #js {:layers #js ["pin-clusters" "pin"]}) 0)
+        ^js pf  (when-not f
+                  (aget (.queryRenderedFeatures m (.-point e) #js {:layers (clj->js peak-layer-ids)}) 0))
         peak    (when pf (some #(when (= (.. pf -properties -id) (nth % 0)) (row->peak %)) (.-__peaks node)))
-        ^js f   (when-not peak
-                  (aget (.queryRenderedFeatures m (.-point e) #js {:layers #js ["pin-clusters" "pin"]}) 0))
         by-id   (fn [id] (some #(when (= id (:id (.-item ^js %))) (.-item ^js %)) (.-__tracks node)))
         coords  (some-> f .-geometry .-coordinates)
         xy      [(.. e -point -x) (.. e -point -y)]
@@ -1208,8 +1227,8 @@
            (.addLayer m #js {:id "heat" :type "raster" :source "heat"
                              :layout #js {:visibility (if (.-__heat node) "visible" "none")}
                              :paint #js {"raster-fade-duration" 0 "raster-resampling" "linear"}})
+           (add-peak-layers! m (.-__peaks node)) ; first: the pins and clusters are drawn over the peaks
            (add-pin-layers! m (.-__tracks node) (.-__pins node))
-           (add-peak-layers! m (.-__peaks node))
            (load-peaks-3d! node)
            (when (and (nil? lat) (seq tracks)) (fit!))
            (redraw)

@@ -924,12 +924,13 @@ button.pill:disabled { opacity: .5; cursor: default; }
 .send-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .send-warn { color: var(--amber); }
 /* Peak bagging: map markers, popups, the Peaks page (views/peaks.cljs) */
-.map-peak { display: block; width: 22px; height: 22px; cursor: pointer; }
+/* komoot's markers: a rounded triangle, grey (bagged: crimson), with a thick white outline (heat.cljs peak-svg) */
+.map-peak { display: block; width: 26px; height: 24px; cursor: pointer; }
 .map-peak svg { display: block; overflow: visible; }
-.map-peak path { fill: rgba(255,255,255,.9); stroke: #6b7280; stroke-width: 2; stroke-linejoin: round; }
-.map-peak.listed path { stroke: var(--amber); stroke-width: 2.5; }
-.map-peak.bagged path { fill: var(--amber); stroke: #fff; stroke-width: 2; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
-.map-peak path.tick { fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; filter: none; }
+.map-peak path { stroke-linejoin: round; }
+.map-peak path.o { fill: #fff; stroke: #fff; stroke-width: 8; }
+.map-peak path.f { fill: #8f8c8a; stroke: #8f8c8a; stroke-width: 3; }
+.map-peak.bagged path.f { fill: #c91a59; stroke: #c91a59; }
 .map-peak-label { background: rgba(255,255,255,.85); border: 0; box-shadow: none; padding: 0 4px; font-size: 11px;
   font-weight: 600; color: #374151; }
 .map-peak-label::before { display: none; }
@@ -950,13 +951,6 @@ details.peak > summary .sp { flex: 1; }
 .peak-name { font-weight: 700; }
 .peak-count { font-size: 13px; font-weight: 600; }
 .peak-body { padding: 0 0 12px; display: flex; flex-direction: column; gap: 2px; }
-.peak-progress { height: 8px; margin: 8px 0; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
-.peak-progress span { display: block; height: 100%; background: var(--green); }
-details.peak-list > summary { cursor: pointer; font-size: 13px; color: var(--text-2); }
-details.peak-list ul { list-style: none; margin: 8px 0 0; padding: 0; columns: 2 220px; font-size: 13px; }
-details.peak-list li { display: flex; gap: 6px; padding: 2px 0; color: var(--text-2); break-inside: avoid; }
-details.peak-list li.done { color: var(--text); font-weight: 600; }
-.peak-tick { width: 14px; color: var(--green-ink); }
 .area-search { display: flex; gap: 8px; margin: 10px 0; }
 .area-search input { flex: 1; min-width: 0; font: inherit; padding: 6px 10px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .area-results { display: flex; flex-direction: column; gap: 2px; margin: 0 0 10px; }

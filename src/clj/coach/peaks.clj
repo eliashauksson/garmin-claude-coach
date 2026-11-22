@@ -1,11 +1,11 @@
 (ns coach.peaks
   "Peak bagging. The peaks are the summits of Andrew Kirmse's and Jonathan de Ferranti's world prominence
   dataset (2023: every summit that stands at least 30 m above its saddle), loaded in 10° blocks from a
-  release of this project's repository. We work out no heights ourselves. Names come from the peak lists
-  (resources/peaks/lists.edn), from swisstopo's swissNAMES3D in Switzerland and from OpenStreetMap
-  elsewhere (Overpass: the named peaks of a 0.25° tile, a 1° square at a time, each fetched once); each name
-  is given to the dataset summit it matches (coach.summits/match-donors). The athlete's tracks never leave
-  the machine: GitHub sees which blocks are loaded, Overpass the tile and square boxes.
+  release of this project's repository. We work out no heights ourselves. Names come from swisstopo's
+  swissNAMES3D in Switzerland and from OpenStreetMap elsewhere (Overpass: the named peaks of a 0.25° tile, a 1°
+  square at a time, each fetched once); each name is given to the dataset summit it matches
+  (coach.summits/match-donors). The athlete's tracks never leave the machine: GitHub sees which blocks are
+  loaded, Overpass the tile and square boxes.
 
   The peaks, the loaded blocks and the downloaded squares are the same for everybody, so they live once per
   install in a shared database (shared/peaks.db, `shared`); what an athlete bagged (`summits`) and their
@@ -163,7 +163,7 @@
   {:osm_id id :name (:name tags) :ele (parse-ele (:ele tags)) :lat lat :lon lon :tags (json/write-str tags)})
 
 (defn save-peaks!
-  "Upserts OSM peak rows (the names to give) into the shared database; a peak on a list stays listed."
+  "Upserts OSM peak rows (the names to give) into the shared database."
   [rows]
   (let [now (str (java.time.Instant/now))]
     (jdbc/with-transaction [tx (shared)]
@@ -293,80 +293,45 @@
 ;; ---------------------------------------------------------------------------
 ;; Names for the summits of a square
 
-(def ^:private source-of-rank {0 "listed" 1 "swisstopo" 2 "osm"})
+(def ^:private source-of-rank {1 "swisstopo" 2 "osm"})
 
 (defn- donors
-  "The points that can name the summits of a square (with a margin around it): the peaks on a list (rank 0),
-  swisstopo's (1) and OpenStreetMap's (2). A point without a name takes no summit but still says which one it is."
+  "The points that can name the summits of a square (with a margin around it): swisstopo's (rank 1) and
+  OpenStreetMap's (2). A point without a name takes no summit but still says which one it is."
   [[s w n e]]
   (let [m 0.01
         box [(- s m) (+ n m) (- w m) (+ e m)]
-        osm (db/query (shared) (into ["SELECT osm_id, name, ele, lat, lon, listed FROM osm_peaks
+        osm (db/query (shared) (into ["SELECT osm_id, name, ele, lat, lon FROM osm_peaks
                                        WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"] box))
         off (db/query (shared) (into ["SELECT id, name, ele, lat, lon FROM official_peaks
                                        WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"] box))]
     (concat
-     (for [{:keys [osm_id name ele lat lon listed]} osm]
-       {:id osm_id :name name :ele ele :lat lat :lon lon :rank (if (= 1 listed) 0 2)
+     (for [{:keys [osm_id name ele lat lon]} osm]
+       {:id osm_id :name name :ele ele :lat lat :lon lon :rank 2
         :claim? (not (str/blank? name))})
      (for [{:keys [id name ele lat lon]} off]
        {:id (- id) :name name :ele ele :lat lat :lon lon :rank 1 :claim? true}))))
 
 (defn- rematch-square!
   "Names the dataset summits of a square from the points around it, from scratch (so it can run again
-  whenever a source has arrived), and records which summit each OSM point is. A listed peak the dataset
-  doesn't have stays a peak of its own."
+  whenever a source has arrived), and records which summit each OSM point is."
   [k]
   (let [[s w n e :as box] (summits/square-bbox k)
         sums (db/query (shared) ["SELECT id, lat, lon, ele_dem AS ele FROM peaks
                                   WHERE id >= ? AND lat >= ? AND lat < ? AND lon >= ? AND lon < ?"
                                  summits/dataset-id-min s n w e])
         ds (donors box)
-        {:keys [named links]} (summits/match-donors sums ds)
-        by-id (into {} (map (juxt :id identity)) ds)
-        listed-summits (into #{} (keep (fn [[donor-id summit-id]]
-                                         (when (zero? (:rank (by-id donor-id))) summit-id)))
-                             links)]
+        {:keys [named links]} (summits/match-donors sums ds)]
     (jdbc/with-transaction [tx (shared)]
-      (jdbc/execute! tx ["UPDATE peaks SET name = NULL, name_src = NULL, listed = 0, ele = ele_dem
+      (jdbc/execute! tx ["UPDATE peaks SET name = NULL, name_src = NULL, ele = ele_dem
                           WHERE id >= ? AND lat >= ? AND lat < ? AND lon >= ? AND lon < ?"
                          summits/dataset-id-min s n w e])
       (doseq [[summit-id d] named]
         (jdbc/execute! tx ["UPDATE peaks SET name = ?, ele = coalesce(?, ele_dem), name_src = ? WHERE id = ?"
                            (:name d) (:ele d) (source-of-rank (:rank d)) summit-id]))
-      (doseq [summit-id listed-summits]
-        (jdbc/execute! tx ["UPDATE peaks SET listed = 1 WHERE id = ?" summit-id]))
       (doseq [[donor-id summit-id] links :when (pos? donor-id)]
-        (jdbc/execute! tx ["INSERT OR REPLACE INTO peak_links (donor_id, peak_id) VALUES (?, ?)" donor-id summit-id])
-        ;; a listed peak that turned out to be a dataset summit is no peak of its own any more
-        (jdbc/execute! tx ["DELETE FROM peaks WHERE id = ?" donor-id]))
-      (doseq [{:keys [id name ele lat lon rank]} ds :when (and (zero? rank) (not (contains? links id)))]
-        (jdbc/execute! tx ["INSERT OR IGNORE INTO peaks (id, lat, lon, ele, name, name_src, listed)
-                            VALUES (?, ?, ?, ?, ?, 'listed', 1)" id lat lon ele name])))
+        (jdbc/execute! tx ["INSERT OR REPLACE INTO peak_links (donor_id, peak_id) VALUES (?, ?)" donor-id summit-id])))
     {:summits (count sums) :named (count named)}))
-
-;; ---------------------------------------------------------------------------
-;; Peak lists (resources/peaks/lists.edn, made by dev/peak_lists.clj)
-
-(defn lists []
-  (if-let [r (io/resource "peaks/lists.edn")]
-    (edn/read-string (slurp r))
-    []))
-
-(defn seed-lists!
-  "Puts the listed peaks into the shared osm_peaks (the names to give) and, until a dataset summit takes
-  their place, into `peaks`: they are shown whatever their prominence."
-  []
-  (let [now (str (java.time.Instant/now))]
-    (jdbc/with-transaction [tx (shared)]
-      (doseq [{:keys [osm_id name ele lat lon]} (mapcat :peaks (lists))]
-        (jdbc/execute! tx ["INSERT INTO osm_peaks (osm_id, name, ele, lat, lon, listed, fetched_at)
-                            VALUES (?, ?, ?, ?, ?, 1, ?)
-                            ON CONFLICT(osm_id) DO UPDATE SET listed = 1"
-                           osm_id name ele lat lon now])
-        (when-not (seq (db/query tx ["SELECT 1 FROM peak_links WHERE donor_id = ?" osm_id]))
-          (jdbc/execute! tx ["INSERT OR IGNORE INTO peaks (id, lat, lon, ele, name, name_src, listed)
-                              VALUES (?, ?, ?, ?, ?, 'listed', 1)" osm_id lat lon ele name]))))))
 
 ;; the athletes whose update is running (:running), or running and asked again meanwhile (:again)
 (defonce ^:private running? (atom {}))
@@ -502,7 +467,7 @@
         m (min-prominence ds)
         counts (into {} (map (juxt :sq identity))
                      (db/query (shared) [(str "SELECT " square-sql " AS sq,
-                                                      coalesce(sum(listed = 1 OR prominence >= ?), 0) AS shown
+                                                      coalesce(sum(prominence >= ?), 0) AS shown
                                                FROM peaks GROUP BY sq") m]))
         bagged (bagged-per-square ds)
         squares (for [k (keys requested)
@@ -684,7 +649,6 @@
                       ready))]))
 
 (defn- run-once! [ds]
-  (seed-lists!)
   (remove-dem-cache!)
   (seed-default-squares!)
   (let [pending (pending-activities ds)
@@ -733,9 +697,7 @@
    FROM summits s LEFT JOIN activities a ON a.id = s.activity_id
    WHERE s.source <> 'dismissed'")
 
-(defn- peak-row [r] (assoc r :listed (= 1 (:listed r))))
-
-(def ^:private peak-columns "id, name, coalesce(ele, ele_dem) AS ele, lat, lon, prominence, listed")
+(def ^:private peak-columns "id, name, coalesce(ele, ele_dem) AS ele, lat, lon, prominence")
 (def ^:private max-view-peaks "The most unbagged peaks one view gets (there are about a million in the dataset)." 5000)
 
 (defn- peaks-by-ids
@@ -744,47 +706,43 @@
   (into [] (mapcat (fn [part]
                      (db/query (shared) (into [(str "SELECT " peak-columns " FROM peaks WHERE id IN ("
                                                     (str/join "," (repeat (count part) "?"))
-                                                    ") AND (listed = 1 OR prominence >= ?)")]
+                                                    ") AND prominence >= ?")]
                                               (conj (vec part) m)))))
         (partition-all 500 ids)))
 
 (defn- with-visits [visits rows]
   (mapv (fn [p]
           (let [v (visits (:id p))]
-            (assoc (peak-row p) :visits (or (:visits v) 0) :first (:first v) :last (:last v))))
+            (assoc p :visits (or (:visits v) 0) :first (:first v) :last (:last v))))
         rows))
 
 (def ^:private thin-zoom-max "From this zoom on every peak the zoom draws is sent, not one per screen cell." 13)
 
 (defn- view-peaks
-  "The unbagged peaks of a view: listed ones from `density/listed-zoom`, the rest from prominence `floor`. With a
-  `cell` (degrees of a screen patch) a patch keeps its most prominent peaks, as many as the square root of those
-  it has (1 of 1, 2 of 4, 5 of 25): the map thins out but still shows where the mountains are. A list's
-  peaks are not thinned."
+  "The unbagged peaks of a view from prominence `floor` up. With a `cell` (degrees of a screen patch) a patch
+  keeps its most prominent peaks, as many as the square root of those it has (1 of 1, 2 of 4, 5 of 25): the
+  map thins out but still shows where the mountains are."
   [{:keys [bbox zoom cell floor]}]
   (let [[s w n e] bbox
         box      (if bbox " AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?" "")
-        box-args (if bbox [s n w e] [])
-        listed?  (>= zoom density/listed-zoom)
-        q        (fn [where args tail]
-                   (db/query (shared) (into [(str "SELECT " peak-columns " FROM peaks WHERE " where box tail)]
-                                            (concat args box-args))))]
-    (if (and cell (pos? cell) (< zoom thin-zoom-max))
-      (concat (when listed? (q "listed = 1" [] ""))
-              (db/query (shared)
-                        (into [(str "SELECT id, name, ele, lat, lon, prominence, listed FROM ("
-                                    " SELECT *, ROW_NUMBER() OVER (PARTITION BY cx, cy ORDER BY prominence DESC) AS rn,"
-                                    "          COUNT(*) OVER (PARTITION BY cx, cy) AS n FROM ("
-                                    "  SELECT " peak-columns ", CAST((lat + 90) / ? AS INTEGER) AS cx,"
-                                    "         CAST((lon + 360) / ? AS INTEGER) AS cy"
-                                    "  FROM peaks WHERE prominence >= ?" box "))"
-                                    " WHERE rn * rn <= n")]
-                              (concat [cell cell floor] box-args))))
-      (q "((listed = 1 AND ?) OR prominence >= ?)" [(if listed? 1 0) floor]
-         (str " ORDER BY listed DESC, prominence DESC LIMIT " max-view-peaks)))))
+        box-args (if bbox [s n w e] [])]
+    (db/query
+     (shared)
+     (if (and cell (pos? cell) (< zoom thin-zoom-max))
+       (into [(str "SELECT id, name, ele, lat, lon, prominence FROM ("
+                   " SELECT *, ROW_NUMBER() OVER (PARTITION BY cx, cy ORDER BY prominence DESC) AS rn,"
+                   "          COUNT(*) OVER (PARTITION BY cx, cy) AS n FROM ("
+                   "  SELECT " peak-columns ", CAST((lat + 90) / ? AS INTEGER) AS cx,"
+                   "         CAST((lon + 360) / ? AS INTEGER) AS cy"
+                   "  FROM peaks WHERE prominence >= ?" box "))"
+                   " WHERE rn * rn <= n")]
+             (concat [cell cell floor] box-args))
+       (into [(str "SELECT " peak-columns " FROM peaks WHERE prominence >= ?" box
+                   " ORDER BY prominence DESC LIMIT " max-view-peaks)]
+             (concat [floor] box-args))))))
 
 (defn visible-peaks
-  "Peaks to show, as maps with :listed, :visits (count, the athlete's), :first and :last visit dates. A peak
+  "Peaks to show, as maps with :visits (count, the athlete's), :first and :last visit dates. A peak
   nobody named has no :name and shows with its height. All of them, which is a million rows in the world
   dataset: `opts` narrow it. `:bagged-only?` gives just the athlete's. `:zoom` (and `:bbox` [south west north
   east], `:cell` the degrees of longitude of a screen patch: one peak per patch) gives what the map draws at that
@@ -797,7 +755,7 @@
          rows (cond
                 bagged-only? bagged
                 (nil? zoom) (db/query (shared) [(str "SELECT " peak-columns
-                                                     " FROM peaks WHERE listed = 1 OR prominence >= ?") m])
+                                                     " FROM peaks WHERE prominence >= ?") m])
                 :else (into bagged
                             (remove #(contains? visits (:id %)))
                             (view-peaks {:bbox bbox :zoom zoom :cell cell
@@ -807,37 +765,24 @@
 (defn map-peaks
   "What the Map tab draws, one short row per peak (there can be a million in the world, so only what a zoom
   draws, in the `bbox` if given; without a zoom the world view):
-  [id lat lon ele prominence visits listed? name last-visit]."
+  [id lat lon ele prominence visits name last-visit]."
   ([ds] (map-peaks ds {:zoom 0 :cell 2.0}))
   ([ds opts]
-   (mapv (fn [{:keys [id lat lon ele prominence visits listed name last]}]
-           [id lat lon ele (some-> prominence Math/round) visits listed name last])
+   (mapv (fn [{:keys [id lat lon ele prominence visits name last]}]
+           [id lat lon ele (some-> prominence Math/round) visits name last])
          (visible-peaks ds opts))))
 
 (defn- visits-by-peak [ds]
   (group-by :peak_id (db/query ds [(str visits-sql " ORDER BY s.date DESC")])))
 
-(defn- list-peaks
-  "A list's peaks as {:peak_id :name :ele}: the id of the dataset summit an OSM peak of the list is, else its own."
-  [l]
-  (let [ps (:peaks l)
-        links (if (seq ps)
-                (into {} (map (juxt :donor_id :peak_id))
-                      (db/query (shared) (into [(str "SELECT donor_id, peak_id FROM peak_links WHERE donor_id IN ("
-                                                     (str/join "," (repeat (count ps) "?")) ")")]
-                                               (map :osm_id ps))))
-                {})]
-    (mapv (fn [{:keys [osm_id name ele]}] {:peak_id (get links osm_id osm_id) :name name :ele ele}) ps)))
-
 (defn summary
-  "The Peaks page: counts, the bagged peaks with their visits, the lists with progress."
+  "The Peaks page: counts, the bagged peaks with their visits."
   [ds]
   (let [peaks (visible-peaks ds {:bagged-only? true})
         visits (visits-by-peak ds)
         year (str (.getYear (LocalDate/now)))
         bagged (->> peaks (filter #(pos? (:visits %)))
                     (mapv #(assoc % :visit_list (mapv (fn [v] (dissoc v :peak_id)) (visits (:id %))))))
-        bagged-ids (set (map :id bagged))
         highest (first (sort-by (comp - :ele) (filter :ele bagged)))]
     {:bagged (count bagged)
      :this_year (count (filter #(= year (some-> (:first %) (subs 0 4))) bagged))
@@ -845,8 +790,7 @@
      :highest (some-> highest (select-keys [:id :name :ele]))
      :min_prominence (min-prominence ds)
      :loading (:loading (squares-status ds))
-     :peaks (vec (sort-by :last #(compare %2 %1) bagged))
-     :lists (mapv #(summits/list-progress (assoc % :peaks (list-peaks %)) bagged-ids) (lists))}))
+     :peaks (vec (sort-by :last #(compare %2 %1) bagged))}))
 
 (defn activity-summits
   "The peaks an activity passed (visible ones): [{:id :name :ele :lat :lon :prominence :visit_id :source}]."
@@ -857,14 +801,14 @@
         peaks (when (seq visits)
                 (into {} (map (juxt :id identity))
                       (db/query (shared) (into [(str "SELECT id, name, coalesce(ele, ele_dem) AS ele, lat, lon,
-                                                             prominence, listed
+                                                             prominence
                                                       FROM peaks WHERE id IN ("
                                                      (str/join "," (repeat (count visits) "?")) ")")]
                                                (map :peak_id visits)))))]
     (vec (for [v visits
                :let [p (peaks (:peak_id v))]
-               :when (and p (or (= 1 (:listed p)) (and (:prominence p) (>= (:prominence p) m))))]
-           (merge (peak-row p) (dissoc v :peak_id))))))
+               :when (and p (:prominence p) (>= (:prominence p) m))]
+           (merge p (dissoc v :peak_id))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Manual bags

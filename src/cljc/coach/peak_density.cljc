@@ -10,14 +10,11 @@
   [zoom]
   (or (some (fn [[z m]] (when (>= zoom z) m)) (reverse steps)) 500))
 
-(def listed-zoom "Peaks on a list show from this zoom on, whatever their prominence." 8)
-
 (defn shown?
-  "Whether a peak is drawn at `zoom`: bagged ones always, listed ones from `listed-zoom`, the rest by
-  prominence. The athlete's own minimum has been applied by the server."
-  [bagged? listed? prominence zoom]
+  "Whether a peak is drawn at `zoom`: bagged ones always, the rest by prominence. The athlete's own minimum has
+  been applied by the server."
+  [bagged? prominence zoom]
   (boolean (or bagged?
-               (and listed? (>= zoom listed-zoom))
                (>= (or prominence 0) (min-prominence zoom)))))
 
 (defn tiers
