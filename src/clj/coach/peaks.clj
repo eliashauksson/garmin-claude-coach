@@ -22,6 +22,7 @@
             [coach.db :as db]
             [coach.i18n :as i18n]
             [coach.paths :as paths]
+            [coach.peak-density :as density]
             [coach.summits :as summits]
             [coach.track :as track]
             [next.jdbc :as jdbc])
@@ -734,25 +735,84 @@
 
 (defn- peak-row [r] (assoc r :listed (= 1 (:listed r))))
 
+(def ^:private peak-columns "id, name, coalesce(ele, ele_dem) AS ele, lat, lon, prominence, listed")
+(def ^:private max-view-peaks "The most unbagged peaks one view gets (there are about a million in the dataset)." 5000)
+
+(defn- peaks-by-ids
+  "The visible rows (a list's, or at least the athlete's minimum prominence) of these peak ids."
+  [ids m]
+  (into [] (mapcat (fn [part]
+                     (db/query (shared) (into [(str "SELECT " peak-columns " FROM peaks WHERE id IN ("
+                                                    (str/join "," (repeat (count part) "?"))
+                                                    ") AND (listed = 1 OR prominence >= ?)")]
+                                              (conj (vec part) m)))))
+        (partition-all 500 ids)))
+
+(defn- with-visits [visits rows]
+  (mapv (fn [p]
+          (let [v (visits (:id p))]
+            (assoc (peak-row p) :visits (or (:visits v) 0) :first (:first v) :last (:last v))))
+        rows))
+
+(def ^:private thin-zoom-max "From this zoom on every peak the zoom draws is sent, not one per screen cell." 13)
+
+(defn- view-peaks
+  "The unbagged peaks of a view: listed ones from `density/listed-zoom`, the rest from prominence `floor`. With a
+  `cell` (degrees of a screen patch) a patch keeps its most prominent peaks, as many as the square root of those
+  it has (1 of 1, 2 of 4, 5 of 25): the map thins out but still shows where the mountains are. A list's
+  peaks are not thinned."
+  [{:keys [bbox zoom cell floor]}]
+  (let [[s w n e] bbox
+        box      (if bbox " AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?" "")
+        box-args (if bbox [s n w e] [])
+        listed?  (>= zoom density/listed-zoom)
+        q        (fn [where args tail]
+                   (db/query (shared) (into [(str "SELECT " peak-columns " FROM peaks WHERE " where box tail)]
+                                            (concat args box-args))))]
+    (if (and cell (pos? cell) (< zoom thin-zoom-max))
+      (concat (when listed? (q "listed = 1" [] ""))
+              (db/query (shared)
+                        (into [(str "SELECT id, name, ele, lat, lon, prominence, listed FROM ("
+                                    " SELECT *, ROW_NUMBER() OVER (PARTITION BY cx, cy ORDER BY prominence DESC) AS rn,"
+                                    "          COUNT(*) OVER (PARTITION BY cx, cy) AS n FROM ("
+                                    "  SELECT " peak-columns ", CAST((lat + 90) / ? AS INTEGER) AS cx,"
+                                    "         CAST((lon + 360) / ? AS INTEGER) AS cy"
+                                    "  FROM peaks WHERE prominence >= ?" box "))"
+                                    " WHERE rn * rn <= n")]
+                              (concat [cell cell floor] box-args))))
+      (q "((listed = 1 AND ?) OR prominence >= ?)" [(if listed? 1 0) floor]
+         (str " ORDER BY listed DESC, prominence DESC LIMIT " max-view-peaks)))))
+
 (defn visible-peaks
   "Peaks to show, as maps with :listed, :visits (count, the athlete's), :first and :last visit dates. A peak
-  nobody named has no :name and shows with its height."
-  [ds]
-  (let [m (min-prominence ds)
-        visits (visit-counts ds)]
-    (mapv (fn [p]
-            (let [v (visits (:id p))]
-              (assoc (peak-row p) :visits (or (:visits v) 0) :first (:first v) :last (:last v))))
-          (db/query (shared) ["SELECT id, name, coalesce(ele, ele_dem) AS ele, lat, lon, prominence, listed
-                               FROM peaks WHERE listed = 1 OR prominence >= ?" m]))))
+  nobody named has no :name and shows with its height. All of them, which is a million rows in the world
+  dataset: `opts` narrow it. `:bagged-only?` gives just the athlete's. `:zoom` (and `:bbox` [south west north
+  east], `:cell` the degrees of longitude of a screen patch: one peak per patch) gives what the map draws at that
+  zoom (`coach.peak-density`), at most `max-view-peaks` of it, plus every bagged peak."
+  ([ds] (visible-peaks ds {}))
+  ([ds {:keys [bbox zoom cell bagged-only?]}]
+   (let [m (min-prominence ds)
+         visits (visit-counts ds)
+         bagged (peaks-by-ids (keys visits) m)
+         rows (cond
+                bagged-only? bagged
+                (nil? zoom) (db/query (shared) [(str "SELECT " peak-columns
+                                                     " FROM peaks WHERE listed = 1 OR prominence >= ?") m])
+                :else (into bagged
+                            (remove #(contains? visits (:id %)))
+                            (view-peaks {:bbox bbox :zoom zoom :cell cell
+                                         :floor (max m (density/min-prominence zoom))})))]
+     (with-visits visits rows))))
 
 (defn map-peaks
-  "What the Map tab draws, one short row per peak (there can be tens of thousands):
+  "What the Map tab draws, one short row per peak (there can be a million in the world, so only what a zoom
+  draws, in the `bbox` if given; without a zoom the world view):
   [id lat lon ele prominence visits listed? name last-visit]."
-  [ds]
-  (mapv (fn [{:keys [id lat lon ele prominence visits listed name last]}]
-          [id lat lon ele (some-> prominence Math/round) visits listed name last])
-        (visible-peaks ds)))
+  ([ds] (map-peaks ds {:zoom 0 :cell 2.0}))
+  ([ds opts]
+   (mapv (fn [{:keys [id lat lon ele prominence visits listed name last]}]
+           [id lat lon ele (some-> prominence Math/round) visits listed name last])
+         (visible-peaks ds opts))))
 
 (defn- visits-by-peak [ds]
   (group-by :peak_id (db/query ds [(str visits-sql " ORDER BY s.date DESC")])))
@@ -772,7 +832,7 @@
 (defn summary
   "The Peaks page: counts, the bagged peaks with their visits, the lists with progress."
   [ds]
-  (let [peaks (visible-peaks ds)
+  (let [peaks (visible-peaks ds {:bagged-only? true})
         visits (visits-by-peak ds)
         year (str (.getYear (LocalDate/now)))
         bagged (->> peaks (filter #(pos? (:visits %)))

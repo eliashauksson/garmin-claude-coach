@@ -3,7 +3,7 @@
 
 (def steps
   "[zoom prominence], by zoom: from this zoom on, unbagged peaks of at least this prominence show."
-  [[0 500] [9 300] [10 150] [11 50] [12 0]])
+  [[0 500] [6 300] [7 150] [8 100] [9 50] [10 0]])
 
 (defn min-prominence
   "The smallest prominence an unbagged peak needs to be drawn at `zoom`."

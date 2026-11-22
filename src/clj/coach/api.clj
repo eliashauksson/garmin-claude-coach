@@ -347,7 +347,14 @@
     ;; every GPS track, for the Map tab's heatmap
     ["/heatmap"     {:get (fn [_] (ok (analysis/heatmap ds)))}]
     ;; peak bagging: the peaks to draw, the Peaks page, manual bags, the minimum prominence
-    ["/peaks"       {:get (fn [_] (ok (peaks/map-peaks ds)))}]
+    ;; the world view, or with ?bbox=south,west,north,east&zoom=z what that part of the map draws
+    ["/peaks"       {:get (fn [{:keys [query-params]}]
+                            (let [bbox (some->> (get query-params "bbox") (re-seq #"-?[\d.]+") (mapv parse-double))
+                                  zoom (some-> (get query-params "zoom") parse-long)
+                                  cell (some-> (get query-params "cell") parse-double)]
+                              (ok (peaks/map-peaks ds (if (and zoom (= 4 (count bbox)))
+                                                        {:zoom zoom :bbox bbox :cell cell}
+                                                        {:zoom 0 :cell 2.0})))))}]
     ["/peaks/summary" {:get (fn [_] (ok (peaks/summary ds)))}]
     ["/peaks/settings" {:put (guarded (fn [req]
                                         (peaks/set-min-prominence! ds (:min_prominence (body req)))

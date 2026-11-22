@@ -312,6 +312,7 @@
       name_src   TEXT,
       listed     INTEGER NOT NULL DEFAULT 0)"
    "CREATE INDEX IF NOT EXISTS peaks_pos ON peaks(lat, lon)"
+   "CREATE INDEX IF NOT EXISTS peaks_prominence ON peaks(prominence)"
    ;; the 10° blocks of the dataset already loaded into `peaks`
    "CREATE TABLE IF NOT EXISTS dataset_blocks (
       block      TEXT PRIMARY KEY,

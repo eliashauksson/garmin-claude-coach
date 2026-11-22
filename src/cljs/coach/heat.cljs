@@ -246,6 +246,35 @@
   [peaks]
   (if peaks (str (count peaks) "/" (reduce (fn [n r] (+ n (or (nth r 5) 0))) 0 peaks)) "off"))
 
+(defn- cell-degrees
+  "Degrees of longitude that ~80 px of a view `span` degrees wide and `width` px across cover."
+  [span width]
+  (if (pos? width) (/ (* 80 (js/Math.abs span)) width) 0))
+
+;; The world has about a million peaks, so /api/peaks sends the world view and the map asks again for the
+;; part in view (what the zoom draws, coach.peak-density) after every move.
+(defn- fetch-view-peaks!
+  "Fetches the peaks of the box `[south west north east]` at `zoom` shortly after the last call, stores them on
+  `node` (`__peaks`) and calls `done!`. `cell`: degrees of longitude of ~80 px;
+  the server sends up to the square root of a cell's peaks, the most prominent. A late answer for an older view
+  is dropped; peaks turned off: nothing."
+  [^js node bounds zoom cell done!]
+  (some-> (.-__peaks-timer node) js/clearTimeout)
+  (set! (.-__peaks-timer node)
+        (js/setTimeout
+         (fn []
+           (when (.-__peaks node)
+             (let [seq-no (set! (.-__peaks-seq node) (inc (or (.-__peaks-seq node) 0)))]
+               (-> (js/fetch (str "/api/peaks?bbox=" (str/join "," bounds) "&zoom=" (js/Math.floor zoom)
+                                    "&cell=" cell))
+                   (.then (fn [res] (when (.-ok res) (.json res))))
+                   (.then (fn [rows]
+                            (when (and rows (= seq-no (.-__peaks-seq node)) (.-__peaks node))
+                              (set! (.-__peaks node) (js->clj rows))
+                              (done!))))
+                   (.catch (fn [_] nil))))))
+         250)))
+
 (defn- peak-title [p] (if (str/blank? (:name p)) (t "Unnamed peak") (:name p)))
 
 (defn- peak-popup-node
@@ -532,6 +561,14 @@
       (do (when-not (.hasLayer m g) (.addTo g m)) ((.-refresh g)))
       (.remove g))))
 
+(defn- load-peaks-2d!
+  "Asks for the peaks of the part in view (a little more than shown, like the layer) and redraws."
+  [^js node]
+  (let [^js m (.-__map node) v (.getBounds m) b (.pad v 0.2)]
+    (fetch-view-peaks! node [(.getSouth b) (.getWest b) (.getNorth b) (.getEast b)] (.getZoom m)
+                       (cell-degrees (- (.getEast v) (.getWest v)) (.-x (.getSize m)))
+                       #(sync-peaks-2d! node))))
+
 (defn map-2d
   "Full-page Leaflet heatmap of `items` ([{:id :track [encoded …]}], coach.track) in the colours of
   `palette` on `ground` (dark, light, satellite), shown while `heat?`. `version` changes with the
@@ -580,8 +617,11 @@
             (sync-pins-2d! node)
             (set! (.-__peaks-layer node) (peaks-layer m node))
             (.on m "moveend" (fn []
-                               (when (.-__peaks node) ((.-refresh ^js (.-__peaks-layer node))))))
+                               (when (.-__peaks node)
+                                 ((.-refresh ^js (.-__peaks-layer node)))
+                                 (load-peaks-2d! node))))
             (sync-peaks-2d! node)
+            (when peaks (load-peaks-2d! node))
             (charts/observe-resize! node #(.invalidateSize m)))
 
           :replicant.life-cycle/update
@@ -601,7 +641,8 @@
                 (set! (.-__peaks node) peaks)
                 (set! (.-__peaks-key node) (peaks-key peaks))
                 (.closePopup (.-__map node))
-                (sync-peaks-2d! node)))
+                (sync-peaks-2d! node)
+                (when peaks (load-peaks-2d! node))))
 
           :replicant.life-cycle/unmount
           (do (some-> (.-__ro node) .disconnect)
@@ -1050,6 +1091,15 @@
                            :paint {"circle-color" "#e08a12" "circle-radius" 7.5
                                    "circle-stroke-width" 2.5 "circle-stroke-color" "#ffffff"}}))))
 
+(defn- load-peaks-3d!
+  "Asks for the peaks of the part in view and puts them on the map."
+  [^js node]
+  (let [^js m (.-__map node) b (.getBounds m)]
+    (fetch-view-peaks! node [(.getSouth b) (.getWest b) (.getNorth b) (.getEast b)] (.getZoom m)
+                       (cell-degrees (- (.getEast b) (.getWest b)) (.-clientWidth (.getContainer m)))
+                       #(when-let [^js src (and (.-__loaded node) (.getSource m "peaks"))]
+                          (.setData src (peak-collection (.-__peaks node)))))))
+
 (defn- open-peak-popup-3d! [^js ml ^js node ^js m p]
   (when-let [^js old (.-__popup node)]
     (set! (.-__popup node) nil)
@@ -1160,6 +1210,7 @@
                              :paint #js {"raster-fade-duration" 0 "raster-resampling" "linear"}})
            (add-pin-layers! m (.-__tracks node) (.-__pins node))
            (add-peak-layers! m (.-__peaks node))
+           (load-peaks-3d! node)
            (when (and (nil? lat) (seq tracks)) (fit!))
            (redraw)
            (draw-sky)))
@@ -1170,6 +1221,7 @@
              (reset! camera {:lat (.-lat c) :lng (.-lng c) :zoom (inc (.getZoom m))
                              :bearing (.getBearing m) :pitch (.getPitch m)}))
            (credit! node m)
+           (when (.-__loaded node) (load-peaks-3d! node))
            (redraw)))
     (charts/observe-resize! node #(.resize m))))
 
@@ -1207,7 +1259,8 @@
               (set! (.-__peaks-key node) (peaks-key peaks))
               (when (.-__loaded node)
                 (some-> (.-__popup node) .remove)
-                (.setData ^js (.getSource ^js (.-__map node) "peaks") (peak-collection peaks))))
+                (.setData ^js (.getSource ^js (.-__map node) "peaks") (peak-collection peaks))
+                (load-peaks-3d! node)))
           (when (or (not= version (.-__version node)) (not= palette (.-__palette node))
                     (not= ground (.-__ground node)) (not= heat? (.-__heat node)) (not= pins? (.-__pins node)))
             (set! (.-__version node) version)

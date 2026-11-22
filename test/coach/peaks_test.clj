@@ -318,7 +318,30 @@
   (let [[ds _] (set-up!)]
     (is (= [[id-big 46.5 8.0 3000.0 400 0 false "Gross Horn" nil]
             [id-bump 46.6 8.0 1200.0 35 0 false nil nil]]
-           (sort-by first (peaks/map-peaks ds))))))
+           (sort-by first (peaks/map-peaks ds {:zoom 12 :bbox [46.0 7.5 47.0 8.5]}))))))
+
+(deftest the-map-gets-what-its-zoom-draws
+  (let [[ds _] (set-up!)
+        ids (fn [opts] (set (map first (peaks/map-peaks ds opts))))
+        box [46.0 7.5 47.0 8.5]]
+    (is (= #{} (ids {:zoom 0})) "the world view only has the big ones (500 m of prominence)")
+    (is (= #{id-big} (ids {:zoom 9 :bbox box})))
+    (is (= #{id-big id-bump} (ids {:zoom 12 :bbox box})))
+    (is (= #{id-big} (ids {:zoom 12 :bbox [46.45 7.5 46.55 8.5]})) "only the part in view")
+    (is (= #{} (ids {:zoom 12 :bbox [10.0 10.0 11.0 11.0]})))
+    (testing "one peak per screen cell, the most prominent; small cells keep both; zoomed in nothing is thinned"
+      (is (= #{id-big} (ids {:zoom 12 :bbox box :cell 1.0})))
+      (is (= #{id-big id-bump} (ids {:zoom 12 :bbox box :cell 0.05})))
+      (is (= #{id-big id-bump} (ids {:zoom 13 :bbox box :cell 1.0}))))
+
+    (is (= 2 (count (peaks/visible-peaks ds))) "without a zoom, all of them")
+    (testing "a cell with more peaks keeps more: the square root of them, the most prominent"
+      (doseq [[i prom] [[1 300] [2 200] [3 100] [4 80]]]
+        (jdbc/execute! (peaks/shared)
+                       ["INSERT INTO peaks (id, lat, lon, ele_dem, prominence) VALUES (?, 46.7, 8.1, 1000, ?)"
+                        (+ 1000 i) prom]))
+      ;; six peaks in one cell now: 2 of them, the most prominent (400 and 300)
+      (is (= #{id-big 1001} (ids {:zoom 12 :bbox box :cell 1.0}))))))
 
 (deftest peaks-are-shared-bags-are-not
   (let [[a _] (set-up!)
