@@ -343,3 +343,11 @@
         (is (= paths/busy @inner)))
       (is (thrown? Exception (paths/with-lock "t" (fn [] (throw (Exception. "x"))))))
       (is (= :done (paths/try-lock "t" (fn [] :done))) "released after an exception"))))
+
+(deftest pause-only-when-busy
+  (is (peaks/pause? 0.95 0.8))
+  (is (not (peaks/pause? 0.5 0.8)))
+  (is (not (peaks/pause? 0.8 0.8)))
+  (testing "an unknown load never pauses"
+    (is (not (peaks/pause? -1.0 0.8)))
+    (is (not (peaks/pause? nil 0.8)))))

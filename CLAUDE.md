@@ -63,6 +63,8 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   Squares come from three places: the default (Switzerland), the athlete's picks on the Peaks page map (≤ 100 at once, name
   search through Nominatim), and every athlete's tracks: the first round of each athlete queues all squares their activities
   touch, then each round those of the activities not checked yet (`queue-track-squares!`; virtual/indoor sports touch none).
+  One peak worker runs at a time for the whole install (`peaks-work` lock) and waits between steps while the machine's
+  CPU is above `peaks/cpu-limit` (60%); detection indexes the track in a grid, so a peak is only compared with nearby fixes.
   Square states: queued (block missing) → names (peaks loaded, OSM names to come) → ready; failed keeps the error and retries.
   `request!`/`work!` run one background worker per athlete (after each sync, at start, when squares are added). Shown: a peak
   on a list or with prominence ≥ the athlete's minimum (30 m, `sync_state`).

@@ -130,33 +130,45 @@
 
 (defn- near-peak
   "Closest approach of the stream to one peak: {:dist_m :time_s :alt} over the points within the
-  radius, nil when the track never comes that close. `alt` is the highest altitude of those points."
-  [{:keys [lat lon alt t]} {plat :lat plon :lon}]
+  radius, nil when the track never comes that close. `alt` is the highest altitude of those points.
+  `idxs`: the ascending indices of the fixes that can be near the peak (a superset of those within `pad`)."
+  [{:keys [lat lon alt t]} idxs {plat :lat plon :lon}]
   (let [n (count lat)
+        plat (double plat) plon (double plon)
         dlon (/ pad (max 0.2 (Math/cos (Math/toRadians plat))))]
-    (loop [i 0 best nil]
-      (if (>= i n)
+    (loop [is (seq idxs) best nil]
+      (if-not is
         best
-        (let [la (nth lat i) lo (nth lon i)]
-          (if (and la lo (< (Math/abs (- la plat)) pad) (< (Math/abs (- lo plon)) dlon))
+        (let [i (long (first is))
+              la (double (nth lat i)) lo (double (nth lon i))]
+          (if (and (< (Math/abs (- la plat)) pad) (< (Math/abs (- lo plon)) dlon))
             (let [a (project plat plon la lo)
                   nxt (when (< (inc i) n)
-                        (let [la2 (nth lat (inc i)) lo2 (nth lon (inc i))]
-                          (when (and la2 lo2) (project plat plon la2 lo2))))
-                  [d u] (if (and nxt (<= (Math/hypot (- (nxt 0) (a 0)) (- (nxt 1) (a 1))) gap-m))
+                        (let [la2 (nth lat (inc i)) lo2 (nth lon (inc i) nil)]
+                          (when (and la2 lo2) (project plat plon (double la2) (double lo2)))))
+                  [d u] (if (and nxt (<= (Math/hypot (- (double (nxt 0)) (double (a 0)))
+                                                     (- (double (nxt 1)) (double (a 1)))) gap-m))
                           (seg-dist a nxt)
                           (seg-dist a a))]
-              (if (<= d radius-m)
-                (let [j (if (and nxt (> u 0.5)) (inc i) i)
+              (if (<= (double d) radius-m)
+                (let [j (if (and nxt (> (double u) 0.5)) (inc i) i)
                       z (some-> alt (nth j nil))
                       ti (some-> t (nth j nil))
                       best (if (and best (<= (:dist_m best) d))
                              best
                              {:dist_m d :time_s ti})
                       best (cond-> best z (update :alt #(if % (max % z) z)))]
-                  (recur (inc i) best))
-                (recur (inc i) best)))
-            (recur (inc i) best)))))))
+                  (recur (next is) best))
+                (recur (next is) best)))
+            (recur (next is) best)))))))
+
+(defn- grid-index
+  "{[row col] [fix index …]} of the fixes with a position, in `pad`-degree rows and `col-deg`-degree columns;
+  the indices of a cell ascend."
+  [lat lon col-deg]
+  (group-by (fn [i] [(long (Math/floor (/ (double (nth lat i)) pad)))
+                     (long (Math/floor (/ (double (nth lon i)) col-deg)))])
+            (filter #(and (number? (nth lat %)) (number? (nth lon % nil))) (range (count lat)))))
 
 (defn detect
   "Peaks a stream bagged. `stream`: {:lat :lon :alt :t} columns; `peaks`: [{:id :lat :lon :ele}].
@@ -168,10 +180,19 @@
     (if (or (empty? pts) (empty? lons))
       []
       (let [[la0 la1] [(apply min pts) (apply max pts)]
-            [lo0 lo1] [(apply min lons) (apply max lons)]]
+            [lo0 lo1] [(apply min lons) (apply max lons)]
+            ;; wide enough for every peak in the box: its own column width is at most this
+            min-cos (min (Math/cos (Math/toRadians (double (- la0 pad))))
+                         (Math/cos (Math/toRadians (double (+ la1 pad)))))
+            col-deg (/ pad (max 0.2 min-cos))
+            index (grid-index lat lon col-deg)]
         (vec (for [{:keys [id ele] :as p} peaks
                    :when (and (<= (- la0 pad) (:lat p) (+ la1 pad)) (<= (- lo0 pad) (:lon p) (+ lo1 pad)))
-                   :let [hit (near-peak stream p)]
+                   :let [r (long (Math/floor (/ (double (:lat p)) pad)))
+                         c (long (Math/floor (/ (double (:lon p)) col-deg)))
+                         idxs (sort (mapcat #(get index [(+ r (long (first %))) (+ c (long (second %)))])
+                                            [[-1 -1] [-1 0] [-1 1] [0 -1] [0 0] [0 1] [1 -1] [1 0] [1 1]]))
+                         hit (when (seq idxs) (near-peak stream idxs p))]
                    :when (and hit (or (nil? ele) (nil? (:alt hit)) (>= (:alt hit) (- ele below-m))))]
                {:id id :dist_m (:dist_m hit) :time_s (:time_s hit)}))))))
 

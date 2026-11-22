@@ -44,6 +44,30 @@
 (def retry-ms "When a server was busy, the update tries the failed chunks again after this long …" 300000)
 (def max-attempts "… up to this many times." 6)
 
+(def cpu-limit
+  "The machine's CPU use (0–1) above which peak bagging waits between its steps, so the dashboard stays quick."
+  0.6)
+(def ^:private pause-ms 250)
+(def ^:private max-pause-ms "One wait is never longer than this, so the update always goes on." 10000)
+
+(defn pause?
+  "Pure: whether to wait, given the CPU load (0–1, negative when unknown) and the limit."
+  [load limit]
+  (and (number? load) (>= load 0) (> load limit)))
+
+(defn- cpu-load []
+  (.getCpuLoad ^com.sun.management.OperatingSystemMXBean
+   (java.lang.management.ManagementFactory/getOperatingSystemMXBean)))
+
+(defn- breathe!
+  "Between two steps of work: while the machine is busier than `cpu-limit`, waits (at most `max-pause-ms`).
+  Returns at once when it isn't, or when the load is unknown."
+  []
+  (loop [waited 0]
+    (when (and (< waited max-pause-ms) (pause? (cpu-load) cpu-limit))
+      (Thread/sleep (long pause-ms))
+      (recur (+ waited pause-ms)))))
+
 (def ^:private ^HttpClient http
   (-> (HttpClient/newBuilder) (.connectTimeout (Duration/ofSeconds 20))
       (.followRedirects java.net.http.HttpClient$Redirect/NORMAL) (.build)))
@@ -214,7 +238,8 @@
 (defn- insert-batched! [tx sql param-rows]
   (with-open [ps (jdbc/prepare tx [sql])]
     (doseq [group (partition-all 5000 param-rows)]
-      (jdbc/execute-batch! ps (vec group)))))
+      (jdbc/execute-batch! ps (vec group))
+      (breathe!))))
 
 (defn- load-block!
   "Puts the summits of a 10° block into `peaks` (unnamed). Once per block, one download at a time for the
@@ -511,6 +536,7 @@
   (reduce (fn [r {:keys [square]}]
             (try (let [new? (load-block! (summits/square-block square))]
                    (when (swiss-square? square) (load-official!))
+                   (breathe!)
                    (rematch-square! square)
                    (jdbc/execute! (shared) ["UPDATE peak_squares SET message = NULL WHERE square = ?" square])
                    (cond-> r new? (update :blocks inc)))
@@ -526,6 +552,7 @@
         todo (remove #(= 16 (square-tiles-done (:square %) have)) (requested-squares))]
     (reduce (fn [r {:keys [square]}]
               (try (let [fetched? (fetch-once! (summits/square-bbox square))]
+                     (breathe!)
                      (rematch-square! square)
                      (jdbc/execute! (shared) ["UPDATE peak_squares SET message = NULL WHERE square = ?" square])
                      (cond-> r fetched? (update :chunks inc)))
@@ -649,7 +676,8 @@
   (let [blocks-have (loaded-blocks)
         ready (filter #(blocks-loaded? blocks-have %) pending)]
     [(count ready)
-     (reduce + 0 (map #(try (detect-activity! ds %)
+     (reduce + 0 (map #(try (breathe!)
+                            (detect-activity! ds %)
                             (catch Throwable e
                               (println "Peaks: activity" (:id %) "failed:" (ex-message e)) 0))
                       ready))]))
@@ -684,7 +712,7 @@
   (let [k (context/athlete)]
     (try
       (loop [attempt 1]
-        (let [r (run-once! ds)]
+        (let [r (paths/with-lock "peaks-work" #(run-once! ds))]
           (cond
             (= :again (get @running? k)) (do (swap! running? assoc k :running) (recur 1))
             (and (:failed? r) (< attempt max-attempts)) (do (Thread/sleep retry-ms) (recur (inc attempt)))

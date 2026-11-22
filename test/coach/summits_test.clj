@@ -134,3 +134,65 @@
     (testing "two summits, two donors: each gets its own"
       (let [r (m [(donor 15 46.5 8.0 4430.0 2) (donor 16 46.51 8.0 3000.0 2)])]
         (is (= {1 15, 2 16} (update-vals (:named r) :id)))))))
+
+(defn- brute-detect
+  "The detection before the grid index: every peak against every fix."
+  [{:keys [lat lon alt t]} peaks]
+  (let [pad 0.006
+        project (fn [lat0 lon0 la lo]
+                  (let [k (/ Math/PI 180.0) r 6371000.0]
+                    [(* r k (- lo lon0) (Math/cos (* k lat0))) (* r k (- la lat0))]))
+        seg (fn [[ax ay] [bx by]]
+              (let [dx (- bx ax) dy (- by ay) l2 (+ (* dx dx) (* dy dy))
+                    u (if (zero? l2) 0.0 (max 0.0 (min 1.0 (/ (- (+ (* ax dx) (* ay dy))) l2))))
+                    px (+ ax (* u dx)) py (+ ay (* u dy))]
+                [(Math/sqrt (+ (* px px) (* py py))) u]))
+        near (fn [{plat :lat plon :lon}]
+               (let [n (count lat) dlon (/ pad (max 0.2 (Math/cos (Math/toRadians plat))))]
+                 (loop [i 0 best nil]
+                   (if (>= i n)
+                     best
+                     (let [la (nth lat i) lo (nth lon i)]
+                       (if (and la lo (< (Math/abs (- la plat)) pad) (< (Math/abs (- lo plon)) dlon))
+                         (let [a (project plat plon la lo)
+                               nxt (when (< (inc i) n)
+                                     (let [la2 (nth lat (inc i)) lo2 (nth lon (inc i))]
+                                       (when (and la2 lo2) (project plat plon la2 lo2))))
+                               [d u] (if (and nxt (<= (Math/hypot (- (nxt 0) (a 0)) (- (nxt 1) (a 1)))
+                                                      summits/gap-m))
+                                       (seg a nxt)
+                                       (seg a a))]
+                           (if (<= d summits/radius-m)
+                             (let [j (if (and nxt (> u 0.5)) (inc i) i)
+                                   z (some-> alt (nth j nil))
+                                   ti (some-> t (nth j nil))
+                                   best (if (and best (<= (:dist_m best) d)) best {:dist_m d :time_s ti})
+                                   best (cond-> best z (update :alt #(if % (max % z) z)))]
+                               (recur (inc i) best))
+                             (recur (inc i) best)))
+                         (recur (inc i) best)))))))
+        pts (filter number? lat) lons (filter number? lon)]
+    (vec (for [{:keys [id ele] :as p} peaks
+               :when (and (<= (- (apply min pts) pad) (:lat p) (+ (apply max pts) pad))
+                          (<= (- (apply min lons) pad) (:lon p) (+ (apply max lons) pad)))
+               :let [hit (near p)]
+               :when (and hit (or (nil? ele) (nil? (:alt hit)) (>= (:alt hit) (- ele summits/below-m))))]
+           {:id id :dist_m (:dist_m hit) :time_s (:time_s hit)}))))
+
+(deftest detect-matches-brute-force
+  (doseq [base-lat [46.5 64.1 -33.9]]
+    (let [rnd (java.util.Random. 42)
+          n 400
+          lat (loop [i 0 x base-lat acc []]
+                (if (= i n) acc (recur (inc i) (+ x (* 0.0002 (.nextGaussian rnd))) (conj acc x))))
+          lon (loop [i 0 x 8.0 acc []]
+                (if (= i n) acc (recur (inc i) (+ x (* 0.0003 (.nextGaussian rnd))) (conj acc x))))
+          lat (assoc lat 10 nil 11 nil)
+          stream {:lat lat :lon lon :alt (mapv (constantly 2000.0) lat) :t (vec (range n))}
+          peaks (vec (for [i (range 600)]
+                       {:id i
+                        :lat (+ base-lat (* 0.03 (- (.nextDouble rnd) 0.5)))
+                        :lon (+ 8.0 (* 0.04 (- (.nextDouble rnd) 0.5)))
+                        :ele (if (even? i) 2010.0 nil)}))]
+      (is (= (brute-detect stream peaks) (summits/detect stream peaks))
+          (str "at latitude " base-lat)))))
