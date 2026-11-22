@@ -60,7 +60,9 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   (gps | manual | dismissed), `summits_checked`, the minimum prominence. No SQL joins across the two databases (merged in Clojure).
   `activity_metrics.peaks` is something else (best HR/power), hence "summits"
   - summits: pure, detection (track within 75 m of the top and, with altitude, within 80 m below it), tiles/squares, list progress
-  - prominence: pure, highest-first flood over an elevation grid; a peak that is the highest in its window is a lower bound
+  - prominence: pure, highest-first flood over an elevation grid (one flood over the 10 km window; elevations are read lazily through
+    `Elevation`, so only the tiles the flood reaches are downloaded); a peak that is the highest in its window is a lower bound.
+    Heights run on `worker-count` threads (chunks of neighbouring peaks, results saved in batches), and start while later squares still download
   - lists: resources/peaks/lists.edn, made by `make peak-lists` (dev/peak_lists.clj); listed peaks skip the prominence filter.
     The 4000er list is generated, not hand-checked
   - privacy: Overpass sees tile/square boxes, Nominatim the search text, the elevation server tiles around peaks; tracks never leave the machine

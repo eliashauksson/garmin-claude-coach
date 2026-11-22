@@ -24,7 +24,8 @@
             [coach.summits :as summits]
             [coach.track :as track]
             [next.jdbc :as jdbc])
-  (:import (java.awt.image BufferedImage)
+  (:import (coach.prominence Elevation)
+           (java.awt.image BufferedImage)
            (java.io ByteArrayInputStream)
            (java.net URI URLEncoder)
            (java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers)
@@ -38,7 +39,12 @@
   ["https://overpass-api.de/api/interpreter" "https://overpass.kumi.systems/api/interpreter"])
 (def dem-url "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/%d/%d/%d.png")
 (def dem-zoom 13)
-(def windows-m "Prominence is first looked for within this far of the summit, then (if still bounded) the next." [3000 10000])
+(def window-m
+  "Prominence is looked for within this far of the summit; a peak still bounded at the edge only has a lower bound."
+  10000)
+(def worker-count
+  "Threads working out prominence at once: a few, as the machine may be a small server that does other things."
+  (max 1 (min 4 (dec (.availableProcessors (Runtime/getRuntime))))))
 (def default-min-prominence 30)
 (def budget-ms
   "How long an update spends on prominence when no region is loading; the rest follows at the next sync."
@@ -187,12 +193,16 @@
 ;; ---------------------------------------------------------------------------
 ;; Elevation tiles (Terrarium PNG: metres = R·256 + G + B/256 − 32768)
 
-(def ^:private dem-memory-tiles "Decoded tiles kept in memory (each 256 kB)." 200)
+(def ^:private dem-memory-tiles
+  "Decoded tiles kept in memory (each 256 kB): room for the windows of every worker."
+  256)
 
 (defonce ^:private dem-cache
   (java.util.Collections/synchronizedMap
    (proxy [java.util.LinkedHashMap] [64 (float 0.75) true]
      (removeEldestEntry [_] (> (.size ^java.util.Map this) dem-memory-tiles)))))
+
+(defonce ^:private dem-loading (java.util.concurrent.ConcurrentHashMap.)) ; tile → delay of its load
 
 (defn- dem-dir ^java.io.File [] (io/file (paths/shared-file "cache" "dem")))
 
@@ -234,19 +244,23 @@
 (defn- decode-dem ^floats [^bytes png]
   (let [out (float-array (* 256 256))]
     (when png
-      (let [^BufferedImage img (ImageIO/read (ByteArrayInputStream. png))]
-        (dotimes [py 256]
-          (dotimes [px 256]
-            (let [rgb (.getRGB img px py)
-                  r (bit-and (bit-shift-right rgb 16) 255) g (bit-and (bit-shift-right rgb 8) 255) b (bit-and rgb 255)]
-              (aset out (+ px (* py 256)) (float (- (+ (* r 256) g (/ b 256.0)) 32768))))))))
+      (let [^BufferedImage img (ImageIO/read (ByteArrayInputStream. png))
+            ^ints px (.getRGB img 0 0 256 256 nil 0 256)]
+        (dotimes [i (* 256 256)]
+          (let [rgb (aget px i)
+                r (bit-and (bit-shift-right rgb 16) 255) g (bit-and (bit-shift-right rgb 8) 255) b (bit-and rgb 255)]
+            (aset out i (float (- (+ (* r 256) g (/ b 256.0)) 32768)))))))
     out))
 
-(defn- dem-tile [z x y]
-  (or (.get ^java.util.Map dem-cache [z x y])
-      (let [a (decode-dem (dem-png z x y))] ; no data: flat at 0 m
-        (.put ^java.util.Map dem-cache [z x y] a)
-        a)))
+(defn- dem-tile
+  "A decoded tile (no data: flat at 0 m). Workers asking for the same tile at once wait for one download."
+  [z x y]
+  (let [k [z x y]]
+    (or (.get ^java.util.Map dem-cache k)
+        (let [mine (delay (or (.get ^java.util.Map dem-cache k) (decode-dem (dem-png z x y))))
+              d (or (.putIfAbsent dem-loading k mine) mine)]
+          (try (let [a @d] (.put ^java.util.Map dem-cache k a) a)
+               (finally (.remove dem-loading k d)))))))
 
 (defn- world-px
   "Pixel position of a coordinate in the whole Web Mercator world at zoom `z`."
@@ -256,37 +270,40 @@
     [(* n (/ (+ lon 180.0) 360.0))
      (* n (/ (- 1.0 (/ (Math/log (+ (Math/tan la) (/ 1.0 (Math/cos la)))) Math/PI)) 2.0))]))
 
+(defn- window-elevation
+  "Reads elevations of a w×w window whose top-left pixel is (x0, y0) of the world at zoom `z`: a tile is
+  fetched the first time somebody asks for a pixel of it, so a flood that finds higher ground nearby
+  never touches (or downloads) the rest of the window."
+  ^Elevation [z ^long x0 ^long y0 ^long w]
+  (let [tx0 (bit-shift-right x0 8) ty0 (bit-shift-right y0 8)
+        nx (inc (- (bit-shift-right (+ x0 w -1) 8) tx0))
+        ny (inc (- (bit-shift-right (+ y0 w -1) 8) ty0))
+        ^objects tiles (object-array (* nx ny))]
+    (reify Elevation
+      (at [_ x y]
+        (let [wx (+ x0 x) wy (+ y0 y)
+              col (- (bit-shift-right wx 8) tx0) row (- (bit-shift-right wy 8) ty0)
+              i (+ col (* row nx))
+              ^floats tile (or (aget tiles i)
+                               (let [t (dem-tile z (+ tx0 col) (+ ty0 row))] (aset tiles i t) t))]
+          (double (aget tile (+ (bit-and wx 255) (* (bit-and wy 255) 256)))))))))
+
 (defn dem-grid
-  "The elevation grid within `radius-m` of a point, for coach.prominence."
+  "The elevation grid within `radius-m` of a point, for coach.prominence (tiles are read as the flood asks)."
   [lat lon radius-m]
   (let [z dem-zoom
         res (/ (* 156543.03392 (Math/cos (Math/toRadians lat))) (Math/pow 2 z))
         half (long (Math/ceil (/ radius-m res)))
         [gx gy] (world-px z lat lon)
-        x0 (- (long gx) half) y0 (- (long gy) half)
-        w (inc (* 2 half))
-        out (double-array (* w w))]
-    ;; the tiles of the window are downloaded side by side: one at a time a region takes hours
-    (doall (pmap (fn [[tx ty]] (dem-tile z tx ty))
-                 (for [ty (range (quot y0 256) (inc (quot (+ y0 w -1) 256)))
-                       tx (range (quot x0 256) (inc (quot (+ x0 w -1) 256)))]
-                   [tx ty])))
-    (dotimes [j w]
-      (dotimes [i w]
-        (let [wx (+ x0 i) wy (+ y0 j)
-              ^floats tile (dem-tile z (quot wx 256) (quot wy 256))]
-          (aset out (+ i (* j w)) (double (aget tile (+ (rem wx 256) (* (rem wy 256) 256))))))))
-    {:w w :h w :elev out :cx half :cy half :res res}))
+        w (inc (* 2 half))]
+    {:w w :h w :at (window-elevation z (- (long gx) half) (- (long gy) half) w) :cx half :cy half :res res}))
 
 (defn peak-prominence
-  "{:prominence m :src \"dem\"|\"dem-min\"} from the elevation tiles: looked for in a small window,
-  then a bigger one while the answer is still only a lower bound."
+  "{:prominence m :src \"dem\"|\"dem-min\"} from the elevation tiles: the flood over a window of `window-m`
+  around the peak; \"dem-min\" when it reached the edge before higher ground, so the value is a lower bound."
   [{:keys [lat lon]} & [{:keys [noise]}]]
-  (loop [[r & more] windows-m]
-    (let [p (prominence/prominence (cond-> (dem-grid lat lon r) noise (assoc :noise noise)))]
-      (if (and (:bound? p) more)
-        (recur more)
-        {:prominence (:prominence p) :src (if (:bound? p) "dem-min" "dem")}))))
+  (let [p (prominence/prominence (cond-> (dem-grid lat lon window-m) noise (assoc :noise noise)))]
+    {:prominence (:prominence p) :src (if (:bound? p) "dem-min" "dem")}))
 
 ;; ---------------------------------------------------------------------------
 ;; Peak lists (resources/peaks/lists.edn, made by dev/peak_lists.clj)
@@ -437,22 +454,24 @@
 (defn- load-squares!
   "Fetches the requested squares that aren't there yet, oldest first, one request at a time (the public
   server is shared). Stops at the first one that fails: the server is busy, and the update tries again
-  later. Returns {:chunks n :failed? bool}."
-  []
-  (let [have (fetched-tiles)
-        todo (remove #(= 16 (square-tiles-done (:square %) have)) (requested-squares))
-        [n failed?] (reduce (fn [[n _] {:keys [square]}]
-                              (try (let [fetched? (fetch-once! (summits/square-bbox square))]
-                                     (jdbc/execute! (shared)
-                                                    ["UPDATE peak_squares SET message = NULL WHERE square = ?" square])
-                                     [(if fetched? (inc n) n) false])
-                                   (catch Throwable e
-                                     (println "Peaks: square" square "failed:" (ex-message e))
-                                     (jdbc/execute! (shared) ["UPDATE peak_squares SET message = ? WHERE square = ?"
-                                                              (ex-message e) square])
-                                     (reduced [n true]))))
-                            [0 false] todo)]
-    {:chunks n :failed? failed?}))
+  later. `on-fetched` is called after each square that was downloaded. Returns {:chunks n :failed? bool}."
+  ([] (load-squares! (fn [])))
+  ([on-fetched]
+   (let [have (fetched-tiles)
+         todo (remove #(= 16 (square-tiles-done (:square %) have)) (requested-squares))
+         [n failed?] (reduce (fn [[n _] {:keys [square]}]
+                               (try (let [fetched? (fetch-once! (summits/square-bbox square))]
+                                      (jdbc/execute! (shared)
+                                                     ["UPDATE peak_squares SET message = NULL WHERE square = ?" square])
+                                      (when fetched? (on-fetched))
+                                      [(if fetched? (inc n) n) false])
+                                    (catch Throwable e
+                                      (println "Peaks: square" square "failed:" (ex-message e))
+                                      (jdbc/execute! (shared) ["UPDATE peak_squares SET message = ? WHERE square = ?"
+                                                               (ex-message e) square])
+                                      (reduced [n true]))))
+                             [0 false] todo)]
+     {:chunks n :failed? failed?})))
 
 ;; ---------------------------------------------------------------------------
 ;; Searching for a place by name (OpenStreetMap's Nominatim; only the search text leaves the machine)
@@ -579,25 +598,59 @@
   (:n (first (db/query (shared) ["SELECT count(*) n FROM osm_peaks
                                   WHERE prominence IS NULL AND ele IS NOT NULL AND ele >= 0"]))))
 
-(defn- compute-prominence!
-  "Works out the prominence of the peaks that lack one, saving each as it is done so the map fills in
-  progressively. Until `deadline` (millis; nil: until all are done). Returns how many."
-  [deadline]
-  (let [todo (prominence-todo)]
-    (loop [[p & more] todo done 0 failures 0]
-      (cond
-        (nil? p) done
-        (and deadline (> (System/currentTimeMillis) deadline)) done
-        (>= failures 3) (do (println "Peaks: elevation tiles unreachable, prominence resumes next time") done)
-        :else
-        (if-let [r (try (peak-prominence p)
-                        (catch Throwable e (println "Peaks: prominence of" (:osm_id p) "failed:" (ex-message e)) nil))]
-          (do (jdbc/execute! (shared) ["UPDATE osm_peaks SET prominence = ?, prominence_src = ? WHERE osm_id = ?"
-                                       (:prominence r) (:src r) (:osm_id p)])
-              (recur more (inc done) 0))
-          (recur more done (inc failures)))))))
-
 (defn- past? [deadline] (and deadline (> (System/currentTimeMillis) deadline)))
+
+(def ^:private chunk-size "Peaks a worker takes at a time: neighbours, so they share elevation tiles." 32)
+(def ^:private flush-every "Results are saved after this many …" 50)
+(def ^:private flush-ms "… or this long, so the map still fills in as it goes." 2000)
+
+(defn- save-prominence!
+  "Saves finished [osm_id prominence src] results in one transaction."
+  [rows]
+  (when (seq rows)
+    (jdbc/with-transaction [tx (shared)]
+      (doseq [[id prominence src] rows]
+        (jdbc/execute! tx ["UPDATE osm_peaks SET prominence = ?, prominence_src = ? WHERE osm_id = ?"
+                           prominence src id])))))
+
+(defn- compute-prominence!
+  "Works out the prominence of the peaks that lack one, on `worker-count` threads that each take a chunk of
+  neighbouring peaks, saving the results in batches so the map fills in progressively. Until `deadline`
+  (millis; nil: until all are done). Returns how many."
+  [deadline]
+  (let [chunks (vec (partition-all chunk-size (prominence-todo)))
+        next-chunk (java.util.concurrent.atomic.AtomicInteger. 0)
+        failures (java.util.concurrent.atomic.AtomicInteger. 0) ; in a row, over all workers
+        done (java.util.concurrent.atomic.AtomicInteger. 0)
+        results (java.util.concurrent.ConcurrentLinkedQueue.)
+        last-save (atom (System/currentTimeMillis))
+        save! (fn [force?]
+                (locking results
+                  (when (or force? (>= (.size results) flush-every)
+                            (> (- (System/currentTimeMillis) @last-save) flush-ms))
+                    (let [rows (loop [acc []] (if-let [r (.poll results)] (recur (conj acc r)) acc))]
+                      (save-prominence! rows)
+                      (reset! last-save (System/currentTimeMillis))))))
+        stop? (fn [] (or (past? deadline) (>= (.get failures) 3)))
+        work (fn []
+               (loop []
+                 (let [i (.getAndIncrement next-chunk)]
+                   (when (and (< i (count chunks)) (not (stop?)))
+                     (doseq [p (nth chunks i) :while (not (stop?))]
+                       (if-let [r (try (peak-prominence p)
+                                       (catch Throwable e
+                                         (println "Peaks: prominence of" (:osm_id p) "failed:" (ex-message e))
+                                         nil))]
+                         (do (.add results [(:osm_id p) (:prominence r) (:src r)])
+                             (.incrementAndGet done)
+                             (.set failures 0)
+                             (save! false))
+                         (.incrementAndGet failures)))
+                     (recur)))))]
+    (try (->> (repeatedly (min worker-count (count chunks)) #(future (work))) doall (run! deref))
+         (finally (save! true)))
+    (when (>= (.get failures) 3) (println "Peaks: elevation tiles unreachable, prominence resumes next time"))
+    (.get done)))
 
 (defn- prominence-step!
   "Prominence for all pending peaks, whoever's region they are in. One worker at a time for the install:
@@ -628,14 +681,23 @@
   (seed-default-squares!)
   (let [pending (pending-activities ds)
         queued (queue-track-squares! ds pending)
-        {:keys [chunks failed?]} (load-squares!)
+        ;; the heights of a square are worked out while the next ones download
+        early (atom nil)
+        heights-now! (fn [] (let [f @early]
+                              (when (or (nil? f) (realized? f))
+                                (reset! early (future (try (prominence-step! nil)
+                                                           (catch Throwable e
+                                                             (println "Peaks: prominence failed:" (ex-message e))
+                                                             0)))))))
+        {:keys [chunks failed?]} (load-squares! heights-now!)
+        early-prom (if-let [f @early] @f 0)
         have (fetched-tiles)
         ready (filter #(every? have (activity-tiles %)) pending)
         found (reduce + 0 (map #(try (detect-activity! ds %)
                                      (catch Throwable e
                                        (println "Peaks: activity" (:id %) "failed:" (ex-message e)) 0))
                                ready))
-        prom (prominence-step! (when-not (loading? ds) (+ (System/currentTimeMillis) budget-ms)))
+        prom (+ early-prom (prominence-step! (when-not (loading? ds) (+ (System/currentTimeMillis) budget-ms))))
         r {:queued queued :chunks chunks :activities (count ready) :summits found :prominence prom}]
     (when (some pos? (vals r)) (println "Peaks:" r))
     (assoc r :failed? failed?)))

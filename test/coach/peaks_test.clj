@@ -226,3 +226,35 @@
         (is (= paths/busy @inner)))
       (is (thrown? Exception (paths/with-lock "t" (fn [] (throw (Exception. "x"))))))
       (is (= :done (paths/try-lock "t" (fn [] :done))) "released after an exception"))))
+
+(deftest elevation-window-reads-tiles-only-where-asked
+  (testing "pixels come from the right tile, and tiles the flood never reaches are not loaded"
+    (let [asked (atom [])
+          ;; every tile holds its own x and y, so a wrong tile or pixel shows
+          tile (fn [x y] (let [a (float-array (* 256 256))]
+                           (dotimes [py 256]
+                             (dotimes [px 256]
+                               (aset a (+ px (* py 256)) (float (+ (* 10 x) y (/ px 1000.0) (/ py 100000.0))))))
+                           a))]
+      (with-redefs [peaks/dem-tile (fn [_ x y] (swap! asked conj [x y]) (tile (mod x 100) (mod y 100)))]
+        (let [{:keys [w at cx cy]} (peaks/dem-grid 46.5 8.0 10000)
+              centre (.at ^coach.prominence.Elevation at cx cy)]
+          (is (= 1 (count @asked)) "nothing is read before the first pixel is asked for")
+          (is (< 1500 w 1600) "10 km each way at 46.5°")
+          (.at ^coach.prominence.Elevation at 0 0)
+          (.at ^coach.prominence.Elevation at (dec w) (dec w))
+          (.at ^coach.prominence.Elevation at 3 3)
+          (is (= 3 (count (distinct @asked))) "a corner, the opposite corner and the centre: three tiles, once each")
+          (is (< (Math/abs (- centre (.at ^coach.prominence.Elevation at cx cy))) 1e-9)))))))
+
+(deftest prominence-runs-on-several-threads-and-saves-everything
+  (temp-ds)
+  (peaks/save-peaks! (for [i (range 1 201)] (peak i (str "P" i) (+ 1000 i) (+ 46.0 (/ i 1000.0)) nil)))
+  (with-redefs [peaks/peak-prominence (fn [p]
+                                        (when (= 77 (:osm_id p)) (throw (ex-info "no tiles" {})))
+                                        {:prominence (double (:ele p)) :src "dem"})]
+    (is (= 199 (#'peaks/compute-prominence! nil))))
+  (let [rows (db/query (peaks/shared) ["SELECT osm_id, prominence, prominence_src FROM osm_peaks ORDER BY osm_id"])]
+    (is (= 199 (count (filter :prominence rows))))
+    (is (nil? (:prominence (nth rows 76))) "the one that failed is still waiting")
+    (is (= 1 (peaks/pending-prominence)))))
