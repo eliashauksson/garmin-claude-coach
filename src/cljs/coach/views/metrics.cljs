@@ -362,7 +362,21 @@
      {:id "rest-hr-scoring" :name (tk "Resting heart rate for scoring") :src :garmin
       :what (tk "The resting heart rate of the activity's day, used to work out how hard your heart worked.")
       :how (tk "From Garmin's daily data. On days without it, your usual resting heart rate.")
-      :read (tk "hrTSS is based on your heart rate reserve: the range between resting and maximum heart rate. How far up that range you went is what counts.")}]}])
+      :read (tk "hrTSS is based on your heart rate reserve: the range between resting and maximum heart rate. How far up that range you went is what counts.")}]}
+
+   {:id "peaks-page" :title (tk "Peaks")
+    :intro (tk "The Peaks page and the peaks on the Map tab: summits your GPS tracks passed.")
+    :items
+    [{:id "peaks-bagged" :name (tk "Peaks bagged") :src :app
+      :what (tk "The number of different summits you have reached. A summit counts as bagged when the GPS track of a hike, run or ride passes within 75 m of its top, at about its height. Virtual and indoor rides never count.")
+      :how (tk "After each sync the app fetches the peaks of the map areas your tracks touch from OpenStreetMap, once per area, and checks every new track against them. Only coarse map squares leave your computer, never your tracks. A peak you reached without recording (or one that was wrongly counted) can be added or removed by hand.")
+      :read (tk "A peak reached again counts as another visit, not as another peak. Peaks on a list (for example the four-thousanders) always show, even before their height has been worked out.")
+      :see ["prominence"]}
+     {:id "prominence" :name (tk "Prominence") :src :app
+      :what (tk "How far a summit stands above the lowest saddle that leads to higher ground. A 3000 m peak in a big range can have 50 m of prominence if it is only a shoulder of its neighbour; a 170 m hill in Denmark has little more than 10 m.")
+      :how (tk "OpenStreetMap marks every bump as a peak, so the app works prominence out from open elevation tiles (about 15 m per pixel), once per peak. For the highest peak around it is only a lower bound, which is plenty to pass the filter.")
+      :read (tk "The usual rule for a summit of its own is 30 m, and that is the default. Raise it to 100 m to keep only the real standalone hills and mountains. The elevation tiles are smoothed, so values on sharp alpine summits are a little low.")
+      :see ["peaks-bagged"]}]}])
 
 ;; ---------------------------------------------------------------------------
 ;; Search

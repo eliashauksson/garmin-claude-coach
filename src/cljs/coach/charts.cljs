@@ -276,12 +276,17 @@
               div)))
     ctrl))
 
+(def ^:private peak-flag
+  (str "<span class=\"map-peak bagged\"><svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" aria-hidden=\"true\">"
+       "<path d=\"m12 3 10 18H2z\"/></svg></span>"))
+
 (defn route-map
   "Leaflet map of the track. The OpenStreetMap tiles keep their colours (dark
   mode inverts them with a CSS filter), and the track, its casing and the start/end dots are
   coloured by CSS classes (.map in app.css), so the theme toggle restyles
-  the map without remounting it. `family` is a ui/families id."
-  [{:keys [latlngs key family]}]
+  the map without remounting it. `family` is a ui/families id. `markers`: summits passed,
+  [{:lat :lon :name}], drawn as flags with their name."
+  [{:keys [latlngs key family markers]}]
   [:div.map
    {:replicant/key key
     :replicant/on-render
@@ -306,6 +311,12 @@
           (doseq [[p class] [[(first latlngs) "route-dot start"] [(last latlngs) "route-dot end"]]]
             (.addTo (L/circleMarker (clj->js p) #js {:className class :radius 6 :weight 3 :interactive false})
                     m))
+          (doseq [{:keys [lat lon name]} markers]
+            (-> (L/marker #js [lat lon]
+                          #js {:icon (L/divIcon #js {:className "map-pin-wrap" :iconSize #js [22 22]
+                                                     :html peak-flag})
+                               :title name :keyboard false})
+                (.addTo m)))
           (let [fit! #(.fitBounds m (.getBounds line) #js {:padding #js [24 24]})]
             (fit!)
             (.addTo (reset-control fit!) m))

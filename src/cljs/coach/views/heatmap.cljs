@@ -7,6 +7,7 @@
             [coach.views.status :as status]))
 
 (def url "/api/heatmap")
+(def peaks-url "/api/peaks")
 
 (def ranges
   [["all" (tk "All time")] ["year" (tk "This year")]
@@ -45,6 +46,11 @@
   "Whether the activity pins are shown (remembered in this browser; off at first)."
   [ui]
   (= "on" (or (:heat-pins ui) (.getItem js/localStorage "heat-pins"))))
+
+(defn peaks?
+  "Whether the peaks are shown (remembered in this browser; on at first)."
+  [ui]
+  (not= "off" (or (:heat-peaks ui) (.getItem js/localStorage "heat-peaks"))))
 
 (defn dim
   "\"2d\" or \"3d\" (remembered in this browser)."
@@ -85,6 +91,8 @@
                                 [:heat-show] {:soft? true}))
        (row (tk "Pins") (ui/seg (if (pins? ui) "on" "off") [["on" (tk "Pins on")] ["off" (tk "Pins off")]]
                                 [:heat-pins] {:soft? true}))
+       (row (tk "Peaks") (ui/seg (if (peaks? ui) "on" "off") [["on" (tk "Peaks on")] ["off" (tk "Peaks off")]]
+                                 [:heat-peaks] {:soft? true}))
        (row (tk "Colours") (palette-picker (palette ui)))
        (row (tk "Map") (ui/seg (ground ui) grounds [:heat-base] {:soft? true}))
        (row (tk "View") (ui/seg (dim ui) [["2d" (tk "2D")] ["3d" (tk "3D")]] [:heat-dim] {:soft? true}))
@@ -105,7 +113,7 @@
        (nil? items)   nil
        :else          (let [props {:items shown :version (str span "|" sport "|" (count shown))
                                    :palette (palette ui) :ground (ground ui) :heat? (heat? ui)
-                                   :pins? (pins? ui)}]
+                                   :pins? (pins? ui) :peaks (when (peaks? ui) (get data peaks-url))}]
                         [:div.heat-base {:class (ground ui)}
                          (if (= "3d" (dim ui)) (heat/map-3d props) (heat/map-2d props))
                          (overlay {:empty? (empty? items) :n (count shown) :span span :sport sport :present present

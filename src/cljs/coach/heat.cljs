@@ -10,6 +10,7 @@
             [clojure.string :as str]
             [coach.charts :as charts]
             [coach.i18n :refer [t tk]]
+            [coach.peak-density :as density]
             [coach.sky :as sky]
             [coach.track :as track]
             [coach.ui :as ui]))
@@ -220,6 +221,93 @@
   (.divIcon L #js {:className "map-pin-wrap" :html (str "<span class=\"" cls "\"" html "</span>")
                    :iconSize #js [size size]}))
 
+(def action-handler
+  "An atom coach.app fills with its action handler: the popups are plain DOM, outside Replicant."
+  (atom nil))
+
+(def ^:private peak-svg
+  "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" aria-hidden=\"true\"><path d=\"m12 3 10 18H2z\"/></svg>")
+
+(def ^:private peak-svg-bagged
+  (str "<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" aria-hidden=\"true\"><path d=\"m12 3 10 18H2z\"/>"
+       "<path class=\"tick\" d=\"m8.5 16.5 2.5 2.5 4.5-5.5\"/></svg>"))
+
+;; A peak travels as a short row: [id lat lon ele prominence visits listed? name last-visit] (coach.peaks/map-peaks)
+(defn- row-bagged? [r] (pos? (or (nth r 5) 0)))
+(defn- row-listed? [r] (boolean (nth r 6)))
+
+(defn- row->peak [[id lat lon ele prominence visits listed name last]]
+  {:id id :lat lat :lon lon :ele ele :prominence prominence :visits visits :listed listed :name name :last last})
+
+(defn- bagged? [p] (pos? (or (:visits p) 0)))
+
+(defn- peaks-key
+  "Changes when the peaks drawn change (shown or not, how many, how many bagged)."
+  [peaks]
+  (if peaks (str (count peaks) "/" (reduce (fn [n r] (+ n (or (nth r 5) 0))) 0 peaks)) "off"))
+
+(defn- peak-title [p] (if (str/blank? (:name p)) (t "Unnamed peak") (:name p)))
+
+(defn- peak-popup-node
+  "A peak's popup: name, height and prominence; when bagged, how often (linking to the Peaks page);
+  when not, a date and a button to bag it by hand."
+  [{:keys [id ele prominence visits last] :as p}]
+  (let [today (ui/iso-today)
+        date  (dom "input" {:type "date" :value today :max today :class "map-peak-date"})
+        bag   (dom "button" {:type "button" :class "btn-ink"} (t "Bag manually"))
+        stats (str/join " · " (remove nil? [(when ele (str (js/Math.round ele) " m"))
+                                            (when prominence (t "{0} m prominence" (js/Math.round prominence)))]))]
+    (.addEventListener bag "click"
+                       (fn [_] (when-let [d @action-handler]
+                                 (d [:api "POST" "/api/peak-bags" {:peak id :date (.-value date)}]))))
+    (dom "div" {:class "map-popup-body"}
+         (dom "div" {:class "map-popup-head"} (peak-title p))
+         (dom "div" {:class "sub"} stats)
+         (if (bagged? p)
+           (dom "a" {:class "map-popup-open" :href (str "#/peaks?peak=" id)}
+                (str (if (= 1 visits) (t "Bagged once") (t "Bagged {0} times" visits))
+                     " · " (t "last {0}" (ui/date-short last))))
+           (dom "div" {:class "map-peak-bag"} date bag)))))
+
+(defn- peak-marker
+  "Bagged: a filled triangle with a tick, on top; on a list: an amber outline; the rest: a grey outline."
+  [p zoom]
+  (let [cls (cond (bagged? p) "map-peak bagged" (:listed p) "map-peak listed" :else "map-peak")
+        mk (.marker L #js [(:lat p) (:lon p)]
+                    #js {:icon (pin-icon cls (str ">" (if (bagged? p) peak-svg-bagged peak-svg)) 22)
+                         :title (peak-title p) :zIndexOffset (cond (bagged? p) 1000 (:listed p) 500 :else 0)})]
+    (when (and (>= zoom 13) (not (str/blank? (:name p))))
+      (.bindTooltip mk (:name p) #js {:permanent true :direction "right" :offset #js [8 0]
+                                      :className "map-peak-label"}))
+    mk))
+
+(def ^:private max-peaks-2d "Peak markers drawn at once; the most prominent first." 1200)
+
+(defn- peaks-layer
+  "Leaflet markers for the peaks of `node` in view, as many as `coach.peak-density` allows at this
+  zoom. Redrawn after every move."
+  [^js m ^js node]
+  (let [group (.layerGroup L)
+        refresh (fn []
+                  (.clearLayers group)
+                  (let [b (.pad (.getBounds m) 0.2)
+                        z (.getZoom m)
+                        rows (filter (fn [r] (and (density/shown? (row-bagged? r) (row-listed? r) (nth r 4) z)
+                                                  (.contains b #js [(nth r 1) (nth r 2)])))
+                                     (.-__peaks node))]
+                    (doseq [p (map row->peak (take max-peaks-2d (sort-by (fn [r] [(if (row-bagged? r) 0 1)
+                                                                                    (- (or (nth r 4) 0))])
+                                                                         rows)))]
+                      (let [mk (peak-marker p z)]
+                        (.on mk "click" (fn []
+                                          (.openOn (doto (.popup L #js {:className "map-popup" :maxWidth 300})
+                                                     (.setLatLng #js [(:lat p) (:lon p)])
+                                                     (.setContent (peak-popup-node p)))
+                                                   m)))
+                        (.addTo mk group)))))]
+    (set! (.-refresh group) refresh)
+    group))
+
 (defn- pins-layer
   "Leaflet pins for `node`'s tracks (their starts), grouped by screen position, redrawn after every
   move. A click opens the popup and highlights the track; `select!` does that for an item list."
@@ -273,6 +361,11 @@
   ;; the last view, shared by 2D and 3D so the Map tab (and a switch between them) keeps the place.
   ;; :zoom is on Leaflet's scale (MapLibre's is one less).
   (atom nil))
+
+(defn show-at!
+  "The next Map tab opens centred on this spot (a peak, from the Peaks page)."
+  [lat lng]
+  (reset! camera {:lat lat :lng lng :zoom 13}))
 
 ;; ---------------------------------------------------------------------------
 ;; Fullscreen: the map with its pill (not the navigation) fills the whole screen
@@ -431,14 +524,22 @@
       (do (when-not (.hasLayer m g) (.addTo g m)) ((.-refresh g)))
       (.remove g))))
 
+(defn- sync-peaks-2d!
+  "Shows or hides the peaks layer by whether there are peaks to draw, and redraws it."
+  [^js node]
+  (let [^js m (.-__map node) ^js g (.-__peaks-layer node)]
+    (if (.-__peaks node)
+      (do (when-not (.hasLayer m g) (.addTo g m)) ((.-refresh g)))
+      (.remove g))))
+
 (defn map-2d
   "Full-page Leaflet heatmap of `items` ([{:id :track [encoded …]}], coach.track) in the colours of
   `palette` on `ground` (dark, light, satellite), shown while `heat?`. `version` changes with the
-  filter: the heat is redrawn, the view kept."
-  [{:keys [items version palette ground heat? pins?]}]
+  filter: the heat is redrawn, the view kept. `peaks` (coach.peaks' map data) are drawn when not nil."
+  [{:keys [items version palette ground heat? pins? peaks]}]
   [:div.map.heatmap
    {:replicant/key "heatmap-2d"
-    :data-version (str version "|" palette "|" ground "|" heat? "|" pins?)
+    :data-version (str version "|" palette "|" ground "|" heat? "|" pins? "|" (peaks-key peaks))
     :replicant/on-render
     (fn [{:replicant/keys [life-cycle] :as hook}]
       (let [^js node (:replicant/node hook)
@@ -446,12 +547,15 @@
         (case life-cycle
           :replicant.life-cycle/mount
           (let [^js m (L/map node #js {:zoomControl false :attributionControl false :minZoom 2})
+                _ (.addEventListener node "contextmenu" #(.preventDefault %)) ; no browser menu over the map
                 fit! #(when-let [[s w n e] (all-bounds (.-__tracks node))]
                         (.fitBounds m #js [#js [s w] #js [n e]] #js {:padding #js [24 24]}))]
             (set! (.-__tracks node) tracks)
             (set! (.-__palette node) palette)
             (set! (.-__heat node) heat?)
             (set! (.-__pins node) pins?)
+            (set! (.-__peaks node) peaks)
+            (set! (.-__peaks-key node) (peaks-key peaks))
             (set! (.-__attribution node) (.addTo (.. L -control (attribution #js {:prefix false})) m))
             (set-ground-2d! node m ground)
             (.addTo (.. L -control (zoom #js {:position "topright"})) m)
@@ -474,6 +578,10 @@
             (.on m "click" #(on-map-click! node %))
             (.on m "moveend" #(when (.-__pins node) ((.-refresh ^js (.-__pins-layer node)))))
             (sync-pins-2d! node)
+            (set! (.-__peaks-layer node) (peaks-layer m node))
+            (.on m "moveend" (fn []
+                               (when (.-__peaks node) ((.-refresh ^js (.-__peaks-layer node))))))
+            (sync-peaks-2d! node)
             (charts/observe-resize! node #(.invalidateSize m)))
 
           :replicant.life-cycle/update
@@ -488,7 +596,12 @@
                 (set! (.-__pins node) pins?)
                 ((.-redraw (.-__layer node)))
                 (.closePopup (.-__map node))
-                (sync-pins-2d! node)))
+                (sync-pins-2d! node))
+              (when (not= (peaks-key peaks) (.-__peaks-key node))
+                (set! (.-__peaks node) peaks)
+                (set! (.-__peaks-key node) (peaks-key peaks))
+                (.closePopup (.-__map node))
+                (sync-peaks-2d! node)))
 
           :replicant.life-cycle/unmount
           (do (some-> (.-__ro node) .disconnect)
@@ -904,6 +1017,50 @@
                            :paint {"circle-color" colors "circle-radius" 6
                                    "circle-stroke-width" 2 "circle-stroke-color" "#ffffff"}}))))
 
+(defn- peak-collection
+  "GeoJSON points for the peak rows (none when they're off)."
+  [peaks]
+  (clj->js {:type "FeatureCollection"
+            :features (for [[id lat lon _ele prom visits listed] peaks]
+                        {:type "Feature"
+                         :properties {:id id :prom (or prom 0) :bagged (pos? (or visits 0)) :listed (boolean listed)}
+                         :geometry {:type "Point" :coordinates [lon lat]}})}))
+
+(def ^:private peak-layer-ids
+  "Top first: what a click on the map finds."
+  (conj (mapv #(str "peak-" (:min %)) (reverse (density/tiers))) "peak-listed" "peak-bagged"))
+
+(defn- add-peak-layers!
+  "Peaks as circles, like the 2D triangles: grey rings for the rest, drawn by prominence band so a zoomed-out
+  map shows only the big ones (`coach.peak-density/tiers`), amber rings for a list's, filled amber for bagged."
+  [^js m peaks]
+  (let [bagged ["get" "bagged"] listed ["get" "listed"]]
+    (.addSource m "peaks" #js {:type "geojson" :data (peak-collection peaks)})
+    (doseq [{:keys [zoom min max]} (density/tiers)]
+      (.addLayer m (clj->js {:id (str "peak-" min) :type "circle" :source "peaks" :minzoom zoom
+                             :filter (cond-> ["all" ["!" bagged] ["!" listed] [">=" ["get" "prom"] min]]
+                                       max (conj ["<" ["get" "prom"] max]))
+                             :paint {"circle-color" "#ffffff" "circle-radius" 4
+                                     "circle-stroke-width" 1.5 "circle-stroke-color" "#6b7280"}})))
+    (.addLayer m (clj->js {:id "peak-listed" :type "circle" :source "peaks" :minzoom density/listed-zoom
+                           :filter ["all" ["!" bagged] listed]
+                           :paint {"circle-color" "#ffffff" "circle-radius" 6
+                                   "circle-stroke-width" 2.5 "circle-stroke-color" "#e08a12"}}))
+    (.addLayer m (clj->js {:id "peak-bagged" :type "circle" :source "peaks" :filter bagged
+                           :paint {"circle-color" "#e08a12" "circle-radius" 7.5
+                                   "circle-stroke-width" 2.5 "circle-stroke-color" "#ffffff"}}))))
+
+(defn- open-peak-popup-3d! [^js ml ^js node ^js m p]
+  (when-let [^js old (.-__popup node)]
+    (set! (.-__popup node) nil)
+    (.remove old))
+  (let [^js pop (-> ^js (new (.-Popup ml) #js {:className "map-popup" :maxWidth "300px"})
+                    (.setLngLat #js [(:lon p) (:lat p)])
+                    (.setDOMContent (peak-popup-node p))
+                    (.addTo m))]
+    (set! (.-__popup node) pop)
+    (.on pop "close" (fn [] (when (identical? pop (.-__popup node)) (set! (.-__popup node) nil))))))
+
 (defn- set-pins-visible! [^js m on?]
   (doseq [id ["pin-clusters" "pin"]]
     (.setLayoutProperty m id "visibility" (if on? "visible" "none"))))
@@ -929,13 +1086,18 @@
   "A click: a cluster zooms in (or lists its activities at one spot), a pin opens its popup, else the
   track under the point (within 10 px) if the heat shows."
   [^js ml ^js node ^js m ^js e]
-  (let [^js f   (aget (.queryRenderedFeatures m (.-point e) #js {:layers #js ["pin-clusters" "pin"]}) 0)
+  (let [^js pf  (aget (.queryRenderedFeatures m (.-point e) #js {:layers (clj->js peak-layer-ids)}) 0)
+        peak    (when pf (some #(when (= (.. pf -properties -id) (nth % 0)) (row->peak %)) (.-__peaks node)))
+        ^js f   (when-not peak
+                  (aget (.queryRenderedFeatures m (.-point e) #js {:layers #js ["pin-clusters" "pin"]}) 0))
         by-id   (fn [id] (some #(when (= id (:id (.-item ^js %))) (.-item ^js %)) (.-__tracks node)))
         coords  (some-> f .-geometry .-coordinates)
         xy      [(.. e -point -x) (.. e -point -y)]
         project (fn [la lo] (let [p (.project m #js [lo la])] #js [(.-x p) (.-y p)]))
         unproj  (fn [x y] (let [ll (.unproject m #js [x y])] #js [(.-lat ll) (.-lng ll)]))]
     (cond
+      peak (open-peak-popup-3d! ml node m peak)
+
       (and f (some? (.. f -properties -cluster_id)))
       (let [id (.. f -properties -cluster_id) ^js src (.getSource m "pins")]
         (-> (.getClusterExpansionZoom src id)
@@ -969,6 +1131,7 @@
                   (draw-3d! m canvas (.-__tracks node) (.-__palette node) (.-__ground node)))
         fit!   #(when-let [[s w n e] (all-bounds (.-__tracks node))]
                   (.fitBounds m #js [#js [w s] #js [e n]] #js {:padding 40}))]
+    (.addEventListener node "contextmenu" #(.preventDefault %)) ; right-drag tilts; no browser menu
     (set! (.-className credit) "map3d-credit")
     (.appendChild node credit)
     ;; under MapLibre's canvas: the space around the globe is transparent
@@ -996,6 +1159,7 @@
                              :layout #js {:visibility (if (.-__heat node) "visible" "none")}
                              :paint #js {"raster-fade-duration" 0 "raster-resampling" "linear"}})
            (add-pin-layers! m (.-__tracks node) (.-__pins node))
+           (add-peak-layers! m (.-__peaks node))
            (when (and (nil? lat) (seq tracks)) (fit!))
            (redraw)
            (draw-sky)))
@@ -1012,10 +1176,10 @@
 (defn map-3d
   "The same heatmap on 3D terrain (drag to move, right-drag or ctrl-drag to tilt and turn).
   Props as `map-2d`."
-  [{:keys [items version palette ground heat? pins?]}]
+  [{:keys [items version palette ground heat? pins? peaks]}]
   [:div.map.heatmap.map3d
    {:replicant/key "heatmap-3d"
-    :data-version (str version "|" palette "|" ground "|" heat? "|" pins?)
+    :data-version (str version "|" palette "|" ground "|" heat? "|" pins? "|" (peaks-key peaks))
     :replicant/on-render
     (fn [{:replicant/keys [life-cycle] :as hook}]
       (let [^js node (:replicant/node hook)
@@ -1027,6 +1191,8 @@
               (set! (.-__ground node) ground)
               (set! (.-__heat node) heat?)
               (set! (.-__pins node) pins?)
+              (set! (.-__peaks node) peaks)
+              (set! (.-__peaks-key node) (peaks-key peaks))
               (set! (.-__version node) version)
               (-> @maplibre
                   (.then (fn [ml] (when-not (.-__gone node) (mount-3d! ml node tracks))))
@@ -1035,6 +1201,13 @@
                             (set! (.-textContent node) (t "The 3D map could not be loaded: {0}" (ex-message e)))))))
 
           :replicant.life-cycle/update
+          (do
+            (when (not= (peaks-key peaks) (.-__peaks-key node))
+              (set! (.-__peaks node) peaks)
+              (set! (.-__peaks-key node) (peaks-key peaks))
+              (when (.-__loaded node)
+                (some-> (.-__popup node) .remove)
+                (.setData ^js (.getSource ^js (.-__map node) "peaks") (peak-collection peaks))))
           (when (or (not= version (.-__version node)) (not= palette (.-__palette node))
                     (not= ground (.-__ground node)) (not= heat? (.-__heat node)) (not= pins? (.-__pins node)))
             (set! (.-__version node) version)
@@ -1051,7 +1224,7 @@
                 (.setLayoutProperty m "heat" "visibility" (if heat? "visible" "none"))))
             (set! (.-__ground node) ground)
             (set! (.-__heat node) heat?)
-            (when-let [redraw (.-__redraw node)] (redraw)))
+            (when-let [redraw (.-__redraw node)] (redraw))))
 
           :replicant.life-cycle/unmount
           (do (set! (.-__gone node) true)

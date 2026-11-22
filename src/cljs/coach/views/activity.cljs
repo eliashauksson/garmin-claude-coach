@@ -218,6 +218,23 @@
     (into [:div.row]
           (map (fn [tl tint] (ui/tile (assoc tl :tint tint :size "sm" :flex "1 1 140px"))) tiles tints))))
 
+(defn- summits-card
+  "The peaks this activity's track passed (komoot-style peak bagging)."
+  [summits]
+  [:div {:replicant/key "summits"}
+   (ui/card {}
+            [:div.lab (t "Summits") (ui/info "peaks-bagged")]
+            (into [:div.peak-list]
+                  (for [{:keys [name ele prominence dist_m visit_id]} summits]
+                    [:div.peak-visit {:replicant/key visit_id}
+                     [:span [:b (if (str/blank? name) (t "Unnamed peak") name)]
+                      [:span.sub (str " " (some-> ele js/Math.round) " m"
+                                      (when prominence (str " · " (t "{0} m prominence" (js/Math.round prominence)))))]]
+                     [:span.sub (t "{0} m from the top" (js/Math.round dist_m))]
+                     [:button.link {:on {:click [[:api "DELETE" (str "/api/peak-bags/" visit_id) nil]]}
+                                    :title (t "This wasn't a summit visit")}
+                      (t "Remove")]])))])
+
 (defn view [{:keys [data errors] ui-state :ui} url]
   (let [a    (get data url)
         s    (:streams a)
@@ -243,8 +260,10 @@
         (when-let [p (:planned a)] (planned-section p s))
         (when (seq pts)
           [:div {:replicant/key "map"}
-           (ui/card {} (c/route-map {:key (str "map-" (:id a)) :latlngs pts
-                                     :family (:id (ui/family (:sport a)))}))])
+           (ui/card {} (c/route-map {:key (str "map-" (:id a) "-" (count (:summits a))) :latlngs pts
+                                     :family (:id (ui/family (:sport a)))
+                                     :markers (:summits a)}))])
+        (when (seq (:summits a)) (summits-card (:summits a)))
         (when (seq ts)
           [:div.row {:replicant/key "streams"}
            (when (some some? (:hr s))

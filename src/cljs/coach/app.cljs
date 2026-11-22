@@ -1,5 +1,6 @@
 (ns coach.app
   (:require [clojure.string :as str]
+            [coach.heat :as heat]
             [coach.i18n :as i18n :refer [t]]
             [coach.ui :as ui]
             [coach.views.activity :as activity]
@@ -10,6 +11,7 @@
             [coach.views.heatmap :as heatmap]
             [coach.views.metrics :as metrics]
             [coach.views.more :as more]
+            [coach.views.peaks :as peaks]
             [coach.views.plan :as plan]
             [coach.views.settings :as settings]
             [coach.views.status :as status]
@@ -39,6 +41,7 @@
       ;; old link: the calendar is a view of the Plan page
       "calendar"   {:page :plan :params (assoc params :view "calendar")}
       "map"        {:page :map :params params}
+      "peaks"      {:page :peaks :params params}
       ;; one planned session's card
       "workouts"   (if-let [id (second segs)] {:page :workout :id id} {:page :plan :params {}})
       "plan"       {:page :plan :params params}
@@ -64,7 +67,8 @@
     :day        [(day/url (:date route))]
     :activity   [(str "/api/activities/" id "?streams=true")]
     :workout    [(workout/url id)]
-    :map        [heatmap/url]
+    :map        [heatmap/url heatmap/peaks-url]
+    :peaks      [peaks/url peaks/squares-url]
     :plan       (plan/urls route (:ui @state))
     :today      (today/urls route)
     :trends     (trends/urls route)
@@ -494,6 +498,32 @@
   [f]
   (fn [[ev :as args]] (when (= "Enter" (.-key ev)) (f args))))
 
+(defn- square-ui! [f & args] (apply swap! state update-in [:ui :squares] f args))
+
+(defn- search-places!
+  "Looks the place up by name; the answer is listed under the search field."
+  []
+  (let [q (str/trim (or (get-in @state [:ui :squares :q]) ""))]
+    (when-not (str/blank? q)
+      (square-ui! assoc :busy true :error nil)
+      (-> (js/fetch (str "/api/peaks/search?q=" (js/encodeURIComponent q)))
+          (.then (fn [res] (-> (.json res)
+                               (.then (fn [body]
+                                        (if (.-ok res)
+                                          (square-ui! assoc :results (js->clj body :keywordize-keys true) :busy false
+                                                      :error (when (zero? (.-length body)) (t "Nothing found")))
+                                          (square-ui! assoc :busy false :error (.-error body))))))))
+          (.catch #(square-ui! assoc :busy false :error (.-message %)))))))
+
+(defn- pick-place!
+  "Flies the map to a search result, outlines it and selects the squares it covers that aren't asked for yet."
+  [i]
+  (let [{:keys [squares bbox outline too_big]} (nth (get-in @state [:ui :squares :results]) i)
+        asked (into #{} (comp (filter :requested) (map :square)) (get-in @state [:data peaks/squares-url :squares]))]
+    (square-ui! (fn [m] (assoc m :outline outline :fly bbox :fly-id (inc (or (:fly-id m) 0))
+                               :selected (set (remove asked squares))
+                               :error (when too_big (t "That place is too big: zoom in and tap squares instead.")))))))
+
 (def actions
   "Action keyword -> function of the action's arguments. Replicant's event
   handlers dispatch these as data (see `dispatch`)."
@@ -528,6 +558,18 @@
    :set-theme         (fn [[choice]] (set-theme! choice))
    :heat-show         (heat-setting :heat-show)
    :heat-pins         (heat-setting :heat-pins)
+   :heat-peaks        (heat-setting :heat-peaks)
+   :peak-prominence   (fn [[v]] (api! "PUT" peaks/settings-url {:min_prominence v}))
+   :square-key        (on-enter (fn [_] (search-places!)))
+   :square-search     (fn [_] (search-places!))
+   :square-pick       (fn [[i]] (pick-place! i))
+   :square-toggle     (fn [[k]] (swap! state update-in [:ui :squares :selected]
+                                       #(let [s (or % #{})] (if (contains? s k) (disj s k) (conj s k)))))
+   :square-clear      (fn [_] (swap! state assoc-in [:ui :squares :selected] #{}))
+   :square-download   (fn [_] (let [sel (get-in @state [:ui :squares :selected])]
+                                (swap! state assoc-in [:ui :squares :selected] #{})
+                                (api! "POST" peaks/squares-url {:squares (vec sel)})))
+   :show-peak         (fn [[lat lng]] (heat/show-at! lat lng) (set-hash! "#/map"))
    :heat-dim          (heat-setting :heat-dim)
    :heat-base         (heat-setting :heat-base)
    :heat-colors       (heat-setting :heat-colors)
@@ -567,6 +609,7 @@
         (handle (cond
                   (= :event/target-value (last action)) (conj (vec (butlast action)) (.. ev -target -value))
                   (= :athlete-chat-key (first action))  [:athlete-chat-key ev]
+                  (= :square-key (first action))        [:square-key ev]
                   (= :garmin-login-key (first action))  [:garmin-login-key (second action) ev]
                   (= :restore-file (first action))      [:restore-file ev]
                   (= :athlete-upload (first action))    [:athlete-upload ev]
@@ -586,7 +629,7 @@
 
 (defn view [{:keys [route loading] :as s}]
   (let [page (:page route)
-        active (case page (:activity :day :workout) :plan (:metrics :settings :athlete) :more page)]
+        active (case page (:activity :day :workout) :plan (:metrics :settings :athlete :peaks) :more page)]
     [:div.shell
      [:nav.side {:aria-label (t "Main")}
       [:div.brand [:span.logo] "Coach"]
@@ -613,7 +656,8 @@
         :athlete    (athlete/view s)
         :more       (more/view s)
         :settings   (settings/view s (theme-choice))
-        :metrics    (metrics/view s))]]))
+        :metrics    (metrics/view s)
+        :peaks      (peaks/view s))]]))
 
 (defn render! []
   (r/render (js/document.getElementById "app") (view @state)))
@@ -626,6 +670,7 @@
 
 (defn init []
   (r/set-dispatch! dispatch)
+  (reset! heat/action-handler handle) ; the map popups' buttons
   (add-watch state ::render (fn [_ _ _ _] (render!)))
   (.addEventListener js/window "hashchange" on-hash!)
   ;; Esc closes the dashboard's open card
