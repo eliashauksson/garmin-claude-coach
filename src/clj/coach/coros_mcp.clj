@@ -5,7 +5,9 @@
   Each activity comes from its original FIT file: totals from the session
   message, per-second data from the records. Read-only twice over: `call`
   refuses anything outside `read-tools`, and the only other request is the
-  download of a FIT file from Coros's own storage."
+  download of a FIT file from Coros's own storage. The one exception is a
+  planned workout the athlete sends to the bike computer: `call-write`
+  (coach.push), limited to `write-tools`."
   (:require [clojure.string :as str]
             [coach.coros-auth :as coros-auth]
             [coach.fit :as fit]
@@ -18,6 +20,8 @@
            (java.time.format DateTimeFormatter)))
 
 (def read-tools #{"querySportRecords" "queryActivityFitFileDownloadUrls"})
+
+(def write-tools #{"createScheduledWorkout" "updateScheduledWorkout"})
 
 (def epoch
   "The earliest date the first sync looks back to (Coros watches came out in 2016)."
@@ -37,11 +41,11 @@
   [msg]
   (or (some (fn [[k re]] (when (re-find re (str msg)) k)) error-kinds) :coros))
 
-(defn call
-  "Calls a Coros MCP tool, refusing anything outside the read-only allowlist."
-  [client tool args]
-  (when-not (read-tools tool)
-    (throw (ex-info (str "Refusing non-read-only Coros tool: " tool) {:tool tool})))
+(defn- call-in
+  "Calls `tool` when it is in `allowed`; errors get Coros's message and :kind."
+  [allowed client tool args]
+  (when-not (allowed tool)
+    (throw (ex-info (str "Refusing Coros tool: " tool) {:tool tool})))
   (try (mcp/call-tool client tool args)
        (catch clojure.lang.ExceptionInfo e
          (throw (ex-info (t "Coros: {0}" (ex-message e))
@@ -49,6 +53,25 @@
                                 :kind (or (#{:auth :rate-limit :unreachable :timeout} (:kind (ex-data e)))
                                           (error-kind (ex-message e))))
                          e)))))
+
+(defn call
+  "Calls a Coros MCP tool, refusing anything outside the read-only allowlist."
+  [client tool args]
+  (call-in read-tools client tool args))
+
+(defn call-write
+  "Calls one of `write-tools` (a workout the athlete sends)."
+  [client tool args]
+  (call-in write-tools client tool args))
+
+(defn id-in-plan
+  "Pure: the idInPlan (a string, 64-bit safe) in a create/update answer, which
+  may be a map or text, or nil."
+  [answer]
+  (let [v (if (map? answer)
+            (or (:idInPlan answer) (:id_in_plan answer))
+            (some-> (re-find #"(?i)idInPlan\W+(\d+)" (str answer)) second))]
+    (some-> v str not-empty)))
 
 ;; ---------------------------------------------------------------------------
 ;; The activity list (pure): querySportRecords answers in text blocks like
@@ -229,20 +252,23 @@
       {:activity (activity-row summary msgs)
        :stream   (fit/records->stream (get msgs "record") {:zero-means-none zero-means-none})})))
 
+(defn connect!
+  "A connected MCP client with the stored login (no source around it)."
+  []
+  (when-not (coros-auth/connected?)
+    (throw (ex-info (t "Coros isn't connected. Connect it in Settings.") {:kind :auth})))
+  (try (mcp/start-http! {:url coros-auth/mcp-url :token-fn coros-auth/access-token!})
+       (catch clojure.lang.ExceptionInfo e
+         (throw (ex-info (t "Coros: {0}" (ex-message e))
+                         (update (ex-data e) :kind #(or (#{:auth :rate-limit :unreachable :timeout} %)
+                                                        (error-kind (ex-message e))))
+                         e)))))
+
 (defn start!
   "Connects to Coros's MCP server with the stored login. `delay-ms`
   spaces out the calls."
   ([] (start! {}))
   ([{:keys [delay-ms] :or {delay-ms 300}}]
-   (when-not (coros-auth/connected?)
-     (throw (ex-info (t "Coros isn't connected. Connect it in Settings.") {:kind :auth})))
-   (->CorosMcpSource
-    (try (mcp/start-http! {:url coros-auth/mcp-url :token-fn coros-auth/access-token!})
-         (catch clojure.lang.ExceptionInfo e
-           (throw (ex-info (t "Coros: {0}" (ex-message e))
-                           (update (ex-data e) :kind #(or (#{:auth :rate-limit :unreachable :timeout} %)
-                                                          (error-kind (ex-message e))))
-                           e))))
-    delay-ms)))
+   (->CorosMcpSource (connect!) delay-ms)))
 
 (defn stop! [{:keys [client]}] (mcp/stop! client))

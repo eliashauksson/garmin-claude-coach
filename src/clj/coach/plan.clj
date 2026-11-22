@@ -161,6 +161,19 @@
                                     ", updated_at = ? WHERE id = ?")]
                               (concat (map changes cols) [(now) id]))))))
 
+(defn mark-sent!
+  "Records that workout `id` went to a device (coach.push). `fields` are the
+  garmin_*/coros_* columns; updated_at stays, so a later edit shows as
+  \"changed since sent\"."
+  [ds id fields]
+  (let [cols (filter #{:garmin_workout_id :garmin_sent_at :coros_id_in_plan :coros_date :coros_sent_at}
+                     (keys fields))]
+    (when (seq cols)
+      (jdbc/execute! ds (into [(str "UPDATE planned_workouts SET "
+                                    (str/join ", " (map #(str (name %) " = ?") cols))
+                                    " WHERE id = ?")]
+                              (concat (map fields cols) [id]))))))
+
 (defn delete-workout! [ds id]
   (jdbc/execute! ds ["DELETE FROM planned_workouts WHERE id = ?" id]))
 

@@ -863,3 +863,9 @@ a.back:hover { color: var(--text); }
   .modal-backdrop { padding: 0; }
   .modal { min-height: 100%; border-radius: 0; padding: 12px 16px 90px; }
 }
+
+/* Send a planned workout to a device (views/workout.cljs) */
+button.pill:disabled { opacity: .5; cursor: default; }
+.send-panel { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; padding: 12px; background: var(--surface); border-radius: var(--radius-sm); }
+.send-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.send-warn { color: var(--amber); }

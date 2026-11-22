@@ -337,6 +337,20 @@
   (swap! state dissoc :flash)
   (api! method url body))
 
+(defn- send-workout!
+  "Sends a planned workout to a device (\"garmin\" or \"coros\"); the panel's state
+  (busy, error, a COROS copy left on another day) is kept under [:ui :send id]."
+  [[id service]]
+  (swap! state update-in [:ui :send id] assoc :busy service :error nil :old-left nil)
+  (-> (js/fetch (str "/api/plan/workouts/" id "/send/" service) #js {:method "POST"})
+      (.then (fn [res]
+               (-> (.json res)
+                   (.then (fn [d] (if (.-ok res) d (throw (js/Error. (.-error d)))))))))
+      (.then (fn [d]
+               (swap! state update-in [:ui :send id] assoc :busy nil :old-left (.-old_left ^js d))
+               (load-route! {:force true})))
+      (.catch (fn [e] (swap! state update-in [:ui :send id] assoc :busy nil :error (.-message e))))))
+
 (defn- ai-setting! [[task field value]]
   (let [current (some #(when (= task (:id %)) %)
                       (get-in @state [:data costs/settings-url :tasks]))]
@@ -488,6 +502,7 @@
    :set-ui            (fn [[k v]] (swap! state assoc-in [:ui k] v))
    :set-in-ui         (fn [args] (swap! state assoc-in (into [:ui] (butlast args)) (last args)))
    :api               api-action!
+   :send-workout      send-workout!
    :sync              (fn [_] (start-sync!))
    :sync-coros        (fn [_] (start-sync! "/api/coros/sync"))
    :ai-setting        ai-setting!

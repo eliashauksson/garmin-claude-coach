@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Personal Garmin dashboard + AI training planner: syncs Garmin data (plus rides from a Coros bike computer) into local SQLite, computes TrainingPeaks-style metrics, and asks Claude to propose training the athlete accepts or rejects. Nothing is ever written to Garmin or Coros.
+Personal Garmin dashboard + AI training planner: syncs Garmin data (plus rides from a Coros bike computer) into local SQLite, computes TrainingPeaks-style metrics, and asks Claude to propose training the athlete accepts or rejects. Sync never writes to Garmin or Coros; the only write is a planned workout the athlete sends with the "Send to device" button (coach.push).
 Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthropic-java), ClojureScript via shadow-cljs + Replicant (ECharts, Leaflet), shared `.cljc` for i18n.
 
 ## Commands
@@ -26,6 +26,9 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - context: the current athlete (`*athlete*`, bound per request/job: `with-athlete`, `athlete-fn` for executors; futures carry it) and
   `per-athlete-atom`, an atom with one value per athlete. State that is per athlete (sync state, DB handles, language, tokens) uses it;
   a new global `atom` that holds an athlete's data must too
+- push: sends one planned workout to Garmin Connect (upload + schedule) or the COROS schedule, on the athlete's button press only; Garmin on its own
+  write-only server (`garmin-mcp/write-tools`, refused while a sync runs), COROS via `coros-mcp/call-write`; remembers what was sent so resending replaces it
+- device-workout: pure, a planned session's blocks as a Garmin workout / COROS course, and `sendable`
 - source: `DataSource` protocol (read-only), `ActivitySource` for activity-only sources · garmin-mcp: DataSource over a local garmin_mcp server · mcp: minimal MCP client (stdio, Streamable HTTP)
 - coros-mcp: ActivitySource over COROS's official remote MCP server (rides from FIT files) · coros-auth: Coros OAuth (PKCE, token in ~/.config/coach/coros.json) · fit: FIT file decoding (Garmin FIT SDK)
 - sync: incremental + backfill from a DataSource into the DB (upserts) · sync.sources: rides from activity-only sources (`activities-only!`, `coros!`), merged with the same ride on Garmin

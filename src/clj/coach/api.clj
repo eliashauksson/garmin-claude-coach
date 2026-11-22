@@ -24,6 +24,7 @@
             [coach.paths :as paths]
             [coach.plan :as plan]
             [coach.planner :as planner]
+            [coach.push :as push]
             [coach.readiness :as readiness]
             [coach.readiness-estimate :as readiness-estimate]
             [coach.season :as season]
@@ -159,9 +160,15 @@
                                          (let [id (parse-long (:id path-params))]
                                            (plan/accept-all! ds id (boolean (:replace (body req))))
                                            (ok-tr ds (plan/proposal ds id)))))}]]
+   ["/workouts/:id/send/garmin" {:post (guarded (fn [{:keys [path-params]}]
+                                                  (let [w (push/garmin! ds (parse-long (:id path-params)))]
+                                                    (ok-tr ds (assoc w :send (push/info w))))))}]
+   ["/workouts/:id/send/coros" {:post (guarded (fn [{:keys [path-params]}]
+                                                 (let [w (push/coros! ds (parse-long (:id path-params)))]
+                                                   (ok-tr ds (assoc w :send (push/info w))))))}]
    ["/workouts/:id" {:get    (fn [{:keys [path-params]}]
                                (if-let [w (plan/workout ds (parse-long (:id path-params)))]
-                                 (ok-tr ds w)
+                                 (ok-tr ds (assoc w :send (push/info w)))
                                  (json-response 404 {:error "not found"})))
                      :patch  (guarded (fn [{:keys [path-params] :as req}]
                                         (plan/update-workout! ds (parse-long (:id path-params)) (body req))

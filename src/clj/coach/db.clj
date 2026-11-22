@@ -290,6 +290,12 @@
    ;; a session's purpose and its structure (coach.workout), JSON blocks
    ["planned_workouts" "goal" "TEXT"]
    ["planned_workouts" "blocks" "TEXT"]
+   ;; sent to a device by the athlete (coach.push): Garmin's library id, COROS's scheduled id and its date
+   ["planned_workouts" "garmin_workout_id" "INTEGER"]
+   ["planned_workouts" "garmin_sent_at" "TEXT"]
+   ["planned_workouts" "coros_id_in_plan" "TEXT"]
+   ["planned_workouts" "coros_date" "TEXT"]
+   ["planned_workouts" "coros_sent_at" "TEXT"]
    ["proposal_items" "goal" "TEXT"]
    ["proposal_items" "blocks" "TEXT"]
    ;; the heatmap's track: encoded polyline segments (coach.track), "[]" without GPS

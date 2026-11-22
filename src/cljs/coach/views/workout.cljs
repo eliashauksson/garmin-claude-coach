@@ -73,7 +73,50 @@
        [:div.sub {:style {:color (if (= "rest" (name level)) "var(--red)" "var(--text-2)")}}
         (str/join " · " signals)])]))
 
-(defn view [{:keys [data errors]} url]
+(defn- reason-text [reason]
+  (case reason
+    "not-planned"   (t "Only planned sessions can be sent.")
+    "past"          (t "This session's day has passed.")
+    "unsupported"   (t "This device can't receive this kind of session.")
+    "too-far"       (t "Coros takes workouts up to {0} days ahead." 90)
+    "not-connected" (t "Not connected. Connect it in Settings.")
+    nil))
+
+(defn- device-row
+  "One device in the send panel: what was sent, or why nothing can be, and the button."
+  [id service label {:keys [reason sent_at changed]} {:keys [busy error old-left]}]
+  [:div.send-row {:replicant/key service}
+   [:div
+    [:b label]
+    [:div.sub
+     (cond reason (reason-text reason)
+           sent_at (str (t "Sent {0}" (ui/date-long (subs sent_at 0 10)))
+                        (when changed (str " · " (t "changed since sent"))))
+           :else (t "Not sent yet."))]
+    (when (and (= "coros" service) old-left)
+      [:div.sub.send-warn
+       (t "The earlier copy stays on {0} in the COROS app. Remove it there." (ui/date-long old-left))])
+    (when (and error (not busy)) [:div.error error])]
+   [:button.pill {:disabled (boolean (or reason busy))
+                  :on {:click [[:send-workout id service]]}}
+    (cond (= busy service) (t "Sending…")
+          sent_at (t "Send again")
+          :else (t "Send"))]])
+
+(defn send-panel
+  "The \"Send to device\" button and, once opened, a row per device."
+  [{:keys [id send]} {:keys [open] :as st}]
+  (when (some #(not (#{"past" "not-planned"} (:reason %))) (vals send))
+    [:div {:replicant/key "send"}
+     [:button.pill {:on {:click [[:set-in-ui :send id :open (not open)]]}}
+      (t "Send to device")]
+     (when open
+       [:div.send-panel
+        (device-row id "garmin" (t "Garmin (watch)") (:garmin send) st)
+        (device-row id "coros" (t "Coros (bike computer)") (:coros send) st)
+        [:div.sub (t "It reaches the device at its next sync with Garmin Connect or the COROS app.")]])]))
+
+(defn view [{:keys [data errors ui]} url]
   (let [w (get data url)]
     [:div {:style {:display "contents"}}
      [:div [:button.link-back {:on {:click [[:back]]}} (t "← Back")]]
@@ -84,7 +127,8 @@
          [:div (plan/session-chip (:session_id w))]
          [:h1 (:title w)]
          [:div.sub (str/join " · " (remove str/blank? [(ui/date-long (:date w)) (:slot w) (amount w)]))]
-         (when-let [p (status-pill w)] [:div.pills {:style {:margin-top "8px"}} p])]
+         (let [p (status-pill w) sp (send-panel w (get-in ui [:send (:id w)]))]
+           (when (or p sp) [:div.pills {:style {:margin-top "8px"}} p sp]))]
         [:div.row {:replicant/key "body"}
          (into (ui/card {:flex "1 1 320px"}) (goal-section w))
          (into (ui/card {:flex "2 1 420px"}) (or (structure-section w)

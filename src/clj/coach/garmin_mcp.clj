@@ -1,7 +1,9 @@
 (ns coach.garmin-mcp
   "DataSource backed by a local Taxuspt/garmin_mcp server over stdio.
   Read-only is enforced twice: the server only registers the tools in
-  `read-tools` (GARMIN_ENABLED_TOOLS), and `call` refuses anything else."
+  `read-tools` (GARMIN_ENABLED_TOOLS), and `call` refuses anything else.
+  The one exception is a planned workout the athlete sends to the watch:
+  `call-write` and a separate server for `write-tools` (coach.push)."
   (:require [clojure.string :as str]
             [coach.fit :as fit]
             [coach.mcp :as mcp]
@@ -93,6 +95,38 @@
      (if (error-text? res)
        (throw (ex-info res {:tool tool :args args :kind (error-kind res)}))
        res))))
+
+;; ---------------------------------------------------------------------------
+;; Writing: only a planned workout the athlete sends (coach.push). Its own
+;; allowlist and its own short-lived server, so the sync's server can't write.
+
+(def write-tools #{"upload_workout" "schedule_workout" "delete_workout"})
+
+(defn start-writer!
+  "A server that registers only `write-tools`. Stop it with `stop!`."
+  []
+  (let [stderr-file (paths/data-file "mcp-server.log")]
+    (mcp/start! {:cmd (server-cmd "garmin-mcp")
+                 :env (assoc (python-env) "GARMIN_ENABLED_TOOLS" (str/join "," (sort write-tools)))
+                 :stderr-file stderr-file})))
+
+(defn call-write
+  "Calls one of `write-tools`. Throws ex-info with :tool and :kind when the
+  tool reports an error, as text or as JSON {\"status\": \"failed\"}."
+  [client tool args]
+  (when-not (write-tools tool)
+    (throw (ex-info (str "Refusing Garmin tool: " tool) {:tool tool})))
+  (let [res (try (mcp/call-tool client tool args)
+                 (catch clojure.lang.ExceptionInfo e
+                   (throw (ex-info (ex-message e)
+                                   (assoc (ex-data e) :tool tool :kind (error-kind (ex-message e)))
+                                   e))))
+        failed? (and (map? res) (some-> (:status res) str str/lower-case (not= "success")))]
+    (cond
+      (error-text? res) (throw (ex-info res {:tool tool :kind (error-kind res)}))
+      failed?           (throw (ex-info (or (:message res) (str "Garmin: " tool " failed"))
+                                        {:tool tool :kind :garmin :result res}))
+      :else             res)))
 
 ;; ---------------------------------------------------------------------------
 ;; Normalisation (pure)
