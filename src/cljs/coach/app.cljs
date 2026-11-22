@@ -591,7 +591,7 @@
      [:nav.side {:aria-label (t "Main")}
       [:div.brand [:span.logo] "Coach"]
       (for [[k href label icon] nav-items]
-        [:a {:replicant/key k :href href :class (when (= k active) "active")
+        [:a {:replicant/key k :href href :class (when (= k active) "active") :title (t label)
              :aria-current (when (= k active) "page")
              :on {:click [[:scroll-top]]}}
          (ui/nav-icon icon) [:span (t label)]])]

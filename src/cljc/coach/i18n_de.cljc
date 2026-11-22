@@ -32,6 +32,8 @@
    "3D" "3D"
    "The 3D map could not be loaded: {0}" "Die 3D-Karte konnte nicht geladen werden: {0}"
    "Pins" "Pins"
+   "Fullscreen" "Vollbild"
+   "Exit fullscreen" "Vollbild beenden"
    "Pins on" "Pins ein"
    "Pins off" "Pins aus"
    "{0} activities here" "{0} Aktivitäten hier"

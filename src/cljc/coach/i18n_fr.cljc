@@ -33,6 +33,8 @@
    "3D" "3D"
    "The 3D map could not be loaded: {0}" "La carte 3D n'a pas pu être chargée : {0}"
    "Pins" "Repères"
+   "Fullscreen" "Plein écran"
+   "Exit fullscreen" "Quitter le plein écran"
    "Pins on" "Repères activés"
    "Pins off" "Repères désactivés"
    "{0} activities here" "{0} activités ici"

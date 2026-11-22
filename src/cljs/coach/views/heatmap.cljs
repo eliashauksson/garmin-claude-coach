@@ -31,20 +31,20 @@
   [["dark" (tk "Dark map")] ["light" (tk "Light map")] ["satellite" (tk "Satellite")]])
 
 (defn ground
-  "What's under the heat: \"dark\", \"light\" or \"satellite\" (remembered in this browser)."
+  "What's under the heat: \"dark\", \"light\" or \"satellite\" (remembered in this browser; light at first)."
   [ui]
   (let [g (or (:heat-base ui) (.getItem js/localStorage "heat-base"))]
-    (if (some #(= g (first %)) grounds) g "dark")))
+    (if (some #(= g (first %)) grounds) g "light")))
 
 (defn heat?
-  "Whether the heat is shown (remembered in this browser)."
+  "Whether the heat is shown (remembered in this browser; off at first)."
   [ui]
-  (not= "off" (or (:heat-show ui) (.getItem js/localStorage "heat-show"))))
+  (= "on" (or (:heat-show ui) (.getItem js/localStorage "heat-show"))))
 
 (defn pins?
-  "Whether the activity pins are shown (remembered in this browser; on by default)."
+  "Whether the activity pins are shown (remembered in this browser; off at first)."
   [ui]
-  (not= "off" (or (:heat-pins ui) (.getItem js/localStorage "heat-pins"))))
+  (= "on" (or (:heat-pins ui) (.getItem js/localStorage "heat-pins"))))
 
 (defn dim
   "\"2d\" or \"3d\" (remembered in this browser)."
@@ -62,17 +62,19 @@
   [:div.map-row [:div.map-row-lab (t label)] (into [:div.map-row-ctl] controls)])
 
 (defn- overlay
-  "Top-left over the map: the title with the number of activities, and the settings in a drop-down."
+  "Top-left over the map: one pill with the title, the number of activities and the filter summary;
+  it opens the settings."
   [{:keys [empty? n span sport present sync ui]}]
   (let [summary (str/join " · " (remove nil? [(t (some #(when (= span (first %)) (second %)) ranges))
                                               (when (seq sport)
                                                 (t (:label (some #(when (= sport (name (:id %))) %) ui/families))))]))]
     [:div.map-overlay
-     [:div.map-title [:b (t "Map")] [:span.sub (if (= 1 n) (t "1 activity") (t "{0} activities" n))]]
      (when empty?
        [:div.map-note (t "No activities with GPS yet: they appear here after the next sync.")])
      [:details.map-filters
-      [:summary (t "Filters") [:span.sub summary]]
+      [:summary {:title (t "Filters")}
+       [:b (t "Map")] [:span.sub (if (= 1 n) (t "1 activity") (t "{0} activities" n))]
+       [:span.sub summary]]
       [:div.map-panel
        (row (tk "Time range") (ui/seg span ranges [:set-param :range] {:soft? true}))
        (row (tk "Sport") (ui/seg sport (into [["" (tk "All sports")]]

@@ -275,6 +275,65 @@
   (atom nil))
 
 ;; ---------------------------------------------------------------------------
+;; Fullscreen: the map with its pill (not the navigation) fills the whole screen
+
+(def ^:private fullscreen-icon
+  (str "<svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\""
+       " stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+       "<path d=\"M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5\"/></svg>"))
+
+(def ^:private fullscreen-exit-icon
+  (str "<svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\""
+       " stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+       "<path d=\"M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5\"/></svg>"))
+
+(defn- toggle-fullscreen! [^js node]
+  (if (.-fullscreenElement js/document)
+    (.exitFullscreen js/document)
+    (some-> (.closest node ".heat-base") .requestFullscreen)))
+
+(defn- fullscreen-button
+  "A button (`tag`: \"a\" or \"button\") that toggles fullscreen for the map `node`, its icon and label
+  following the state. `.cleanup` removes its document listener."
+  [^js node tag]
+  (let [^js b (js/document.createElement tag)
+        update! (fn []
+                  (let [on? (some? (.-fullscreenElement js/document))
+                        label (if on? (t "Exit fullscreen") (t "Fullscreen"))]
+                    (set! (.-title b) label)
+                    (.setAttribute b "aria-label" label)
+                    (set! (.-innerHTML b) (if on? fullscreen-exit-icon fullscreen-icon))))]
+    (update!)
+    (.addEventListener b "click" (fn [e] (.preventDefault e) (toggle-fullscreen! node)))
+    (.addEventListener js/document "fullscreenchange" update!)
+    (set! (.-cleanup b) #(.removeEventListener js/document "fullscreenchange" update!))
+    b))
+
+(defn- fullscreen-control-2d [^js node]
+  (let [^js ctrl (L/control #js {:position "topright"})
+        btn      (volatile! nil)]
+    (set! (.-onAdd ctrl)
+          (fn [_]
+            (let [div (.create (.-DomUtil L) "div" "leaflet-bar leaflet-control map-reset")
+                  ^js a (fullscreen-button node "a")]
+              (set! (.-href a) "#")
+              (.setAttribute a "role" "button")
+              (.appendChild div a)
+              (.disableClickPropagation (.-DomEvent L) div)
+              (vreset! btn a)
+              div)))
+    (set! (.-onRemove ctrl) (fn [_] (some-> ^js @btn .-cleanup (#(%)))))
+    ctrl))
+
+(defn- fullscreen-control-3d [^js node]
+  (let [div (js/document.createElement "div")
+        ^js b (fullscreen-button node "button")]
+    (set! (.-className div) "maplibregl-ctrl maplibregl-ctrl-group")
+    (set! (.-type b) "button")
+    (.appendChild div b)
+    #js {:onAdd (fn [_] div) :onRemove (fn [_] ((.-cleanup b)) (.remove div))}))
+
+;; ---------------------------------------------------------------------------
 ;; 2D (Leaflet)
 
 (def ^:private pad "Canvas margin around the view (fraction of its size), so short pans show heat." 0.25)
@@ -341,7 +400,7 @@
   (let [^js m   (.-__map node)
         ^js sel (.-__sel node)]
     (.openOn (doto (.popup L #js {:className "map-popup" :maxWidth 300 :autoPanPaddingTopLeft #js [240 110]
-                                  :autoPanPaddingBottomRight #js [60 60]})
+                                  :autoPanPaddingBottomRight #js [60 90]})
                (.setLatLng ll)
                (.setContent (popup-node items)))
              m)
@@ -403,6 +462,7 @@
                                (let [c (.getCenter m)]
                                  (swap! camera assoc :lat (.-lat c) :lng (.-lng c) :zoom (.getZoom m)))))
             (.addTo (charts/reset-control fit! (t "Show all activities")) m)
+            (when js/document.fullscreenEnabled (.addTo (fullscreen-control-2d node) m))
             (let [layer (heat-layer #(vector (.-__tracks node) (.-__palette node) (.-__heat node)))]
               (.addTo layer m)
               (set! (.-__layer node) layer))
@@ -923,6 +983,7 @@
     (set! (.-__redraw node) redraw)
     (.addControl m (new (.-NavigationControl ml) #js {:visualizePitch true}) "top-right")
     (.addControl m (fit-control fit!) "top-right")
+    (when js/document.fullscreenEnabled (.addControl m (fullscreen-control-3d node) "top-right"))
     (.on m "load"
          (fn []
            (set! (.-__loaded node) true)
