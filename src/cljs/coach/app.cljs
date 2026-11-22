@@ -599,6 +599,7 @@
                                    "loading")
                                  (when (= :map page) "wide")
                                  (when (= :plan page) "plan")
+                                 (when (calendar-view? s) "cal")
                                  (when (= :map page) "full")])}
       (status/view s)
       (case page
