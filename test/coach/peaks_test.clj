@@ -142,6 +142,13 @@
     (testing "tracks are not limited to the manual cap"
       (is (= 120 (#'peaks/queue-squares! (for [la (range -60 60)] (str la ",0"))))))))
 
+(deftest queueing-at-the-same-moment
+  (temp-ds)
+  (let [keys (for [la (range 0 40)] (str la ",5"))
+        new (doall (pmap (fn [_] (#'peaks/queue-squares! keys)) (range 4)))]
+    (is (= 40 (reduce + new)) "every square is new exactly once, however many workers queue it")
+    (is (= 40 (count (queued))))))
+
 (deftest load-squares-fetches-in-order-and-stops-at-a-failure
   (temp-ds)
   (peaks/add-squares! ["46,7" "46,8" "46,9"])

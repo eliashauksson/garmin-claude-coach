@@ -343,16 +343,15 @@
   (count (filter have (summits/tiles-of-square k))))
 
 (defn- queue-squares!
-  "Puts squares (valid keys) on the download list, oldest first; the ones already there are skipped.
-  Returns how many were new."
+  "Puts squares (valid keys) on the download list, oldest first; the ones already there are skipped, also
+  when another athlete's worker queues the same square at the same moment. Returns how many were new."
   [keys]
-  (let [have (set (map :square (requested-squares)))
-        new (remove have (distinct keys))
-        now (str (java.time.Instant/now))]
+  (let [now (str (java.time.Instant/now))]
     (jdbc/with-transaction [tx (shared)]
-      (doseq [k new]
-        (jdbc/execute! tx ["INSERT INTO peak_squares (square, added_at) VALUES (?, ?)" k now])))
-    (count new)))
+      (reduce + 0 (for [k (distinct keys)]
+                    (:next.jdbc/update-count
+                     (jdbc/execute-one! tx ["INSERT OR IGNORE INTO peak_squares (square, added_at) VALUES (?, ?)"
+                                            k now])))))))
 
 (defn add-squares!
   "Asks for these 1° squares (keys like \"46,7\") to be downloaded; the ones already asked for are
