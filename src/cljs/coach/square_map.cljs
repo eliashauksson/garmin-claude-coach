@@ -22,14 +22,14 @@
 (defn- style
   "Leaflet path options of a square: [selected? state]."
   [renderer selected? state]
-  (let [c (charts/css-var (case state "ready" "--green" "heights" "--blue" "failed" "--red"
+  (let [c (charts/css-var (case state "ready" "--green" "names" "--blue" "failed" "--red"
                                 "queued" "--amber" "--text-3"))
         base #js {:renderer renderer :weight 1 :color c :opacity 0.8 :fillColor c :fillOpacity 0}]
     (cond
       selected?          (doto base (aset "fillColor" (charts/css-var "--amber")) (aset "fillOpacity" 0.45)
                            (aset "color" (charts/css-var "--amber")) (aset "weight" 2))
       (= "ready" state)  (doto base (aset "fillOpacity" 0.3))
-      (= "heights" state) (doto base (aset "fillOpacity" 0.3))
+      (= "names" state) (doto base (aset "fillOpacity" 0.3))
       (= "queued" state) (doto base (aset "dashArray" "4 3") (aset "weight" 2) (aset "fillOpacity" 0.1))
       (= "failed" state) (doto base (aset "weight" 2) (aset "fillOpacity" 0.1))
       :else              (doto base (aset "opacity" 0.35) (aset "weight" 0.5)))))
@@ -38,7 +38,7 @@
   (case state
     "queued"  (t "Waiting to download")
     "failed"  (t "The map server is busy; trying again later. ({0})" (or message ""))
-    "heights" (t "Peaks loaded, working out heights")
+    "names"   (t "Peaks loaded, adding names")
     "ready"   (t "Downloaded")
     ""))
 
@@ -47,7 +47,7 @@
     (set! (.-className div) "square-popup")
     (set! (.-innerHTML div)
           (str "<b>" (t "Square {0}" square) "</b><br>" (state-text sq)
-               (when (#{"heights" "ready"} state) (str "<br>" (t "{0} peaks · {1} bagged" peaks bagged)))))
+               (when (#{"names" "ready"} state) (str "<br>" (t "{0} peaks · {1} bagged" peaks bagged)))))
     (when (and requested (#{"queued" "failed"} state))
       (let [b (js/document.createElement "button")]
         (set! (.-className b) "btn-ghost")

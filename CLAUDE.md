@@ -46,26 +46,36 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - translate: translates Claude's texts once into all languages (translations table)
 - athlete: athlete.md read/save/backup · athlete-chat: editing athlete.md as a chat with Claude
 - auth: Garmin login expiry countdown · backup: zip snapshots of DB + athlete docs
-- peaks: peak bagging, komoot-style. OSM `natural=peak` nodes from Overpass, downloaded per 1° square (the world is cut into
-  squares; resources/peaks/regions.edn is only the default, Switzerland; each square fetched once), prominence from Terrarium
-  elevation tiles (z13, cached on disk under shared/cache/dem while squares load, then deleted), summit detection from GPS streams.
-  Squares come from three places: the default, the athlete's picks on the Peaks page map (≤ 100 at once, name search through
-  Nominatim), and every athlete's tracks: the first round of each athlete queues all squares their activities touch, then each
-  round those of the activities not checked yet (`queue-track-squares!`; virtual/indoor sports touch none).
-  `request!`/`work!` run one background worker per athlete (after each sync, at start, when squares are added; it runs until every
-  height is done while squares load). Shown: a peak on a list or with prominence ≥ the athlete's minimum (30 m, `sync_state`).
-  Shared by all athletes: `osm_peaks`, `peak_tiles`, `peak_squares`, `meta` live in shared/peaks.db (`$COACH_SHARED_DIR`, else
-  shared/ in the app folder; `paths/shared-file`; also the DEM cache), so a square one athlete downloads is there for everybody;
-  one prominence worker per install (`paths/try-lock`), fetches take turns (`paths/with-lock`). Per athlete: `summits`
+- peaks: peak bagging, komoot-style. **The peaks are the summits of the Kirmse/de Ferranti world prominence dataset (2023, every
+  summit ≥ 30 m prominence); we calculate no heights ourselves.** The dataset is cut into 10° blocks (`make prominence-data`,
+  dev/prominence_data.clj) and, with `official-ch.csv.gz` (swisstopo's swissNAMES3D summits, `make official-names`), uploaded as
+  assets of the GitHub release `peaks-data-2023` of this repo (`peaks/data-url`; `$COACH_PEAKS_DATA_URL` may be a URL or a
+  folder, for dev/tests). resources/peaks/blocks.edn lists the blocks that exist (rest of the world is sea).
+  Flow per requested 1° square (`run-once!`): `load-datasets!` (the square's block into `peaks`, Switzerland's official names
+  once, then `rematch-square!`) → detection for activities whose blocks are loaded → `load-names!` (OSM `natural=peak` named
+  nodes per tile through Overpass, then rematch) → `relink-summits!`. Rematching is from scratch and idempotent.
+  A dataset summit's id comes from its position (`summits/dataset-peak-id`, ≥ 10^13); a listed peak the dataset lacks keeps
+  its OSM id as a placeholder row. Names: peak lists > swisstopo (Switzerland only) > OSM, one donor per summit
+  (`summits/match-donors`, ≤ 250 m, donor height −60…+250 m over the dataset's, which runs low on sharp summits); a donor's
+  height replaces the dataset's `ele` (`ele_dem` keeps it). OSM/official points with no summit nearby are not shown (unless
+  listed); a summit nobody named shows unnamed with its height. `peak_links` (OSM id → summit) moves athletes' old bags
+  (athlete `summits.osm_id` was renamed `peak_id`). The dataset's licence is not stated: ask the author before publishing a release.
+  Squares come from three places: the default (Switzerland), the athlete's picks on the Peaks page map (≤ 100 at once, name
+  search through Nominatim), and every athlete's tracks: the first round of each athlete queues all squares their activities
+  touch, then each round those of the activities not checked yet (`queue-track-squares!`; virtual/indoor sports touch none).
+  Square states: queued (block missing) → names (peaks loaded, OSM names to come) → ready; failed keeps the error and retries.
+  `request!`/`work!` run one background worker per athlete (after each sync, at start, when squares are added). Shown: a peak
+  on a list or with prominence ≥ the athlete's minimum (30 m, `sync_state`).
+  Shared by all athletes: `peaks`, `dataset_blocks`, `official_peaks`, `peak_links`, `osm_peaks`, `peak_tiles`, `peak_squares`,
+  `meta` live in shared/peaks.db (`$COACH_SHARED_DIR`, else shared/ in the app folder; `paths/shared-file`), so a block one
+  athlete loads is there for everybody; downloads take turns (`paths/with-lock "peaks-fetch"`). Per athlete: `summits`
   (gps | manual | dismissed), `summits_checked`, the minimum prominence. No SQL joins across the two databases (merged in Clojure).
   `activity_metrics.peaks` is something else (best HR/power), hence "summits"
-  - summits: pure, detection (track within 75 m of the top and, with altitude, within 80 m below it), tiles/squares, list progress
-  - prominence: pure, highest-first flood over an elevation grid (one flood over the 10 km window; elevations are read lazily through
-    `Elevation`, so only the tiles the flood reaches are downloaded); a peak that is the highest in its window is a lower bound.
-    Heights run on `worker-count` threads (chunks of neighbouring peaks, results saved in batches), and start while later squares still download
+  - summits: pure, detection (track within 75 m of the top and, with altitude, within 80 m below it), tiles/squares, list progress,
+    dataset ids and `match-donors`
   - lists: resources/peaks/lists.edn, made by `make peak-lists` (dev/peak_lists.clj); listed peaks skip the prominence filter.
     The 4000er list is generated, not hand-checked
-  - privacy: Overpass sees tile/square boxes, Nominatim the search text, the elevation server tiles around peaks; tracks never leave the machine
+  - privacy: GitHub sees which 10° blocks are loaded, Overpass the tile/square boxes, Nominatim the search text; no elevation server any more; tracks never leave the machine
 
 ## Namespaces (src/cljs, src/cljc)
 - app: state, routing, `fetch!` of /api URLs · ui: formatters + shared components · charts: ECharts/Leaflet mount

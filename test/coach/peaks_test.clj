@@ -1,15 +1,13 @@
 (ns coach.peaks-test
-  (:require [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing]]
             [coach.db :as db]
             [coach.paths :as paths]
             [coach.peaks :as peaks]
             [coach.summits :as summits]
             [coach.track :as track]
             [next.jdbc :as jdbc])
-  (:import (java.awt.image BufferedImage)
-           (java.io ByteArrayOutputStream)
-           (javax.imageio ImageIO)))
+  (:import (java.io ByteArrayOutputStream)
+           (java.util.zip GZIPOutputStream)))
 
 (defn- temp-db [migrate!]
   (let [f (java.io.File/createTempFile "coach-peaks" ".db")]
@@ -22,8 +20,41 @@
   (peaks/use-shared! (temp-db db/migrate-peaks!))
   (temp-db db/migrate!))
 
-(defn- peak [id name ele lat prominence]
-  {:osm_id id :name name :ele ele :lat lat :lon 8.0 :prominence prominence :tags "{}"})
+(defn- gz [lines]
+  (let [o (ByteArrayOutputStream.)]
+    (with-open [w (java.io.OutputStreamWriter. (GZIPOutputStream. o) "UTF-8")]
+      (doseq [l lines] (.write w ^String l) (.write w "\n")))
+    (.toByteArray o)))
+
+(def ^:private id-big (summits/dataset-peak-id 46.5 8.0))
+(def ^:private id-bump (summits/dataset-peak-id 46.6 8.0))
+
+;; block 40_0 holds 46.x N, 8.x E: a big summit (the model cuts it: 2900 m, the survey says 3000)
+;; and a bump of 35 m of prominence
+(defn- fake-release
+  "A stand-in for the release: files by name; counts how often each was asked for."
+  [asked]
+  {"prominence-40_0.csv.gz" (gz ["46.5,8.0,2900.0,400.0" "46.6,8.0,1200.0,35.0" "broken line"])
+   "official-ch.csv.gz" (gz ["46.5002,8.0002,3000.0,Gross Horn" "46.9,8.9,2000.0,Elsewhere"])
+   :asked asked})
+
+(defn- with-release [release f]
+  (with-redefs [peaks/fetch-data (fn [file]
+                                   (swap! (:asked release) conj file)
+                                   (or (get release file) (throw (ex-info (str "no " file) {}))))]
+    (f)))
+
+(defn- osm-peak [id name ele lat lon]
+  {:osm_id id :name name :ele ele :lat lat :lon lon :tags "{}"})
+
+(defn- load-all! []
+  (with-redefs [peaks/fetch-box! (fn [bbox]
+                                   (let [now "2026-01-01T00:00:00Z"]
+                                     (doseq [t (summits/tiles-in bbox)]
+                                       (jdbc/execute! (peaks/shared)
+                                                      ["INSERT OR REPLACE INTO peak_tiles (tile, peaks, fetched_at) VALUES (?, 0, ?)" t now]))
+                                     0))]
+    [(#'peaks/load-datasets!) (#'peaks/load-names!)]))
 
 (defn- activity! [ds id sport]
   (db/upsert-activities! ds [{:id id :date "2026-07-14" :sport sport :name "Hike" :raw {} :fetched_at "x"}])
@@ -35,6 +66,16 @@
                           :t (vec (range 200))}
                    nil))
 
+(defn- peak-named [ds name] (first (filter #(= name (:name %)) (peaks/visible-peaks ds))))
+
+(defn- set-up!
+  "An athlete database on a shared one that has loaded the fake release for the square 46,8."
+  []
+  (let [ds (temp-ds) asked (atom [])]
+    (peaks/add-squares! ["46,8"])
+    (with-release (fake-release asked) load-all!)
+    [ds asked]))
+
 (deftest parse-ele
   (is (= 3000.0 (peaks/parse-ele "3,000")))
   (is (= 1234.0 (peaks/parse-ele "1234 m")))
@@ -42,52 +83,124 @@
   (is (nil? (peaks/parse-ele "many")))
   (is (nil? (peaks/parse-ele nil))))
 
-(deftest filter-by-prominence
-  (let [ds (temp-ds)]
-    (peaks/save-peaks! [(peak 1 "Big" 3000.0 46.5 400.0) (peak 2 "Bump" 40.0 46.6 12.0)
-                           (peak 3 "Unknown" 900.0 46.7 nil)])
-    (is (= ["Big"] (map :name (peaks/visible-peaks ds))) "minor and not-yet-computed peaks are hidden")
-    (peaks/set-min-prominence! ds 10)
-    (is (= #{"Big" "Bump"} (set (map :name (peaks/visible-peaks ds)))))
-    (testing "saving a peak again keeps the prominence worked out for it"
-      (db/query (peaks/shared) ["UPDATE osm_peaks SET prominence = 55, prominence_src = 'dem' WHERE osm_id = 3"])
-      (peaks/save-peaks! [(peak 3 "Unknown" 901.0 46.7 nil)])
-      (is (= 55.0 (:prominence (first (filter #(= 3 (:id %)) (peaks/visible-peaks ds)))))))))
+(deftest a-block-brings-the-peaks-unnamed
+  (let [ds (temp-ds) asked (atom [])]
+    (peaks/add-squares! ["46,8"])
+    (with-release (fake-release asked)
+      (fn []
+        (is (= 1 (:blocks (#'peaks/load-datasets!))))
+        (testing "the official names of Switzerland arrive with the first Swiss square; the broken line is skipped"
+          (is (= #{"prominence-40_0.csv.gz" "official-ch.csv.gz"} (set @asked))))
+        (testing "a second run downloads nothing"
+          (is (= 0 (:blocks (#'peaks/load-datasets!))))
+          (is (= 2 (count @asked))))))
+    (is (= #{id-big id-bump} (set (map :id (db/query (peaks/shared) ["SELECT id FROM peaks"])))))
+    (is (= #{id-big id-bump} (set (map :id (peaks/visible-peaks ds)))) "the dataset has nothing under 30 m")))
+
+(deftest names-and-heights-from-the-best-source
+  (let [[ds _] (set-up!)]
+    (testing "swisstopo names the summit and gives its surveyed height (the dataset's model is 100 m low)"
+      (let [p (peak-named ds "Gross Horn")]
+        (is (= id-big (:id p)))
+        (is (= 3000.0 (:ele p)))
+        (is (= "swisstopo" (:name_src (first (db/query (peaks/shared)
+                                                       ["SELECT name_src FROM peaks WHERE id = ?" id-big])))))))
+    (testing "OpenStreetMap names what swisstopo left unnamed; swisstopo keeps what it named"
+      (peaks/save-peaks! [(osm-peak 5 "Osm Name" 3002.0 46.5001 8.0001) (osm-peak 6 "Small Bump" 1210.0 46.6003 8.0)])
+      (#'peaks/rematch-square! "46,8")
+      (is (= "Gross Horn" (:name (peak-named ds "Gross Horn"))))
+      (is (nil? (peak-named ds "Osm Name")))
+      (is (= id-bump (:id (peak-named ds "Small Bump")))))
+    (testing "an unmatched OSM point creates no peak"
+      (peaks/save-peaks! [(osm-peak 7 "Far Away" 2000.0 46.55 8.5)])
+      (#'peaks/rematch-square! "46,8")
+      (is (nil? (peak-named ds "Far Away"))))
+    (testing "running it again changes nothing"
+      (let [before (db/query (peaks/shared) ["SELECT * FROM peaks ORDER BY id"])]
+        (#'peaks/rematch-square! "46,8")
+        (is (= before (db/query (peaks/shared) ["SELECT * FROM peaks ORDER BY id"])))))))
+
+(deftest minimum-prominence
+  (let [[ds _] (set-up!)]
+    (is (= 2 (count (peaks/visible-peaks ds))) "both are at least 30 m")
+    (peaks/set-min-prominence! ds 100)
+    (is (= [id-big] (map :id (peaks/visible-peaks ds))))))
+
+(deftest listed-peaks
+  (let [ds (temp-ds) asked (atom [])]
+    (with-redefs [peaks/lists (fn [] [{:id "l" :name "L"
+                                       :peaks [{:osm_id 9 :name "Listed Horn" :ele 3001.0 :lat 46.5003 :lon 8.0}
+                                               {:osm_id 10 :name "Lonely" :ele 500.0 :lat 10.0 :lon 10.0}]}])]
+      (peaks/seed-lists!)
+      (testing "a listed peak is shown before any block is there, under its own id"
+        (is (= #{9 10} (set (map :id (peaks/visible-peaks ds))))))
+      (peaks/add-squares! ["46,8"])
+      (with-release (fake-release asked) #(#'peaks/load-datasets!))
+      (testing "the dataset's summit takes it over: named and listed; the placeholder is gone; the list follows"
+        (is (= #{id-big 10} (set (map :id (filter :listed (peaks/visible-peaks ds))))))
+        (is (= "Listed Horn" (:name (peak-named ds "Listed Horn"))) "the list's name outranks swisstopo's")
+        (let [l (first (:lists (peaks/summary ds)))]
+          (peaks/bag! ds id-big "2026-08-01")
+          (is (= 1 (:bagged (first (:lists (peaks/summary ds))))))
+          (is (= 2 (:total l))))))))
 
 (deftest detection-and-dismissing
-  (let [ds (temp-ds)]
-    (peaks/save-peaks! [(peak 1 "Big" 3000.0 46.5 400.0)])
+  (let [[ds _] (set-up!)]
     (activity! ds 10 "hiking")
     (is (= 1 (peaks/detect-activity! ds {:id 10 :date "2026-07-14" :sport "hiking"})))
-    (let [[s :as summits] (peaks/activity-summits ds 10)]
-      (is (= 1 (count summits)))
-      (is (= "Big" (:name s)))
+    (let [[s :as visits] (peaks/activity-summits ds 10)]
+      (is (= 1 (count visits)))
+      (is (= "Gross Horn" (:name s)))
       (testing "a GPS bag is dismissed, not deleted, so detection doesn't bring it back"
         (peaks/unbag! ds (:visit_id s))
         (is (empty? (peaks/activity-summits ds 10)))
         (peaks/detect-activity! ds {:id 10 :date "2026-07-14" :sport "hiking"})
         (is (empty? (peaks/activity-summits ds 10)))))
     (testing "manual bags"
-      (let [id (peaks/bag! ds 1 "2026-08-01")]
+      (let [id (peaks/bag! ds id-big "2026-08-01")]
         (is (= 1 (:bagged (peaks/summary ds))))
         (is (= 1 (:visits (peaks/summary ds))))
         (peaks/unbag! ds id)
         (is (zero? (:bagged (peaks/summary ds))))))
     (testing "bad input"
       (is (thrown? Exception (peaks/bag! ds 99 "2026-08-01")))
-      (is (thrown? Exception (peaks/bag! ds 1 "yesterday"))))))
+      (is (thrown? Exception (peaks/bag! ds id-big "yesterday"))))))
 
 (deftest virtual-rides-bag-nothing
-  (let [ds (temp-ds)]
-    (peaks/save-peaks! [(peak 1 "Big" 3000.0 46.5 400.0)])
+  (let [[ds _] (set-up!)]
     (activity! ds 11 "virtual_ride")
     (is (zero? (peaks/detect-activity! ds {:id 11 :date "2026-07-14" :sport "virtual_ride"})))
     (is (empty? (peaks/activity-summits ds 11)))))
+
+(deftest bags-made-under-osm-ids-follow-their-summit
+  (let [[ds _] (set-up!)]
+    (peaks/save-peaks! [(osm-peak 5 "Osm Name" 3002.0 46.5001 8.0001)])
+    (#'peaks/rematch-square! "46,8")
+    (testing "the athlete's old rows hold the OSM id"
+      (jdbc/execute! ds ["INSERT INTO summits (peak_id, activity_id, date, source, created_at)
+                          VALUES (5, NULL, '2026-05-01', 'manual', 'x'), (77, NULL, '2026-05-02', 'manual', 'x')"])
+      (is (= 1 (#'peaks/relink-summits! ds)))
+      (is (= [id-big 77] (map :peak_id (db/query ds ["SELECT peak_id FROM summits ORDER BY id"])))
+          "the one with a summit is moved, an OSM point that was no summit stays (hidden)"))))
+
+(deftest old-summit-tables-are-renamed
+  (let [f (java.io.File/createTempFile "coach-old" ".db") _ (.deleteOnExit f)
+        ds (db/datasource (str f))]
+    (jdbc/execute! ds ["CREATE TABLE summits (id INTEGER PRIMARY KEY AUTOINCREMENT, osm_id INTEGER NOT NULL,
+                         activity_id INTEGER, date TEXT NOT NULL, time_s REAL, dist_m REAL, source TEXT NOT NULL,
+                         created_at TEXT NOT NULL)"])
+    (jdbc/execute! ds ["INSERT INTO summits (osm_id, date, source, created_at) VALUES (5, '2026-01-01', 'manual', 'x')"])
+    (db/migrate! ds)
+    (is (= [5] (map :peak_id (db/query ds ["SELECT peak_id FROM summits"]))))))
 
 (defn- fetched! [k]
   (let [now "2026-01-01T00:00:00Z"]
     (doseq [t (summits/tiles-of-square k)]
       (jdbc/execute! (peaks/shared) ["INSERT OR REPLACE INTO peak_tiles (tile, peaks, fetched_at) VALUES (?, 0, ?)" t now]))))
+
+(defn- block! [k]
+  (jdbc/execute! (peaks/shared) ["INSERT OR REPLACE INTO dataset_blocks (block, rows, fetched_at) VALUES (?, 0, 'x')"
+                                 (summits/square-block k)]))
 
 (deftest squares
   (let [ds (temp-ds)
@@ -98,23 +211,36 @@
       (is (thrown? Exception (peaks/add-squares! ["99,99"])))
       (is (thrown? Exception (peaks/add-squares! [])))
       (is (thrown? Exception (peaks/add-squares! (for [la (range -85 15) lo [0 1]] (str la "," lo)))) "over the cap"))
-    (testing "states: queued, failed, heights, ready"
+    (testing "states: queued, failed, names, ready"
       (is (= "queued" (state ds "46,8")))
       (jdbc/execute! (peaks/shared) ["UPDATE peak_squares SET message = 'busy' WHERE square = '46,8'"])
       (is (= "failed" (state ds "46,8")))
+      (jdbc/execute! (peaks/shared) ["UPDATE peak_squares SET message = NULL WHERE square = '46,8'"])
+      (block! "46,8")
+      (is (= "names" (state ds "46,8")) "the peaks are loaded, OpenStreetMap's names still to come")
       (fetched! "46,8")
-      (peaks/save-peaks! [(peak 1 "A" 3000.0 46.5 nil)])
-      (is (= "heights" (state ds "46,8")) "all tiles fetched, a height still to work out")
-      (db/query (peaks/shared) ["UPDATE osm_peaks SET prominence = 300 WHERE osm_id = 1"])
       (is (= "ready" (state ds "46,8")))
-      (is (= 1 (:downloaded (peaks/squares-status ds)))))
+      (is (= 3 (:downloaded (peaks/squares-status ds))) "46,7 and 47,8 share the loaded block"))
     (testing "only a square still waiting can be cancelled"
       (is (thrown? Exception (peaks/cancel-square! "46,8")))
       (peaks/cancel-square! "47,8")
-      (is (nil? (state ds "47,8"))))
-    (testing "the athlete's bags are counted per square"
-      (peaks/bag! ds 1 "2026-08-01")
-      (is (= 1 (:bagged (first (filter #(= "46,8" (:square %)) (:squares (peaks/squares-status ds))))))))))
+      (is (nil? (state ds "47,8"))))))
+
+(deftest a-failed-block-is-noted-and-the-others-go-on
+  (let [ds (temp-ds) asked (atom [])]
+    (peaks/add-squares! ["10,10" "46,8"])
+    (with-release (assoc (fake-release asked) "prominence-10_10.csv.gz" nil)
+      (fn []
+        (with-redefs [peaks/fetch-data (let [orig @#'peaks/fetch-data]
+                                         (fn [file]
+                                           (if (= "prominence-10_10.csv.gz" file)
+                                             (throw (ex-info "offline" {}))
+                                             (orig file))))]
+          (let [r (#'peaks/load-datasets!)]
+            (is (:failed? r))
+            (is (= 1 (:blocks r)))))))
+    (is (= "offline" (:message (first (filter #(= "10,10" (:square %)) (#'peaks/requested-squares))))))
+    (is (= "failed" (:state (first (filter #(= "10,10" (:square %)) (:squares (peaks/squares-status ds)))))))))
 
 (defn- queued [] (set (map :square (#'peaks/requested-squares))))
 
@@ -149,7 +275,7 @@
     (is (= 40 (reduce + new)) "every square is new exactly once, however many workers queue it")
     (is (= 40 (count (queued))))))
 
-(deftest load-squares-fetches-in-order-and-stops-at-a-failure
+(deftest names-are-fetched-in-order-and-stop-at-a-failure
   (temp-ds)
   (peaks/add-squares! ["46,7" "46,8" "46,9"])
   (let [calls (atom [])]
@@ -158,9 +284,22 @@
                                      (when (= [46 8 47 9] bbox) (throw (Exception. "Overpass busy")))
                                      (fetched! (summits/square-key (first bbox) (second bbox)))
                                      0)]
-      (is (= {:chunks 1 :failed? true} (#'peaks/load-squares!)))
+      (is (= {:chunks 1 :failed? true} (#'peaks/load-names!)))
       (is (= [[46 7 47 8] [46 8 47 9]] @calls) "stopped at the first failure, the third was not tried")
       (is (= "Overpass busy" (:message (second (#'peaks/requested-squares))))))))
+
+(deftest the-update-detects-before-the-names-arrive
+  (let [ds (temp-ds) asked (atom [])]
+    (activity! ds 12 "hiking")
+    (db/upsert-metrics! ds [{:activity_id 12 :track [(track/encode [[46.49 8.0] [46.51 8.0]])]}])
+    (with-release (fake-release asked)
+      (fn []
+        (with-redefs [peaks/fetch-box! (fn [_] (throw (Exception. "Overpass busy")))
+                      peaks/retry-ms 1 peaks/max-attempts 1]
+          (let [r (peaks/update! ds)]
+            (is (:failed? r) "the names are still to come")
+            (is (= 1 (:summits r)) "the bag is there already")))))
+    (is (= 1 (count (peaks/activity-summits ds 12))))))
 
 (deftest searching
   (temp-ds)
@@ -172,49 +311,23 @@
       (is (= 1 @calls) "the same question twice asks once"))))
 
 (deftest compact-map-rows
-  (let [ds (temp-ds)]
-    (peaks/save-peaks! [(peak 1 "Big" 3000.0 46.5 412.6) (peak 2 "Bump" 40.0 46.6 12.0)])
-    (is (= [[1 46.5 8.0 3000.0 413 0 false "Big" nil]] (peaks/map-peaks ds)))))
-
-(defn- png
-  "A Terrarium tile of one height: metres + 32768 = R·256 + G."
-  [metres]
-  (let [v (+ metres 32768) img (BufferedImage. 256 256 BufferedImage/TYPE_INT_RGB)
-        rgb (bit-or (bit-shift-left (quot v 256) 16) (bit-shift-left (rem v 256) 8))]
-    (dotimes [y 256] (dotimes [x 256] (.setRGB img x y rgb)))
-    (let [o (ByteArrayOutputStream.)] (ImageIO/write img "png" o) (.toByteArray o))))
-
-(deftest elevation-tiles-are-downloaded-once
-  (let [dir (doto (java.io.File/createTempFile "coach-dem" "") .delete .mkdirs)
-        downloads (atom 0)]
-    (paths/use-shared-dir! dir)
-    (with-redefs [peaks/download-dem-png (fn [_ _ _] (swap! downloads inc) (png 1234))]
-      (let [dem-tile #'peaks/dem-tile]
-        (is (= 1234.0 (double (aget ^floats (dem-tile 13 4270 2905) 0))))
-        (is (= 1 @downloads))
-        (testing "a second look (also after a restart: the memory cache is cleared) reads the disk"
-          (.clear ^java.util.Map @#'peaks/dem-cache)
-          (is (= 1234.0 (double (aget ^floats (dem-tile 13 4270 2905) 100))))
-          (is (= 1 @downloads)))
-        (testing "no data (open sea) is flat at 0 m"
-          (with-redefs [peaks/download-dem-png (fn [_ _ _] nil)]
-            (is (= 0.0 (double (aget ^floats (dem-tile 13 1 1) 5))))))
-        (peaks/clean-dem-cache!)
-        (is (not (.exists (io/file (paths/shared-file "cache" "dem")))) "cleaned up")))))
+  (let [[ds _] (set-up!)]
+    (is (= [[id-big 46.5 8.0 3000.0 400 0 false "Gross Horn" nil]
+            [id-bump 46.6 8.0 1200.0 35 0 false nil nil]]
+           (sort-by first (peaks/map-peaks ds))))))
 
 (deftest peaks-are-shared-bags-are-not
-  (let [a (temp-ds)
+  (let [[a _] (set-up!)
         b (temp-db db/migrate!)]
-    (peaks/save-peaks! [(peak 1 "Big" 3000.0 46.5 400.0) (peak 2 "Other" 2500.0 46.6 300.0)])
-    (peaks/bag! a 1 "2026-08-01")
-    (peaks/bag! b 2 "2026-08-02")
-    (is (= #{"Big" "Other"} (set (map :name (peaks/visible-peaks a)))) "the peaks are the same ...")
-    (is (= (set (map :name (peaks/visible-peaks a))) (set (map :name (peaks/visible-peaks b)))))
-    (is (= ["Big"] (map :name (:peaks (peaks/summary a)))) "... the bags are not")
-    (is (= ["Other"] (map :name (:peaks (peaks/summary b)))))
+    (peaks/bag! a id-big "2026-08-01")
+    (peaks/bag! b id-bump "2026-08-02")
+    (is (= (set (map :id (peaks/visible-peaks a))) (set (map :id (peaks/visible-peaks b))))
+        "the peaks are the same ...")
+    (is (= [id-big] (map :id (:peaks (peaks/summary a)))) "... the bags are not")
+    (is (= [id-bump] (map :id (:peaks (peaks/summary b)))))
     (testing "a square asked for by one is there for the other"
       (peaks/add-squares! ["46,7"])
-      (is (= ["46,7"] (map :square (:squares (peaks/squares-status b))))))))
+      (is (some #{"46,7"} (map :square (:squares (peaks/squares-status b))))))))
 
 (deftest locks
   (testing "a lock held by someone else is busy for try-lock, and free again afterwards"
@@ -226,35 +339,3 @@
         (is (= paths/busy @inner)))
       (is (thrown? Exception (paths/with-lock "t" (fn [] (throw (Exception. "x"))))))
       (is (= :done (paths/try-lock "t" (fn [] :done))) "released after an exception"))))
-
-(deftest elevation-window-reads-tiles-only-where-asked
-  (testing "pixels come from the right tile, and tiles the flood never reaches are not loaded"
-    (let [asked (atom [])
-          ;; every tile holds its own x and y, so a wrong tile or pixel shows
-          tile (fn [x y] (let [a (float-array (* 256 256))]
-                           (dotimes [py 256]
-                             (dotimes [px 256]
-                               (aset a (+ px (* py 256)) (float (+ (* 10 x) y (/ px 1000.0) (/ py 100000.0))))))
-                           a))]
-      (with-redefs [peaks/dem-tile (fn [_ x y] (swap! asked conj [x y]) (tile (mod x 100) (mod y 100)))]
-        (let [{:keys [w at cx cy]} (peaks/dem-grid 46.5 8.0 10000)
-              centre (.at ^coach.prominence.Elevation at cx cy)]
-          (is (= 1 (count @asked)) "nothing is read before the first pixel is asked for")
-          (is (< 1500 w 1600) "10 km each way at 46.5°")
-          (.at ^coach.prominence.Elevation at 0 0)
-          (.at ^coach.prominence.Elevation at (dec w) (dec w))
-          (.at ^coach.prominence.Elevation at 3 3)
-          (is (= 3 (count (distinct @asked))) "a corner, the opposite corner and the centre: three tiles, once each")
-          (is (< (Math/abs (- centre (.at ^coach.prominence.Elevation at cx cy))) 1e-9)))))))
-
-(deftest prominence-runs-on-several-threads-and-saves-everything
-  (temp-ds)
-  (peaks/save-peaks! (for [i (range 1 201)] (peak i (str "P" i) (+ 1000 i) (+ 46.0 (/ i 1000.0)) nil)))
-  (with-redefs [peaks/peak-prominence (fn [p]
-                                        (when (= 77 (:osm_id p)) (throw (ex-info "no tiles" {})))
-                                        {:prominence (double (:ele p)) :src "dem"})]
-    (is (= 199 (#'peaks/compute-prominence! nil))))
-  (let [rows (db/query (peaks/shared) ["SELECT osm_id, prominence, prominence_src FROM osm_peaks ORDER BY osm_id"])]
-    (is (= 199 (count (filter :prominence rows))))
-    (is (nil? (:prominence (nth rows 76))) "the one that failed is still waiting")
-    (is (= 1 (peaks/pending-prominence)))))

@@ -2,7 +2,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [coach.summits :as summits]))
 
-(def peak {:osm_id 1 :lat 46.5 :lon 8.0 :ele 3000.0})
+(def peak {:id 1 :lat 46.5 :lon 8.0 :ele 3000.0})
 
 (defn- walk
   "A stream passing `off` metres east of the peak, going north, at altitude `alt`."
@@ -18,7 +18,7 @@
   (testing "passing 40 m away at the summit's height bags it"
     (let [[hit :as hits] (summits/detect (walk 40 2995.0) [peak])]
       (is (= 1 (count hits)))
-      (is (= 1 (:osm_id hit)))
+      (is (= 1 (:id hit)))
       (is (< (Math/abs (- 40.0 (:dist_m hit))) 2.0))))
   (testing "passing 150 m away does not"
     (is (empty? (summits/detect (walk 150 2995.0) [peak]))))
@@ -57,7 +57,7 @@
   (is (summits/visible? {:prominence 5.0 :listed true} 30) "list peaks skip the filter"))
 
 (deftest progress
-  (let [p (summits/list-progress {:id "x" :name "X" :peaks [{:osm_id 1} {:osm_id 2} {:osm_id 3}]} [2 9])]
+  (let [p (summits/list-progress {:id "x" :name "X" :peaks [{:peak_id 1} {:peak_id 2} {:peak_id 3}]} [2 9])]
     (is (= 3 (:total p)))
     (is (= 1 (:bagged p)))
     (is (= [false true false] (mapv :bagged? (:peaks p))))))
@@ -92,3 +92,45 @@
   (let [r (summits/search-result {:display_name "Russia" :boundingbox ["41.2" "81.9" "19.6" "180"] :type "country"})]
     (is (:too_big r))
     (is (empty? (:squares r)) "nothing is selected for a place that is too big")))
+
+(deftest dataset-ids-from-positions
+  (let [a (summits/dataset-peak-id 46.5 8.0) b (summits/dataset-peak-id 46.5001 8.0)]
+    (is (summits/dataset-peak-id? a))
+    (is (not (summits/dataset-peak-id? 13800000000)) "OSM ids are below")
+    (is (not= a b))
+    (is (= a (summits/dataset-peak-id 46.50000001 7.99999999)) "the same 4 decimals, the same id")
+    (is (< (summits/dataset-peak-id 84.9999 179.9999) 9007199254740992) "safe in JSON")
+    (is (summits/dataset-peak-id? (summits/dataset-peak-id -84.9 -179.9)))))
+
+(defn- summit [id lat lon ele] {:id id :lat lat :lon lon :ele ele})
+(defn- donor [id lat lon ele rank & [claim?]]
+  {:id id :lat lat :lon lon :ele ele :rank rank :claim? (if (nil? claim?) true claim?)})
+
+(deftest matching-names-to-summits
+  (let [top (summit 1 46.5 8.0 4430.0)    ; dataset height, cut by the terrain model
+        other (summit 2 46.51 8.0 3000.0)
+        m #(summits/match-donors [top other] %)]
+    (testing "a donor 50 m away with the surveyed height (75 m higher) names the summit"
+      (is (= {1 505} (update-vals (:named (m [(donor 505 46.50045 8.0 4505.0 2)])) :id))))
+    (testing "too far, or a height that can't be the same peak"
+      (is (empty? (:named (m [(donor 5 46.504 8.0 4430.0 2)]))) "450 m away")
+      (is (empty? (:named (m [(donor 6 46.5 8.0 4800.0 2)]))) "370 m above the summit")
+      (is (empty? (:named (m [(donor 7 46.5 8.0 4300.0 2)]))) "130 m below: the dataset is never that much higher"))
+    (testing "without a height only very close counts"
+      (is (= [1] (keys (:named (m [(donor 8 46.5005 8.0 nil 2)])))))
+      (is (empty? (:named (m [(donor 9 46.5015 8.0 nil 2)])))))
+    (testing "one name per summit, the nearest wins; the other point is still the same peak"
+      (let [r (m [(donor 10 46.5003 8.0 4430.0 2) (donor 11 46.5001 8.0 4430.0 2)])]
+        (is (= 11 (:id (get (:named r) 1))))
+        (is (= {10 1, 11 1} (:links r)))))
+    (testing "a lower rank goes first even when farther"
+      (let [r (m [(donor 12 46.5001 8.0 4430.0 2) (donor 13 46.5008 8.0 4430.0 0)])]
+        (is (= 13 (:id (get (:named r) 1))))
+        (is (= 1 (get (:links r) 12)))))
+    (testing "a point without a name never takes a summit but is linked"
+      (let [r (m [(donor 14 46.5001 8.0 4430.0 2 false)])]
+        (is (empty? (:named r)))
+        (is (= {14 1} (:links r)))))
+    (testing "two summits, two donors: each gets its own"
+      (let [r (m [(donor 15 46.5 8.0 4430.0 2) (donor 16 46.51 8.0 3000.0 2)])]
+        (is (= {1 15, 2 16} (update-vals (:named r) :id)))))))

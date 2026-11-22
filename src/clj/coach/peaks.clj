@@ -1,17 +1,19 @@
 (ns coach.peaks
-  "Peak bagging: OpenStreetMap peaks (Overpass: a 0.25° tile for each activity track, a 1° square at a
-  time for the squares the athletes download, each fetched once), their prominence from open elevation tiles
-  (coach.prominence), and which of them an activity's GPS track passed (coach.summits). The athlete's
-  tracks never leave the machine: Overpass sees tile and square boxes, the elevation server the tiles
-  around a peak.
+  "Peak bagging. The peaks are the summits of Andrew Kirmse's and Jonathan de Ferranti's world prominence
+  dataset (2023: every summit that stands at least 30 m above its saddle), loaded in 10° blocks from a
+  release of this project's repository. We work out no heights ourselves. Names come from the peak lists
+  (resources/peaks/lists.edn), from swisstopo's swissNAMES3D in Switzerland and from OpenStreetMap
+  elsewhere (Overpass: the named peaks of a 0.25° tile, a 1° square at a time, each fetched once); each name
+  is given to the dataset summit it matches (coach.summits/match-donors). The athlete's tracks never leave
+  the machine: GitHub sees which blocks are loaded, Overpass the tile and square boxes.
 
-  The peaks, their prominence and the downloaded squares are the same for everybody, so they live once per
+  The peaks, the loaded blocks and the downloaded squares are the same for everybody, so they live once per
   install in a shared database (shared/peaks.db, `shared`); what an athlete bagged (`summits`) and their
   minimum prominence are in their own database. Functions without a `ds` argument work on the shared
   data; those with one on the athlete's.
 
-  OSM tags every bump as a peak, so a peak is shown only when its prominence reaches the athlete's
-  minimum (30 m by default), unless it is on a peak list."
+  A peak is shown when its prominence reaches the athlete's minimum (30 m, the dataset's own limit, by
+  default) or it is on a peak list."
   (:require [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -20,36 +22,26 @@
             [coach.db :as db]
             [coach.i18n :as i18n]
             [coach.paths :as paths]
-            [coach.prominence :as prominence]
             [coach.summits :as summits]
             [coach.track :as track]
             [next.jdbc :as jdbc])
-  (:import (coach.prominence Elevation)
-           (java.awt.image BufferedImage)
-           (java.io ByteArrayInputStream)
+  (:import (java.io ByteArrayInputStream)
            (java.net URI URLEncoder)
            (java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers)
            (java.nio.charset StandardCharsets)
-           (java.nio.file Files StandardCopyOption)
+           (java.nio.file Files)
            (java.time Duration LocalDate)
-           (javax.imageio ImageIO)))
+           (java.util.zip GZIPInputStream)))
 
 (def overpass-urls
   "The public Overpass servers, tried in turn when one is busy."
   ["https://overpass-api.de/api/interpreter" "https://overpass.kumi.systems/api/interpreter"])
-(def dem-url "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/%d/%d/%d.png")
-(def dem-zoom 13)
-(def window-m
-  "Prominence is looked for within this far of the summit; a peak still bounded at the edge only has a lower bound."
-  10000)
-(def worker-count
-  "Threads working out prominence at once: a few, as the machine may be a small server that does other things."
-  (max 1 (min 4 (dec (.availableProcessors (Runtime/getRuntime))))))
+(def data-url
+  "Where the dataset's blocks are (assets of a release of this repository, made by `make prominence-data` and
+  `make official-names`). $COACH_PEAKS_DATA_URL may point elsewhere: a URL or a folder."
+  "https://github.com/eliashauksson/garmin-claude-coach/releases/download/peaks-data-2023")
 (def default-min-prominence 30)
-(def budget-ms
-  "How long an update spends on prominence when no region is loading; the rest follows at the next sync."
-  180000)
-(def retry-ms "When Overpass was busy, the update tries the failed chunks again after this long …" 300000)
+(def retry-ms "When a server was busy, the update tries the failed chunks again after this long …" 300000)
 (def max-attempts "… up to this many times." 6)
 
 (def ^:private ^HttpClient http
@@ -69,7 +61,7 @@
   (reset! shared-ds ds))
 
 (defn shared
-  "The database every athlete of this install shares (peaks, prominence, squares), opened once."
+  "The database every athlete of this install shares (peaks, loaded blocks, squares), opened once."
   []
   (or @shared-ds
       (locking shared-ds
@@ -77,9 +69,11 @@
 
 (defn- meta-get [k] (:v (first (db/query (shared) ["SELECT v FROM meta WHERE k = ?" (name k)]))))
 
-(defn- meta-set! [k v]
-  (jdbc/execute! (shared) ["INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v"
-                           (name k) (str v)]))
+(defn- meta-set!
+  ([k v] (meta-set! (shared) k v))
+  ([ds k v]
+   (jdbc/execute! ds ["INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v"
+                      (name k) (str v)])))
 
 ;; ---------------------------------------------------------------------------
 ;; Settings
@@ -93,7 +87,7 @@
   (db/set-state! ds :peak_min_prominence (double m)))
 
 ;; ---------------------------------------------------------------------------
-;; Overpass: the peaks of a tile
+;; Overpass: the named peaks of a tile
 
 (defn parse-ele
   "OSM's `ele` tag as metres: \"3,000\", \"1234 m\", \"4478.4\"; nil when there is no number."
@@ -135,32 +129,28 @@
         :else (throw (ex-info "The Overpass servers are busy." {}))))))
 
 (defn peaks-query
-  "Overpass QL for every natural=peak node in a [south west north east] box."
+  "Overpass QL for every named natural=peak node in a [south west north east] box (the heights and the
+  unnamed bumps come from the dataset)."
   [[s w n e]]
-  (format "[out:json][timeout:120];node[\"natural\"=\"peak\"](%s,%s,%s,%s);out;" s w n e))
+  (format "[out:json][timeout:120];node[\"natural\"=\"peak\"][\"name\"](%s,%s,%s,%s);out;" s w n e))
 
 (defn- element->row [{:keys [id lat lon tags]}]
-  {:osm_id id :name (:name tags) :ele (parse-ele (:ele tags)) :lat lat :lon lon
-   :prominence (parse-ele (:prominence tags)) :tags (json/write-str tags)})
+  {:osm_id id :name (:name tags) :ele (parse-ele (:ele tags)) :lat lat :lon lon :tags (json/write-str tags)})
 
 (defn save-peaks!
-  "Upserts peak rows into the shared database. The prominence is kept when a peak is saved again, unless OSM gives one."
+  "Upserts OSM peak rows (the names to give) into the shared database; a peak on a list stays listed."
   [rows]
   (let [now (str (java.time.Instant/now))]
     (jdbc/with-transaction [tx (shared)]
-      (doseq [{:keys [osm_id name ele lat lon prominence tags]} rows]
-        (jdbc/execute! tx ["INSERT INTO osm_peaks
-                              (osm_id, name, ele, lat, lon, prominence, prominence_src, tags, fetched_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (doseq [{:keys [osm_id name ele lat lon tags]} rows]
+        (jdbc/execute! tx ["INSERT INTO osm_peaks (osm_id, name, ele, lat, lon, tags, fetched_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
                             ON CONFLICT(osm_id) DO UPDATE SET name = excluded.name, ele = excluded.ele,
-                              lat = excluded.lat, lon = excluded.lon, tags = excluded.tags,
-                              prominence = coalesce(excluded.prominence, osm_peaks.prominence),
-                              prominence_src = CASE WHEN excluded.prominence IS NOT NULL THEN 'osm'
-                                                    ELSE osm_peaks.prominence_src END"
-                           osm_id name ele lat lon prominence (when prominence "osm") tags now])))))
+                              lat = excluded.lat, lon = excluded.lon, tags = excluded.tags"
+                           osm_id name ele lat lon tags now])))))
 
 (defn fetch-box!
-  "Downloads the peaks of a tile-aligned [south west north east] box and records each of its tiles as
+  "Downloads the named peaks of a tile-aligned [south west north east] box and records each of its tiles as
   fetched. Returns how many peaks."
   [bbox]
   (let [rows (->> (:elements (overpass (peaks-query bbox)))
@@ -191,119 +181,143 @@
         true))))
 
 ;; ---------------------------------------------------------------------------
-;; Elevation tiles (Terrarium PNG: metres = R·256 + G + B/256 − 32768)
+;; The dataset: 10° blocks and the Swiss names, from the release
 
-(def ^:private dem-memory-tiles
-  "Decoded tiles kept in memory (each 256 kB): room for the windows of every worker."
-  256)
+(defn- fetch-data
+  "The bytes of a file of the release (or of the folder $COACH_PEAKS_DATA_URL names)."
+  ^bytes [file]
+  (let [base (or (System/getenv "COACH_PEAKS_DATA_URL") data-url)]
+    (if (re-find #"^https?://" base)
+      (let [resp (.send http (-> (HttpRequest/newBuilder (URI/create (str base "/" file)))
+                                 (.timeout (Duration/ofSeconds 180))
+                                 (.header "User-Agent" user-agent) (.GET) (.build))
+                        (HttpResponse$BodyHandlers/ofByteArray))]
+        (when-not (= 200 (.statusCode resp))
+          (throw (ex-info (i18n/t "The peak data server answered HTTP {0} for {1}." (.statusCode resp) file) {})))
+        (.body resp))
+      (Files/readAllBytes (.toPath (io/file base file))))))
 
-(defonce ^:private dem-cache
-  (java.util.Collections/synchronizedMap
-   (proxy [java.util.LinkedHashMap] [64 (float 0.75) true]
-     (removeEldestEntry [_] (> (.size ^java.util.Map this) dem-memory-tiles)))))
-
-(defonce ^:private dem-loading (java.util.concurrent.ConcurrentHashMap.)) ; tile → delay of its load
-
-(defn- dem-dir ^java.io.File [] (io/file (paths/shared-file "cache" "dem")))
-
-(defn clean-dem-cache!
-  "Deletes the downloaded elevation tiles (a region's worth is hundreds of MB)."
+(defn- blocks
+  "{block rows}: the blocks that exist (resources/peaks/blocks.edn); the rest of the world is sea."
   []
-  (let [d (dem-dir)]
-    (when (.exists d)
-      (doseq [^java.io.File f (reverse (file-seq d))] (.delete f)))))
+  (if-let [r (io/resource "peaks/blocks.edn")] (edn/read-string (slurp r)) {}))
 
-(defn- download-dem-png
-  "The PNG bytes of an elevation tile; nil where there is no data (open sea)."
-  ^bytes [z x y]
-  (let [resp (.send http (-> (HttpRequest/newBuilder (URI/create (format dem-url z x y)))
-                             (.timeout (Duration/ofSeconds 30))
-                             (.header "User-Agent" user-agent) (.GET) (.build))
-                    (HttpResponse$BodyHandlers/ofByteArray))
-        status (.statusCode resp)]
-    (cond
-      (= 404 status) nil
-      (not= 200 status) (throw (ex-info (str "Elevation tiles answered HTTP " status) {:status status}))
-      :else (.body resp))))
+(defn- gz-lines
+  "Calls `f` with the lines of a gzipped text file."
+  [^bytes data f]
+  (with-open [r (io/reader (GZIPInputStream. (ByteArrayInputStream. data)) :encoding "UTF-8")]
+    (f (line-seq r))))
 
-(defn- dem-png
-  "The tile's PNG: from the disk cache, else downloaded once and kept there."
-  [z x y]
-  (let [f (io/file (dem-dir) (str z) (str x) (str y ".png"))]
-    (if (.exists f)
-      (Files/readAllBytes (.toPath f))
-      (when-let [bytes (download-dem-png z x y)]
-        (try (.mkdirs (.getParentFile f))
-             (let [part (io/file (str f ".part"))]
-               (with-open [o (io/output-stream part)] (.write o ^bytes bytes))
-               (Files/move (.toPath part) (.toPath f)
-                         (into-array java.nio.file.CopyOption [StandardCopyOption/REPLACE_EXISTING])))
-             (catch java.io.IOException _ nil)) ; no disk cache is not a reason to fail
-        bytes))))
+(defn- loaded-blocks []
+  (into #{} (map :block) (db/query (shared) ["SELECT block FROM dataset_blocks"])))
 
-(defn- decode-dem ^floats [^bytes png]
-  (let [out (float-array (* 256 256))]
-    (when png
-      (let [^BufferedImage img (ImageIO/read (ByteArrayInputStream. png))
-            ^ints px (.getRGB img 0 0 256 256 nil 0 256)]
-        (dotimes [i (* 256 256)]
-          (let [rgb (aget px i)
-                r (bit-and (bit-shift-right rgb 16) 255) g (bit-and (bit-shift-right rgb 8) 255) b (bit-and rgb 255)]
-            (aset out i (float (- (+ (* r 256) g (/ b 256.0)) 32768)))))))
-    out))
+(defn- insert-batched! [tx sql param-rows]
+  (with-open [ps (jdbc/prepare tx [sql])]
+    (doseq [group (partition-all 5000 param-rows)]
+      (jdbc/execute-batch! ps (vec group)))))
 
-(defn- dem-tile
-  "A decoded tile (no data: flat at 0 m). Workers asking for the same tile at once wait for one download."
-  [z x y]
-  (let [k [z x y]]
-    (or (.get ^java.util.Map dem-cache k)
-        (let [mine (delay (or (.get ^java.util.Map dem-cache k) (decode-dem (dem-png z x y))))
-              d (or (.putIfAbsent dem-loading k mine) mine)]
-          (try (let [a @d] (.put ^java.util.Map dem-cache k a) a)
-               (finally (.remove dem-loading k d)))))))
+(defn- load-block!
+  "Puts the summits of a 10° block into `peaks` (unnamed). Once per block, one download at a time for the
+  install. True when this call loaded it."
+  [block]
+  (when-not ((loaded-blocks) block)
+    (paths/with-lock "peaks-fetch"
+      (fn []
+        (when-not ((loaded-blocks) block)
+          (let [data (when (contains? (blocks) block) (fetch-data (str "prominence-" block ".csv.gz")))
+                n (atom 0)]
+            (jdbc/with-transaction [tx (shared)]
+              (when data
+                (gz-lines data
+                          (fn [lines]
+                            (insert-batched!
+                             tx "INSERT OR IGNORE INTO peaks (id, lat, lon, ele_dem, ele, prominence) VALUES (?, ?, ?, ?, ?, ?)"
+                             (for [^String line lines
+                                   :let [f (.split line "," -1)]
+                                   :when (= 4 (alength f))]
+                               (let [lat (parse-double (aget f 0)) lon (parse-double (aget f 1))
+                                     ele (parse-double (aget f 2))]
+                                 (swap! n inc)
+                                 [(summits/dataset-peak-id lat lon) lat lon ele ele (parse-double (aget f 3))]))))))
+              (jdbc/execute! tx ["INSERT OR REPLACE INTO dataset_blocks (block, rows, fetched_at) VALUES (?, ?, ?)"
+                                 block @n (str (java.time.Instant/now))]))
+            true))))))
 
-(defn- world-px
-  "Pixel position of a coordinate in the whole Web Mercator world at zoom `z`."
-  [z lat lon]
-  (let [n (* 256.0 (Math/pow 2 z))
-        la (Math/toRadians lat)]
-    [(* n (/ (+ lon 180.0) 360.0))
-     (* n (/ (- 1.0 (/ (Math/log (+ (Math/tan la) (/ 1.0 (Math/cos la)))) Math/PI)) 2.0))]))
+(defn- load-official!
+  "Switzerland's official names (swissNAMES3D), once for the install."
+  []
+  (when-not (meta-get :official_ch)
+    (paths/with-lock "peaks-fetch"
+      (fn []
+        (when-not (meta-get :official_ch)
+          (let [data (fetch-data "official-ch.csv.gz")]
+            (jdbc/with-transaction [tx (shared)]
+              (jdbc/execute! tx ["DELETE FROM official_peaks"])
+              (gz-lines data
+                        (fn [lines]
+                          (insert-batched!
+                           tx "INSERT INTO official_peaks (lat, lon, ele, name) VALUES (?, ?, ?, ?)"
+                           (for [^String line lines
+                                 :let [f (.split line "," 4)]
+                                 :when (= 4 (alength f))]
+                             [(parse-double (aget f 0)) (parse-double (aget f 1))
+                              (parse-double (aget f 2)) (aget f 3)]))))
+              (meta-set! tx :official_ch (str (java.time.Instant/now))))))))))
 
-(defn- window-elevation
-  "Reads elevations of a w×w window whose top-left pixel is (x0, y0) of the world at zoom `z`: a tile is
-  fetched the first time somebody asks for a pixel of it, so a flood that finds higher ground nearby
-  never touches (or downloads) the rest of the window."
-  ^Elevation [z ^long x0 ^long y0 ^long w]
-  (let [tx0 (bit-shift-right x0 8) ty0 (bit-shift-right y0 8)
-        nx (inc (- (bit-shift-right (+ x0 w -1) 8) tx0))
-        ny (inc (- (bit-shift-right (+ y0 w -1) 8) ty0))
-        ^objects tiles (object-array (* nx ny))]
-    (reify Elevation
-      (at [_ x y]
-        (let [wx (+ x0 x) wy (+ y0 y)
-              col (- (bit-shift-right wx 8) tx0) row (- (bit-shift-right wy 8) ty0)
-              i (+ col (* row nx))
-              ^floats tile (or (aget tiles i)
-                               (let [t (dem-tile z (+ tx0 col) (+ ty0 row))] (aset tiles i t) t))]
-          (double (aget tile (+ (bit-and wx 255) (* (bit-and wy 255) 256)))))))))
+;; ---------------------------------------------------------------------------
+;; Names for the summits of a square
 
-(defn dem-grid
-  "The elevation grid within `radius-m` of a point, for coach.prominence (tiles are read as the flood asks)."
-  [lat lon radius-m]
-  (let [z dem-zoom
-        res (/ (* 156543.03392 (Math/cos (Math/toRadians lat))) (Math/pow 2 z))
-        half (long (Math/ceil (/ radius-m res)))
-        [gx gy] (world-px z lat lon)
-        w (inc (* 2 half))]
-    {:w w :h w :at (window-elevation z (- (long gx) half) (- (long gy) half) w) :cx half :cy half :res res}))
+(def ^:private source-of-rank {0 "listed" 1 "swisstopo" 2 "osm"})
 
-(defn peak-prominence
-  "{:prominence m :src \"dem\"|\"dem-min\"} from the elevation tiles: the flood over a window of `window-m`
-  around the peak; \"dem-min\" when it reached the edge before higher ground, so the value is a lower bound."
-  [{:keys [lat lon]} & [{:keys [noise]}]]
-  (let [p (prominence/prominence (cond-> (dem-grid lat lon window-m) noise (assoc :noise noise)))]
-    {:prominence (:prominence p) :src (if (:bound? p) "dem-min" "dem")}))
+(defn- donors
+  "The points that can name the summits of a square (with a margin around it): the peaks on a list (rank 0),
+  swisstopo's (1) and OpenStreetMap's (2). A point without a name takes no summit but still says which one it is."
+  [[s w n e]]
+  (let [m 0.01
+        box [(- s m) (+ n m) (- w m) (+ e m)]
+        osm (db/query (shared) (into ["SELECT osm_id, name, ele, lat, lon, listed FROM osm_peaks
+                                       WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"] box))
+        off (db/query (shared) (into ["SELECT id, name, ele, lat, lon FROM official_peaks
+                                       WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"] box))]
+    (concat
+     (for [{:keys [osm_id name ele lat lon listed]} osm]
+       {:id osm_id :name name :ele ele :lat lat :lon lon :rank (if (= 1 listed) 0 2)
+        :claim? (not (str/blank? name))})
+     (for [{:keys [id name ele lat lon]} off]
+       {:id (- id) :name name :ele ele :lat lat :lon lon :rank 1 :claim? true}))))
+
+(defn- rematch-square!
+  "Names the dataset summits of a square from the points around it, from scratch (so it can run again
+  whenever a source has arrived), and records which summit each OSM point is. A listed peak the dataset
+  doesn't have stays a peak of its own."
+  [k]
+  (let [[s w n e :as box] (summits/square-bbox k)
+        sums (db/query (shared) ["SELECT id, lat, lon, ele_dem AS ele FROM peaks
+                                  WHERE id >= ? AND lat >= ? AND lat < ? AND lon >= ? AND lon < ?"
+                                 summits/dataset-id-min s n w e])
+        ds (donors box)
+        {:keys [named links]} (summits/match-donors sums ds)
+        by-id (into {} (map (juxt :id identity)) ds)
+        listed-summits (into #{} (keep (fn [[donor-id summit-id]]
+                                         (when (zero? (:rank (by-id donor-id))) summit-id)))
+                             links)]
+    (jdbc/with-transaction [tx (shared)]
+      (jdbc/execute! tx ["UPDATE peaks SET name = NULL, name_src = NULL, listed = 0, ele = ele_dem
+                          WHERE id >= ? AND lat >= ? AND lat < ? AND lon >= ? AND lon < ?"
+                         summits/dataset-id-min s n w e])
+      (doseq [[summit-id d] named]
+        (jdbc/execute! tx ["UPDATE peaks SET name = ?, ele = coalesce(?, ele_dem), name_src = ? WHERE id = ?"
+                           (:name d) (:ele d) (source-of-rank (:rank d)) summit-id]))
+      (doseq [summit-id listed-summits]
+        (jdbc/execute! tx ["UPDATE peaks SET listed = 1 WHERE id = ?" summit-id]))
+      (doseq [[donor-id summit-id] links :when (pos? donor-id)]
+        (jdbc/execute! tx ["INSERT OR REPLACE INTO peak_links (donor_id, peak_id) VALUES (?, ?)" donor-id summit-id])
+        ;; a listed peak that turned out to be a dataset summit is no peak of its own any more
+        (jdbc/execute! tx ["DELETE FROM peaks WHERE id = ?" donor-id]))
+      (doseq [{:keys [id name ele lat lon rank]} ds :when (and (zero? rank) (not (contains? links id)))]
+        (jdbc/execute! tx ["INSERT OR IGNORE INTO peaks (id, lat, lon, ele, name, name_src, listed)
+                            VALUES (?, ?, ?, ?, ?, 'listed', 1)" id lat lon ele name])))
+    {:summits (count sums) :named (count named)}))
 
 ;; ---------------------------------------------------------------------------
 ;; Peak lists (resources/peaks/lists.edn, made by dev/peak_lists.clj)
@@ -314,32 +328,58 @@
     []))
 
 (defn seed-lists!
-  "Puts the listed peaks into the shared osm_peaks and marks them: they are shown whatever their prominence."
+  "Puts the listed peaks into the shared osm_peaks (the names to give) and, until a dataset summit takes
+  their place, into `peaks`: they are shown whatever their prominence."
   []
   (let [now (str (java.time.Instant/now))]
-    (doseq [{:keys [osm_id name ele lat lon]} (mapcat :peaks (lists))]
-      (jdbc/execute! (shared) ["INSERT INTO osm_peaks (osm_id, name, ele, lat, lon, listed, fetched_at)
-                                VALUES (?, ?, ?, ?, ?, 1, ?)
-                                ON CONFLICT(osm_id) DO UPDATE SET listed = 1"
-                               osm_id name ele lat lon now]))))
+    (jdbc/with-transaction [tx (shared)]
+      (doseq [{:keys [osm_id name ele lat lon]} (mapcat :peaks (lists))]
+        (jdbc/execute! tx ["INSERT INTO osm_peaks (osm_id, name, ele, lat, lon, listed, fetched_at)
+                            VALUES (?, ?, ?, ?, ?, 1, ?)
+                            ON CONFLICT(osm_id) DO UPDATE SET listed = 1"
+                           osm_id name ele lat lon now])
+        (when-not (seq (db/query tx ["SELECT 1 FROM peak_links WHERE donor_id = ?" osm_id]))
+          (jdbc/execute! tx ["INSERT OR IGNORE INTO peaks (id, lat, lon, ele, name, name_src, listed)
+                              VALUES (?, ?, ?, ?, ?, 'listed', 1)" osm_id lat lon ele name]))))))
 
 ;; the athletes whose update is running (:running), or running and asked again meanwhile (:again)
 (defonce ^:private running? (atom {}))
 
-(defonce ^:private computing? (atom false)) ; this app is working out prominence (for all athletes)
-
 (defn working?
-  "Whether peak work is going on that the athlete should wait for: their own update (also while it
-  waits to retry a busy Overpass), or the prominence calculation, which serves every athlete."
+  "Whether the athlete's own update is going on (also while it waits to retry a busy server)."
   []
-  (boolean (or (contains? @running? (context/athlete)) @computing?)))
+  (contains? @running? (context/athlete)))
 
 (defn- visit-counts
-  "The athlete's visits per peak: {osm_id {:visits n :first date :last date}}."
+  "The athlete's visits per peak: {peak_id {:visits n :first date :last date}}."
   [ds]
-  (into {} (map (juxt :osm_id identity))
-        (db/query ds ["SELECT osm_id, count(*) AS visits, min(date) AS first, max(date) AS last
-                       FROM summits WHERE source <> 'dismissed' GROUP BY osm_id"])))
+  (into {} (map (juxt :peak_id identity))
+        (db/query ds ["SELECT peak_id, count(*) AS visits, min(date) AS first, max(date) AS last
+                       FROM summits WHERE source <> 'dismissed' GROUP BY peak_id"])))
+
+(defn- relink-summits!
+  "Moves what the athlete bagged under an OSM id (before the dataset) to the summit that OSM peak is."
+  [ds]
+  (let [old (map :peak_id (db/query ds ["SELECT DISTINCT peak_id FROM summits WHERE peak_id < ?"
+                                        summits/dataset-id-min]))
+        links (when (seq old)
+                (db/query (shared) (into [(str "SELECT donor_id, peak_id FROM peak_links WHERE donor_id IN ("
+                                               (str/join "," (repeat (count old) "?")) ")")]
+                                         old)))]
+    (when (seq links)
+      (jdbc/with-transaction [tx ds]
+        (doseq [{:keys [donor_id peak_id]} links]
+          ;; OR IGNORE: two OSM points on one summit, both bagged on one activity, stay as they are
+          (jdbc/execute! tx ["UPDATE OR IGNORE summits SET peak_id = ? WHERE peak_id = ?" peak_id donor_id]))))
+    (count links)))
+
+(defn- remove-dem-cache!
+  "Once: the elevation tiles older versions downloaded (hundreds of MB) are of no use any more."
+  []
+  (when-not (meta-get :dem_cache_removed)
+    (let [d (io/file (paths/shared-file "cache" "dem"))]
+      (when (.exists d) (doseq [^java.io.File f (reverse (file-seq d))] (.delete f))))
+    (meta-set! :dem_cache_removed "1")))
 
 ;; ---------------------------------------------------------------------------
 ;; Squares: the world in 1° squares, each downloaded on its own, like an offline map region. Shared:
@@ -350,6 +390,8 @@
   []
   (when-let [r (io/resource "peaks/regions.edn")]
     (summits/squares-in (:bbox (first (edn/read-string (slurp r)))))))
+
+(defn- swiss-square? [k] (contains? (set (default-squares)) k))
 
 (defn- requested-squares
   "[{:square :message}] in the order they were asked for."
@@ -383,10 +425,16 @@
                       {:squares (count keys)})))
     (queue-squares! keys)))
 
+(defn- square-ready?
+  "Whether a square's peaks are loaded and its names fetched."
+  [k blocks-have tiles-have]
+  (and (blocks-have (summits/square-block k))
+       (= (count (summits/tiles-of-square k)) (square-tiles-done k tiles-have))))
+
 (defn cancel-square!
   "Takes a square that is still waiting off the list. A downloaded one stays: its peaks are shared and small."
   [k]
-  (when (= (count (summits/tiles-of-square k)) (square-tiles-done k (fetched-tiles)))
+  (when (square-ready? k (loaded-blocks) (fetched-tiles))
     (throw (ex-info (i18n/t "A downloaded square stays: its peaks are shared with the other athletes.") {:square k})))
   (jdbc/execute! (shared) ["DELETE FROM peak_squares WHERE square = ?" k])
   {:ok true})
@@ -413,65 +461,77 @@
     (if (empty? ids)
       {}
       (frequencies (map #(summits/square-key (:lat %) (:lon %))
-                        (db/query (shared) (into [(str "SELECT lat, lon FROM osm_peaks WHERE osm_id IN ("
+                        (db/query (shared) (into [(str "SELECT lat, lon FROM peaks WHERE id IN ("
                                                        (str/join "," (repeat (count ids) "?")) ")")]
                                                  ids)))))))
 
 (defn squares-status
   "The Peaks page's download map: every square with something to show. `:state` is
-  queued (waiting) | failed (will retry) | heights (peaks loaded, heights being worked out) | ready."
+  queued (waiting) | failed (will retry) | names (peaks loaded, names being added) | ready."
   [ds]
   (let [have (fetched-tiles)
+        blocks-have (loaded-blocks)
         done (frequencies (map tile-square have))
         requested (into {} (map (juxt :square :message)) (requested-squares))
         m (min-prominence ds)
         counts (into {} (map (juxt :sq identity))
-                     (db/query (shared) [(str "SELECT " square-sql " AS sq, count(*) AS peaks,
-                                                     coalesce(sum(listed = 1 OR prominence >= ?), 0) AS shown,
-                                                     coalesce(sum(prominence IS NULL AND ele IS NOT NULL
-                                                                  AND ele >= 0), 0) AS pending
-                                              FROM osm_peaks GROUP BY sq") m]))
+                     (db/query (shared) [(str "SELECT " square-sql " AS sq,
+                                                      coalesce(sum(listed = 1 OR prominence >= ?), 0) AS shown
+                                               FROM peaks GROUP BY sq") m]))
         bagged (bagged-per-square ds)
         squares (for [k (keys requested)
-                      :let [full? (= 16 (get done k 0)) c (get counts k)
+                      :let [loaded? (blocks-have (summits/square-block k))
+                            full? (= 16 (get done k 0))
                             msg (get requested k)
-                            state (cond (not full?) (if msg "failed" "queued")
-                                        (pos? (long (:pending c 0))) "heights"
-                                        :else "ready")]]
+                            state (cond (and loaded? full?) "ready"
+                                        msg "failed"
+                                        loaded? "names"
+                                        :else "queued")]]
                   {:square k :state state :requested true :message msg
-                   :peaks (long (:shown c 0)) :bagged (get bagged k 0)})]
+                   :peaks (if loaded? (long (:shown (get counts k) 0)) 0) :bagged (get bagged k 0)})]
     {:status (if (working?) "running" "idle") ; "running" makes the page ask again shortly
      :squares (vec squares)
-     :downloaded (count (filter #(#{"heights" "ready"} (:state %)) squares))
+     :downloaded (count (filter #(#{"names" "ready"} (:state %)) squares))
      :loading (count (remove #(= "ready" (:state %)) squares))
      :peaks (reduce + 0 (map :peaks squares))}))
 
-(defn- loading?
-  "Whether squares asked for are not ready yet."
-  [ds]
-  (pos? (:loading (squares-status ds))))
+(defn- note-failure! [square e]
+  (println "Peaks: square" square "failed:" (ex-message e))
+  (jdbc/execute! (shared) ["UPDATE peak_squares SET message = ? WHERE square = ?" (ex-message e) square]))
 
-(defn- load-squares!
-  "Fetches the requested squares that aren't there yet, oldest first, one request at a time (the public
-  server is shared). Stops at the first one that fails: the server is busy, and the update tries again
-  later. `on-fetched` is called after each square that was downloaded. Returns {:chunks n :failed? bool}."
-  ([] (load-squares! (fn [])))
-  ([on-fetched]
-   (let [have (fetched-tiles)
-         todo (remove #(= 16 (square-tiles-done (:square %) have)) (requested-squares))
-         [n failed?] (reduce (fn [[n _] {:keys [square]}]
-                               (try (let [fetched? (fetch-once! (summits/square-bbox square))]
-                                      (jdbc/execute! (shared)
-                                                     ["UPDATE peak_squares SET message = NULL WHERE square = ?" square])
-                                      (when fetched? (on-fetched))
-                                      [(if fetched? (inc n) n) false])
-                                    (catch Throwable e
-                                      (println "Peaks: square" square "failed:" (ex-message e))
-                                      (jdbc/execute! (shared) ["UPDATE peak_squares SET message = ? WHERE square = ?"
-                                                               (ex-message e) square])
-                                      (reduced [n true]))))
-                             [0 false] todo)]
-     {:chunks n :failed? failed?})))
+(defn- unfinished-squares []
+  (let [have (fetched-tiles) blocks-have (loaded-blocks)]
+    (remove #(square-ready? (:square %) blocks-have have) (requested-squares))))
+
+(defn- load-datasets!
+  "The peaks of the requested squares that aren't there yet: their 10° block of the dataset (and Switzerland's
+  official names), each named from what is known so far. Fast: no public server is asked for names here.
+  A square that fails is noted and the others go on. Returns {:blocks n :failed? bool}."
+  []
+  (reduce (fn [r {:keys [square]}]
+            (try (let [new? (load-block! (summits/square-block square))]
+                   (when (swiss-square? square) (load-official!))
+                   (rematch-square! square)
+                   (when new?
+                     (jdbc/execute! (shared) ["UPDATE peak_squares SET message = NULL WHERE square = ?" square]))
+                   (cond-> r new? (update :blocks inc)))
+                 (catch Throwable e (note-failure! square e) (assoc r :failed? true))))
+          {:blocks 0 :failed? false} (unfinished-squares)))
+
+(defn- load-names!
+  "OpenStreetMap's names for the requested squares that haven't got them yet, oldest first, one request at a
+  time (the public server is shared). Stops at the first one that fails: the server is busy, and the update
+  tries again later. Returns {:chunks n :failed? bool}."
+  []
+  (let [have (fetched-tiles)
+        todo (remove #(= 16 (square-tiles-done (:square %) have)) (requested-squares))]
+    (reduce (fn [r {:keys [square]}]
+              (try (let [fetched? (fetch-once! (summits/square-bbox square))]
+                     (rematch-square! square)
+                     (jdbc/execute! (shared) ["UPDATE peak_squares SET message = NULL WHERE square = ?" square])
+                     (cond-> r fetched? (update :chunks inc)))
+                   (catch Throwable e (note-failure! square e) (reduced (assoc r :failed? true)))))
+            {:chunks 0 :failed? false} todo)))
 
 ;; ---------------------------------------------------------------------------
 ;; Searching for a place by name (OpenStreetMap's Nominatim; only the search text leaves the machine)
@@ -524,7 +584,7 @@
 (defn- candidates [{:keys [lat lon]}]
   (let [la (filter number? lat) lo (filter number? lon)]
     (when (seq la)
-      (db/query (shared) ["SELECT osm_id, lat, lon, ele FROM osm_peaks
+      (db/query (shared) ["SELECT id, lat, lon, coalesce(ele, ele_dem) AS ele FROM peaks
                            WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"
                           (- (apply min la) 0.01) (+ (apply max la) 0.01)
                           (- (apply min lo) 0.01) (+ (apply max lo) 0.01)]))))
@@ -532,11 +592,11 @@
 (defn- save-detected! [ds {:keys [id date]} hits]
   (jdbc/with-transaction [tx ds]
     (jdbc/execute! tx ["DELETE FROM summits WHERE activity_id = ? AND source = 'gps'" id])
-    (doseq [{:keys [osm_id dist_m time_s]} hits]
+    (doseq [{peak :id :keys [dist_m time_s]} hits]
       ;; a dismissed one keeps its row (unique per peak and activity), so it stays gone
-      (jdbc/execute! tx ["INSERT OR IGNORE INTO summits (osm_id, activity_id, date, time_s, dist_m, source, created_at)
+      (jdbc/execute! tx ["INSERT OR IGNORE INTO summits (peak_id, activity_id, date, time_s, dist_m, source, created_at)
                           VALUES (?, ?, ?, ?, ?, 'gps', ?)"
-                         osm_id id date time_s dist_m (str (java.time.Instant/now))]))))
+                         peak id date time_s dist_m (str (java.time.Instant/now))]))))
 
 (defn detect-activity!
   "Looks for the peaks one activity passed and stores them. Returns how many."
@@ -579,128 +639,35 @@
 ;; ---------------------------------------------------------------------------
 ;; Update
 
-(defn- dem-tile-of
-  "Where a peak's elevation tile is: sorting by it keeps the peaks of one area together, so they share tiles."
-  [{:keys [lat lon]}]
-  (let [[x y] (world-px dem-zoom lat lon)
-        row (long (quot y 256)) col (long (quot x 256))]
-    [(quot row 8) (quot col 8) row col]))
+(defn- blocks-loaded?
+  "Whether the dataset is there for every square an activity touches."
+  [blocks-have activity]
+  (every? #(blocks-have (summits/square-block (tile-square %))) (activity-tiles activity)))
 
-(defn- prominence-todo
-  "Peaks still without a prominence that could be real summits (they have a height): the listed ones
-  first, then the rest area by area."
-  []
-  (->> (db/query (shared) ["SELECT osm_id, lat, lon, ele, listed AS first FROM osm_peaks
-                            WHERE prominence IS NULL AND ele IS NOT NULL AND ele >= 0"])
-       (sort-by (fn [p] [(if (= 1 (:first p)) 0 1) (dem-tile-of p)]))))
-
-(defn pending-prominence []
-  (:n (first (db/query (shared) ["SELECT count(*) n FROM osm_peaks
-                                  WHERE prominence IS NULL AND ele IS NOT NULL AND ele >= 0"]))))
-
-(defn- past? [deadline] (and deadline (> (System/currentTimeMillis) deadline)))
-
-(def ^:private chunk-size "Peaks a worker takes at a time: neighbours, so they share elevation tiles." 32)
-(def ^:private flush-every "Results are saved after this many …" 50)
-(def ^:private flush-ms "… or this long, so the map still fills in as it goes." 2000)
-
-(defn- save-prominence!
-  "Saves finished [osm_id prominence src] results in one transaction."
-  [rows]
-  (when (seq rows)
-    (jdbc/with-transaction [tx (shared)]
-      (doseq [[id prominence src] rows]
-        (jdbc/execute! tx ["UPDATE osm_peaks SET prominence = ?, prominence_src = ? WHERE osm_id = ?"
-                           prominence src id])))))
-
-(defn- compute-prominence!
-  "Works out the prominence of the peaks that lack one, on `worker-count` threads that each take a chunk of
-  neighbouring peaks, saving the results in batches so the map fills in progressively. Until `deadline`
-  (millis; nil: until all are done). Returns how many."
-  [deadline]
-  (let [chunks (vec (partition-all chunk-size (prominence-todo)))
-        next-chunk (java.util.concurrent.atomic.AtomicInteger. 0)
-        failures (java.util.concurrent.atomic.AtomicInteger. 0) ; in a row, over all workers
-        done (java.util.concurrent.atomic.AtomicInteger. 0)
-        results (java.util.concurrent.ConcurrentLinkedQueue.)
-        last-save (atom (System/currentTimeMillis))
-        save! (fn [force?]
-                (locking results
-                  (when (or force? (>= (.size results) flush-every)
-                            (> (- (System/currentTimeMillis) @last-save) flush-ms))
-                    (let [rows (loop [acc []] (if-let [r (.poll results)] (recur (conj acc r)) acc))]
-                      (save-prominence! rows)
-                      (reset! last-save (System/currentTimeMillis))))))
-        stop? (fn [] (or (past? deadline) (>= (.get failures) 3)))
-        work (fn []
-               (loop []
-                 (let [i (.getAndIncrement next-chunk)]
-                   (when (and (< i (count chunks)) (not (stop?)))
-                     (doseq [p (nth chunks i) :while (not (stop?))]
-                       (if-let [r (try (peak-prominence p)
-                                       (catch Throwable e
-                                         (println "Peaks: prominence of" (:osm_id p) "failed:" (ex-message e))
-                                         nil))]
-                         (do (.add results [(:osm_id p) (:prominence r) (:src r)])
-                             (.incrementAndGet done)
-                             (.set failures 0)
-                             (save! false))
-                         (.incrementAndGet failures)))
-                     (recur)))))]
-    (try (->> (repeatedly (min worker-count (count chunks)) #(future (work))) doall (run! deref))
-         (finally (save! true)))
-    (when (>= (.get failures) 3) (println "Peaks: elevation tiles unreachable, prominence resumes next time"))
-    (.get done)))
-
-(defn- prominence-step!
-  "Prominence for all pending peaks, whoever's region they are in. One worker at a time for the install:
-  the first to come does it all and the others go on (their peaks are covered, being in the same
-  database). The holder re-checks what arrived while it worked, before and after letting go, so a peak
-  added at the last moment is not forgotten. Returns how many were done here."
-  [deadline]
-  (loop [total 0]
-    (let [r (paths/try-lock "peaks-prominence"
-                            (fn []
-                              (reset! computing? true)
-                              (try
-                                (let [n (loop [n 0]
-                                          (let [d (compute-prominence! deadline)]
-                                            (if (and (pos? d) (pos? (pending-prominence)) (not (past? deadline)))
-                                              (recur (+ n d))
-                                              (+ n d))))]
-                                  (when (zero? (pending-prominence)) (clean-dem-cache!))
-                                  n)
-                                (finally (reset! computing? false)))))]
-      (cond
-        (= r paths/busy) total
-        (and (pos? r) (pos? (pending-prominence)) (not (past? deadline))) (recur (+ total r))
-        :else (+ total r)))))
+(defn- detect-ready!
+  "Detects the peaks of the pending activities whose blocks are loaded. Returns [activities found]."
+  [ds pending]
+  (let [blocks-have (loaded-blocks)
+        ready (filter #(blocks-loaded? blocks-have %) pending)]
+    [(count ready)
+     (reduce + 0 (map #(try (detect-activity! ds %)
+                            (catch Throwable e
+                              (println "Peaks: activity" (:id %) "failed:" (ex-message e)) 0))
+                      ready))]))
 
 (defn- run-once! [ds]
   (seed-lists!)
+  (remove-dem-cache!)
   (seed-default-squares!)
   (let [pending (pending-activities ds)
         queued (queue-track-squares! ds pending)
-        ;; the heights of a square are worked out while the next ones download
-        early (atom nil)
-        heights-now! (fn [] (let [f @early]
-                              (when (or (nil? f) (realized? f))
-                                (reset! early (future (try (prominence-step! nil)
-                                                           (catch Throwable e
-                                                             (println "Peaks: prominence failed:" (ex-message e))
-                                                             0)))))))
-        {:keys [chunks failed?]} (load-squares! heights-now!)
-        early-prom (if-let [f @early] @f 0)
-        have (fetched-tiles)
-        ready (filter #(every? have (activity-tiles %)) pending)
-        found (reduce + 0 (map #(try (detect-activity! ds %)
-                                     (catch Throwable e
-                                       (println "Peaks: activity" (:id %) "failed:" (ex-message e)) 0))
-                               ready))
-        prom (+ early-prom (prominence-step! (when-not (loading? ds) (+ (System/currentTimeMillis) budget-ms))))
-        r {:queued queued :chunks chunks :activities (count ready) :summits found :prominence prom}]
+        {:keys [blocks] failed-data? :failed?} (load-datasets!)
+        [activities found] (detect-ready! ds pending)
+        {:keys [chunks] failed-names? :failed?} (load-names!)
+        relinked (relink-summits! ds)
+        r {:queued queued :blocks blocks :chunks chunks :activities activities :summits found :relinked relinked}]
     (when (some pos? (vals r)) (println "Peaks:" r))
-    (assoc r :failed? failed?)))
+    (assoc r :failed? (boolean (or failed-data? failed-names?)))))
 
 (defn request!
   "Asks for an update. True when the caller should run `work!` (none is running for this athlete); a
@@ -713,9 +680,7 @@
 (defn work!
   "Peak bagging for this athlete, after `request!` said true: the peaks of the squares and tiles for the
   activities not checked yet (shared with the other athletes), which peaks each activity passed (theirs),
-  and the prominence of the peaks that need it (shared: one worker for the install). While a region is
-  loading it runs until all heights are done (it can take many minutes); otherwise within a time
-  budget. With Overpass busy it retries later. Returns the last round's counts."
+  and the names. With a server busy it retries later. Returns the last round's counts."
   [ds]
   (let [k (context/athlete)]
     (try
@@ -736,22 +701,23 @@
 ;; Queries
 
 (def ^:private visits-sql
-  "SELECT s.id, s.osm_id, s.activity_id, s.date, s.source, s.dist_m, a.name AS activity_name, a.sport
+  "SELECT s.id, s.peak_id, s.activity_id, s.date, s.source, s.dist_m, a.name AS activity_name, a.sport
    FROM summits s LEFT JOIN activities a ON a.id = s.activity_id
    WHERE s.source <> 'dismissed'")
 
-(defn- peak-row [r] (-> r (assoc :listed (= 1 (:listed r)))))
+(defn- peak-row [r] (assoc r :listed (= 1 (:listed r))))
 
 (defn visible-peaks
-  "Peaks to show, as maps with :listed, :visits (count, the athlete's), :first and :last visit dates."
+  "Peaks to show, as maps with :listed, :visits (count, the athlete's), :first and :last visit dates. A peak
+  nobody named has no :name and shows with its height."
   [ds]
   (let [m (min-prominence ds)
         visits (visit-counts ds)]
     (mapv (fn [p]
             (let [v (visits (:id p))]
               (assoc (peak-row p) :visits (or (:visits v) 0) :first (:first v) :last (:last v))))
-          (db/query (shared) ["SELECT osm_id AS id, name, ele, lat, lon, prominence, listed
-                               FROM osm_peaks WHERE listed = 1 OR prominence >= ?" m]))))
+          (db/query (shared) ["SELECT id, name, coalesce(ele, ele_dem) AS ele, lat, lon, prominence, listed
+                               FROM peaks WHERE listed = 1 OR prominence >= ?" m]))))
 
 (defn map-peaks
   "What the Map tab draws, one short row per peak (there can be tens of thousands):
@@ -762,7 +728,19 @@
         (visible-peaks ds)))
 
 (defn- visits-by-peak [ds]
-  (group-by :osm_id (db/query ds [(str visits-sql " ORDER BY s.date DESC")])))
+  (group-by :peak_id (db/query ds [(str visits-sql " ORDER BY s.date DESC")])))
+
+(defn- list-peaks
+  "A list's peaks as {:peak_id :name :ele}: the id of the dataset summit an OSM peak of the list is, else its own."
+  [l]
+  (let [ps (:peaks l)
+        links (if (seq ps)
+                (into {} (map (juxt :donor_id :peak_id))
+                      (db/query (shared) (into [(str "SELECT donor_id, peak_id FROM peak_links WHERE donor_id IN ("
+                                                     (str/join "," (repeat (count ps) "?")) ")")]
+                                               (map :osm_id ps))))
+                {})]
+    (mapv (fn [{:keys [osm_id name ele]}] {:peak_id (get links osm_id osm_id) :name name :ele ele}) ps)))
 
 (defn summary
   "The Peaks page: counts, the bagged peaks with their visits, the lists with progress."
@@ -771,7 +749,7 @@
         visits (visits-by-peak ds)
         year (str (.getYear (LocalDate/now)))
         bagged (->> peaks (filter #(pos? (:visits %)))
-                    (mapv #(assoc % :visit_list (mapv (fn [v] (dissoc v :osm_id)) (visits (:id %))))))
+                    (mapv #(assoc % :visit_list (mapv (fn [v] (dissoc v :peak_id)) (visits (:id %))))))
         bagged-ids (set (map :id bagged))
         highest (first (sort-by (comp - :ele) (filter :ele bagged)))]
     {:bagged (count bagged)
@@ -779,42 +757,40 @@
      :visits (reduce + 0 (map :visits bagged))
      :highest (some-> highest (select-keys [:id :name :ele]))
      :min_prominence (min-prominence ds)
-     :pending (pending-prominence)
+     :loading (:loading (squares-status ds))
      :peaks (vec (sort-by :last #(compare %2 %1) bagged))
-     :lists (mapv (fn [l]
-                    (summits/list-progress (update l :peaks (fn [ps] (mapv #(select-keys % [:osm_id :name :ele]) ps)))
-                                           bagged-ids))
-                  (lists))}))
+     :lists (mapv #(summits/list-progress (assoc % :peaks (list-peaks %)) bagged-ids) (lists))}))
 
 (defn activity-summits
   "The peaks an activity passed (visible ones): [{:id :name :ele :lat :lon :prominence :visit_id :source}]."
   [ds activity-id]
   (let [m (min-prominence ds)
-        visits (db/query ds ["SELECT id AS visit_id, osm_id, source, dist_m, time_s FROM summits
+        visits (db/query ds ["SELECT id AS visit_id, peak_id, source, dist_m, time_s FROM summits
                               WHERE activity_id = ? AND source <> 'dismissed' ORDER BY time_s" activity-id])
         peaks (when (seq visits)
                 (into {} (map (juxt :id identity))
-                      (db/query (shared) (into [(str "SELECT osm_id AS id, name, ele, lat, lon, prominence, listed
-                                                      FROM osm_peaks WHERE osm_id IN ("
+                      (db/query (shared) (into [(str "SELECT id, name, coalesce(ele, ele_dem) AS ele, lat, lon,
+                                                             prominence, listed
+                                                      FROM peaks WHERE id IN ("
                                                      (str/join "," (repeat (count visits) "?")) ")")]
-                                               (map :osm_id visits)))))]
+                                               (map :peak_id visits)))))]
     (vec (for [v visits
-               :let [p (peaks (:osm_id v))]
+               :let [p (peaks (:peak_id v))]
                :when (and p (or (= 1 (:listed p)) (and (:prominence p) (>= (:prominence p) m))))]
-           (merge (peak-row p) (dissoc v :osm_id))))))
+           (merge (peak-row p) (dissoc v :peak_id))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Manual bags
 
 (defn bag!
   "Marks a peak as reached on `date` without GPS. Returns the new visit's id."
-  [ds osm-id date]
-  (when-not (seq (db/query (shared) ["SELECT 1 FROM osm_peaks WHERE osm_id = ?" osm-id]))
-    (throw (ex-info "Unknown peak." {:osm_id osm-id})))
+  [ds peak-id date]
+  (when-not (seq (db/query (shared) ["SELECT 1 FROM peaks WHERE id = ?" peak-id]))
+    (throw (ex-info "Unknown peak." {:peak_id peak-id})))
   (when-not (and (string? date) (re-matches #"\d{4}-\d{2}-\d{2}" date))
     (throw (ex-info "The date must look like 2026-07-14." {:date date})))
-  (jdbc/execute! ds ["INSERT INTO summits (osm_id, activity_id, date, source, created_at) VALUES (?, NULL, ?, 'manual', ?)"
-                     osm-id date (str (java.time.Instant/now))])
+  (jdbc/execute! ds ["INSERT INTO summits (peak_id, activity_id, date, source, created_at) VALUES (?, NULL, ?, 'manual', ?)"
+                     peak-id date (str (java.time.Instant/now))])
   (:id (first (db/query ds ["SELECT max(id) AS id FROM summits"]))))
 
 (defn unbag!

@@ -12,8 +12,8 @@
 (def max-squares 100)
 
 (def prominences
-  "How far a summit must stand above its saddle to count (m)."
-  [[0 "0 m"] [30 "30 m"] [50 "50 m"] [100 "100 m"]])
+  "How far a summit must stand above its saddle to count (m); the dataset has nothing under 30 m."
+  [[30 "30 m"] [50 "50 m"] [100 "100 m"]])
 
 (defn- metres [x] (when (ui/num? x) (str (js/Math.round x) " m")))
 
@@ -43,7 +43,7 @@
 (defn- legend []
   [:div.square-legend
    (for [[cls label] [["free" (t "Not downloaded")] ["selected" (t "Selected")] ["queued" (t "Waiting")]
-                      ["heights" (t "Working out heights")] ["ready" (t "Ready")]
+                      ["names" (t "Adding names")] ["ready" (t "Ready")]
                       ["failed" (t "Failed, trying again")]]]
      [:span {:replicant/key cls} [:i {:class ["sq" cls]}] label])])
 
@@ -89,8 +89,8 @@
             [:details.peak-list
              [:summary (t "All peaks of the list")]
              [:ul
-              (for [{:keys [osm_id name ele bagged?]} peaks]
-                [:li {:replicant/key osm_id :class (when bagged? "done")}
+              (for [{:keys [peak_id name ele bagged?]} peaks]
+                [:li {:replicant/key peak_id :class (when bagged? "done")}
                  [:span.peak-tick (if bagged? "✓" "")] name [:span.sub (metres ele)]])]])])
 
 (defn view [{:keys [data errors route] ui-state :ui}]
@@ -114,9 +114,9 @@
          (ui/card {}
                   [:div.lab (t "Smallest summit that counts") (ui/info "prominence")]
                   (ui/seg (:min_prominence d) prominences [:peak-prominence])
-                  [:div.sub (t "OpenStreetMap calls every bump a peak. Prominence is how far a summit stands above the saddle to higher ground: 30 m is the usual rule for a summit of its own.")]
-                  (when (pos? (:pending d))
-                    [:div.sub (t "Working out the height of {0} more peaks in the background; they appear as they are done." (:pending d))]))]
+                  [:div.sub (t "Prominence is how far a summit stands above the saddle to higher ground. The dataset lists every summit of at least 30 m, the usual rule for a summit of its own; raise the limit to keep only bigger ones.")]
+                  (when (pos? (:loading d))
+                    [:div.sub (t "Adding names to {0} more squares in the background; the peaks are already on the map." (:loading d))]))]
         (when sq (download-card sq (:squares ui-state)))
         (for [l (:lists d)] (list-card l))
         [:div {:replicant/key "peaks"}

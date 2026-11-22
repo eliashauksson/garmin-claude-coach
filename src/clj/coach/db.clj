@@ -266,21 +266,23 @@
    ;; a peak reached: source gps (from an activity), manual, or dismissed (a wrong gps one, kept so it stays gone)
    "CREATE TABLE IF NOT EXISTS summits (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      osm_id      INTEGER NOT NULL,
+      peak_id     INTEGER NOT NULL,
       activity_id INTEGER,
       date        TEXT NOT NULL,
       time_s      REAL,
       dist_m      REAL,
       source      TEXT NOT NULL,
       created_at  TEXT NOT NULL)"
-   "CREATE UNIQUE INDEX IF NOT EXISTS summits_peak_activity ON summits(osm_id, activity_id)
+   "CREATE UNIQUE INDEX IF NOT EXISTS summits_peak_activity ON summits(peak_id, activity_id)
       WHERE activity_id IS NOT NULL"
    "CREATE INDEX IF NOT EXISTS summits_activity ON summits(activity_id)"])
 
 (def ^:private peaks-ddl
   "The shared peaks database (coach.peaks): the same for every athlete of an install; what an athlete
   bagged is in their own database (`summits`)."
-  [;; peak bagging (coach.peaks): OSM peaks per 0.25° tile, fetched once; each with its prominence
+  [;; peak bagging (coach.peaks): `peaks` are the summits of the prominence dataset (plus listed peaks the dataset
+   ;; lacks), named from the peak lists, swisstopo or OpenStreetMap; `osm_peaks` per 0.25° tile and
+   ;; `official_peaks` are those name sources, `peak_links` says which summit an OSM peak is
    "CREATE TABLE IF NOT EXISTS peak_tiles (
       tile       TEXT PRIMARY KEY,
       peaks      INTEGER NOT NULL,
@@ -297,6 +299,34 @@
       tags           TEXT,
       fetched_at     TEXT NOT NULL)"
    "CREATE INDEX IF NOT EXISTS osm_peaks_pos ON osm_peaks(lat, lon)"
+   ;; id: made from the position for a dataset summit (summits/dataset-peak-id), the OSM id for a listed peak
+   ;; the dataset doesn't have; ele: the best height known, ele_dem: the dataset's own
+   "CREATE TABLE IF NOT EXISTS peaks (
+      id         INTEGER PRIMARY KEY,
+      lat        REAL NOT NULL,
+      lon        REAL NOT NULL,
+      ele_dem    REAL,
+      ele        REAL,
+      prominence REAL,
+      name       TEXT,
+      name_src   TEXT,
+      listed     INTEGER NOT NULL DEFAULT 0)"
+   "CREATE INDEX IF NOT EXISTS peaks_pos ON peaks(lat, lon)"
+   ;; the 10° blocks of the dataset already loaded into `peaks`
+   "CREATE TABLE IF NOT EXISTS dataset_blocks (
+      block      TEXT PRIMARY KEY,
+      rows       INTEGER NOT NULL,
+      fetched_at TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS official_peaks (
+      id   INTEGER PRIMARY KEY,
+      lat  REAL NOT NULL,
+      lon  REAL NOT NULL,
+      ele  REAL,
+      name TEXT NOT NULL)"
+   "CREATE INDEX IF NOT EXISTS official_peaks_pos ON official_peaks(lat, lon)"
+   "CREATE TABLE IF NOT EXISTS peak_links (
+      donor_id INTEGER PRIMARY KEY,
+      peak_id  INTEGER NOT NULL)"
    ;; a 1° square somebody asked to download ("46,7": its south-west corner), added by any athlete or by default
    "CREATE TABLE IF NOT EXISTS peak_squares (
       square   TEXT PRIMARY KEY,
@@ -356,8 +386,18 @@
     (when-not (cols column)
       (jdbc/execute! ds [(str "ALTER TABLE " table " ADD COLUMN " column " " type)]))))
 
+(defn- rename-summit-peak-column!
+  "Bags were stored under the OSM id (`osm_id`), now under the peak's id (`peak_id`); coach.peaks moves the
+  old ids over to the new ones."
+  [ds]
+  (let [cols (set (map :name (jdbc/execute! ds ["PRAGMA table_info(summits)"]
+                                            {:builder-fn rs/as-unqualified-lower-maps})))]
+    (when (and (cols "osm_id") (not (cols "peak_id")))
+      (jdbc/execute! ds ["ALTER TABLE summits RENAME COLUMN osm_id TO peak_id"]))))
+
 (defn migrate! [ds]
   (jdbc/execute! ds ["PRAGMA journal_mode=WAL"])
+  (rename-summit-peak-column! ds)
   (doseq [stmt ddl] (jdbc/execute! ds [stmt]))
   (doseq [c added-columns] (ensure-column! ds c))
   (doseq [stmt data-fixes] (jdbc/execute! ds [stmt])))

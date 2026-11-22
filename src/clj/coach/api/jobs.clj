@@ -83,7 +83,7 @@
          (finally (System/gc)))))
 
 (defn peaks-soon!
-  "Peak bagging for the new activities (OSM peaks per tile, prominence, GPS matching) in the
+  "Peak bagging for the new activities (the dataset's peaks and their names, GPS matching) in the
   background: it can take minutes, and the sync is done without it."
   [ds]
   (when (peaks/request!) ; marked at once, so the page sees it running; a running update goes round again

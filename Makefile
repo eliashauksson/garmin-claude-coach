@@ -1,4 +1,4 @@
-.PHONY: run start offline watch build app sync status test sky peak-lists lint hooks backup backups restore
+.PHONY: run start offline watch build app sync status test sky peak-lists prominence-data official-names lint hooks backup backups restore
 
 # Dashboard on http://127.0.0.1:8081/, syncs on start and every 2 h.
 # (8080 is the installed app's.) Data: data/, or COACH_DATA_DIR=… make run
@@ -38,6 +38,14 @@ sky:
 # The Peaks page's lists: resources/peaks/lists.edn from OSM + open elevation tiles (dev/peak_lists.clj), check by hand
 peak-lists:
 	clojure -M dev/peak_lists.clj
+
+# Cuts the world prominence results into the blocks of the peaks-data release (dev/prominence_data.clj)
+prominence-data:
+	clojure -M dev/prominence_data.clj $(ZIP) $(OUT)
+
+# Cuts swisstopo's swissNAMES3D into the official summit names of the release (dev/official_names.clj)
+official-names:
+	clojure -M dev/official_names.clj $(ZIP) $(OUT)
 
 # Static checks with clj-kondo (.clj-kondo/config.edn); should print no warnings
 lint:

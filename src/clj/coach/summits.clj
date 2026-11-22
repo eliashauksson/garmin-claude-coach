@@ -1,6 +1,7 @@
 (ns coach.summits
-  "Pure. Peak bagging: which OSM tiles an activity needs, which peaks a GPS stream bagged, which peaks
-  to show, and the progress of a peak list."
+  "Pure. Peak bagging: which tiles an activity needs, which peaks a GPS stream bagged, which peaks to show,
+  the progress of a peak list, and how the names of other sources (peak lists, swisstopo, OpenStreetMap)
+  are matched to the summits of the prominence dataset."
   (:require [clojure.string :as str]))
 
 (def radius-m "A track bags a peak when it passes within this distance of it." 75.0)
@@ -158,9 +159,9 @@
             (recur (inc i) best)))))))
 
 (defn detect
-  "Peaks a stream bagged. `stream`: {:lat :lon :alt :t} columns; `peaks`: [{:osm_id :lat :lon :ele}].
+  "Peaks a stream bagged. `stream`: {:lat :lon :alt :t} columns; `peaks`: [{:id :lat :lon :ele}].
   A peak counts when the track passes within `radius-m` and, if both altitudes are known, was within
-  `below-m` of its height there. Returns [{:osm_id :dist_m :time_s}], nearest first for each peak once."
+  `below-m` of its height there. Returns [{:id :dist_m :time_s}], nearest first for each peak once."
   [{:keys [lat lon] :as stream} peaks]
   (let [pts (filter number? lat)
         lons (filter number? lon)]
@@ -168,28 +169,119 @@
       []
       (let [[la0 la1] [(apply min pts) (apply max pts)]
             [lo0 lo1] [(apply min lons) (apply max lons)]]
-        (vec (for [{:keys [osm_id ele] :as p} peaks
+        (vec (for [{:keys [id ele] :as p} peaks
                    :when (and (<= (- la0 pad) (:lat p) (+ la1 pad)) (<= (- lo0 pad) (:lon p) (+ lo1 pad)))
                    :let [hit (near-peak stream p)]
                    :when (and hit (or (nil? ele) (nil? (:alt hit)) (>= (:alt hit) (- ele below-m))))]
-               {:osm_id osm_id :dist_m (:dist_m hit) :time_s (:time_s hit)}))))))
+               {:id id :dist_m (:dist_m hit) :time_s (:time_s hit)}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; What to show
 
 (defn visible?
-  "Whether a peak is shown: it is on a list, or its prominence (OSM tag or the elevation model) reaches
-  `min-prominence`. A peak without a prominence yet is hidden."
+  "Whether a peak is shown: it is on a list, or its prominence (from the prominence dataset) reaches
+  `min-prominence`. A peak without a prominence is hidden."
   [{:keys [prominence listed]} min-prominence]
   (boolean (or listed
                (and prominence (>= prominence (or min-prominence 0))))))
 
 (defn list-progress
-  "A peak list against the bagged ids: {:total :bagged :peaks [{… :bagged? bool}]}."
+  "A peak list against the bagged peak ids: {:total :bagged :peaks [{… :bagged? bool}]}. A listed peak
+  says which peak it is in `:peak_id`."
   [{:keys [peaks] :as lst} bagged-ids]
   (let [bagged (set bagged-ids)
-        ps (mapv #(assoc % :bagged? (contains? bagged (:osm_id %))) peaks)]
+        ps (mapv #(assoc % :bagged? (contains? bagged (:peak_id %))) peaks)]
     (assoc (dissoc lst :peaks)
            :total (count ps)
            :bagged (count (filter :bagged? ps))
            :peaks ps)))
+
+;; ---------------------------------------------------------------------------
+;; The prominence dataset's summits (coach.peaks): ids, and which name belongs to which summit
+
+(defn dataset-peak-id
+  "A summit's id, made from its position (the dataset has 4 decimals): always above 10^13, so never an OSM
+  id (those stay below 1.5·10^10), and below 2^53, so safe in JSON."
+  [lat lon]
+  (+ 10000000000000
+     (* (+ (Math/round (* 1e4 (double lat))) 900000) 3600000)
+     (Math/round (* 1e4 (double lon)))
+     1800000))
+
+(def dataset-id-min "The smallest id of a dataset summit." 10000000000000)
+
+(defn square-block
+  "The 10° block of the dataset a 1° square is in (\"46,8\" → \"40_0\": south-west corner)."
+  [k]
+  (let [[la lo] (map #(Long/parseLong %) (str/split k #","))]
+    (str (* 10 (Math/floorDiv la 10)) "_" (* 10 (Math/floorDiv lo 10)))))
+
+(defn dataset-peak-id?
+  "Whether an id is a dataset summit's (not an OSM one: those are older athletes' bags)."
+  [id]
+  (>= id 10000000000000))
+
+(def match-m "A name is given to a summit this near (m) …" 250.0)
+(def match-no-ele-m "… or this near when one of the two has no height …" 100.0)
+(def link-m "… and a point this near a summit that took another name only counts as the same peak (m)." 150.0)
+(def ele-window
+  "The donor's height minus the summit's must lie in this range (m): the dataset's terrain model cuts sharp
+  summits by up to 190 m (Finsteraarhorn), and hardly ever sits above the surveyed height."
+  [-60.0 250.0])
+
+(defn- dist-m [lat1 lon1 lat2 lon2]
+  (let [k (/ Math/PI 180.0)]
+    (Math/hypot (* 6371000.0 k (- lon2 lon1) (Math/cos (* k (/ (+ lat1 lat2) 2.0))))
+                (* 6371000.0 k (- lat2 lat1)))))
+
+(def ^:private cell-deg 0.005)
+
+(defn- cell [lat lon] [(long (Math/floor (/ (double lat) cell-deg))) (long (Math/floor (/ (double lon) cell-deg)))])
+
+(defn- fits?
+  "Whether a donor can be this summit: near enough, and of about the same height."
+  [{dele :ele :as d} {sele :ele :as s} limit-m]
+  (let [dist (dist-m (:lat d) (:lon d) (:lat s) (:lon s))]
+    (if (and dele sele)
+      (and (<= dist limit-m)
+           (<= (first ele-window) (- dele sele) (second ele-window))
+           dist)
+      (and (<= dist match-no-ele-m) (<= dist limit-m) dist))))
+
+(defn match-donors
+  "Which donor (a point with a name and a height: a peak list, swisstopo, OpenStreetMap) names which summit
+  of the prominence dataset. `summits`: [{:id :lat :lon :ele}]; `donors`: [{:id :lat :lon :ele :rank :claim?}]
+  where a lower `:rank` goes first and a donor with `:claim?` false (no name) never takes a summit.
+  One donor per summit and one summit per donor, the nearest pair first within a rank. A donor left over is
+  still the same peak as the nearest summit within `link-m` (a second OSM point on one top), so what an
+  athlete bagged under its id is not lost. Returns {:named {summit-id donor} :links {donor-id summit-id}}."
+  [summits donors]
+  (let [by-cell (group-by (fn [s] (cell (:lat s) (:lon s))) summits)
+        near (fn [d limit]
+               (let [[ci cj] (cell (:lat d) (:lon d))]
+                 (for [i (range (- ci 2) (+ ci 3)) j (range (- cj 2) (+ cj 3))
+                       s (get by-cell [i j])
+                       :let [dist (fits? d s limit)]
+                       :when dist]
+                   [dist s])))
+        ranks (sort (distinct (map :rank (filter :claim? donors))))
+        [named links]
+        (reduce (fn [[named links] rank]
+                  (let [pairs (sort-by first (for [d donors :when (and (:claim? d) (= rank (:rank d)))
+                                                   [dist s] (near d match-m)
+                                                   :when (not (contains? named (:id s)))]
+                                               [dist s d]))]
+                    (reduce (fn [[named links] [_ s d]]
+                              (if (or (contains? named (:id s)) (contains? links (:id d)))
+                                [named links]
+                                [(assoc named (:id s) d) (assoc links (:id d) (:id s))]))
+                            [named links] pairs)))
+                [{} {}] ranks)
+        links (reduce (fn [links d]
+                        (if (contains? links (:id d))
+                          links
+                          (if-let [[_ s] (first (sort-by first (near d link-m)))]
+                            (assoc links (:id d) (:id s))
+                            links)))
+                      links donors)]
+    {:named named :links links}))
