@@ -67,7 +67,7 @@
                :sub (some-> (:date latest) ui/date-short)})
      (ui/tile {:label (t "7-day average") :value (fmt (:avg7 now) (dissoc opts :unit)) :unit (:unit opts)})
      (ui/tile {:label (t "28-day average") :value (fmt (:avg28 now) (dissoc opts :unit)) :unit (:unit opts)})
-     (ui/tile {:label (t "Normal range")
+     (ui/tile {:label (t "Normal range") :info "vital-history"
                :value (when (and (ui/num? (:base_low now)) (ui/num? (:base_high now)))
                         (str (ui/fixed (:base_low now) dec) "–" (ui/fixed (:base_high now) dec)))
                :unit (:unit opts)})
