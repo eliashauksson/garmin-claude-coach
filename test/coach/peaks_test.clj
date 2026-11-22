@@ -240,7 +240,11 @@
             (is (:failed? r))
             (is (= 1 (:blocks r)))))))
     (is (= "offline" (:message (first (filter #(= "10,10" (:square %)) (#'peaks/requested-squares))))))
-    (is (= "failed" (:state (first (filter #(= "10,10" (:square %)) (:squares (peaks/squares-status ds)))))))))
+    (is (= "failed" (:state (first (filter #(= "10,10" (:square %)) (:squares (peaks/squares-status ds))))))))
+    (testing "a square whose block another square loaded meanwhile loses its old error"
+      (jdbc/execute! (peaks/shared) ["UPDATE peak_squares SET message = 'old 404' WHERE square = '46,8'"])
+      (with-release (fake-release (atom [])) #(#'peaks/load-datasets!))
+      (is (nil? (:message (first (filter #(= "46,8" (:square %)) (#'peaks/requested-squares))))))))
 
 (defn- queued [] (set (map :square (#'peaks/requested-squares))))
 

@@ -512,8 +512,7 @@
             (try (let [new? (load-block! (summits/square-block square))]
                    (when (swiss-square? square) (load-official!))
                    (rematch-square! square)
-                   (when new?
-                     (jdbc/execute! (shared) ["UPDATE peak_squares SET message = NULL WHERE square = ?" square]))
+                   (jdbc/execute! (shared) ["UPDATE peak_squares SET message = NULL WHERE square = ?" square])
                    (cond-> r new? (update :blocks inc)))
                  (catch Throwable e (note-failure! square e) (assoc r :failed? true))))
           {:blocks 0 :failed? false} (unfinished-squares)))
