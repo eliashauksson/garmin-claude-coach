@@ -1,0 +1,3 @@
+;; Every install starts with the peaks of this area (the 1° squares covering it); more squares are
+;; downloaded from the map on the Peaks page. [south west north east]
+[{:id "switzerland" :name "Switzerland" :bbox [45.75 5.75 48.0 10.5]}]

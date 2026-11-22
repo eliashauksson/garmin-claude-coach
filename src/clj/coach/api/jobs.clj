@@ -11,6 +11,7 @@
             [coach.db :as db]
             [coach.load-model :as load-model]
             [coach.paths :as paths]
+            [coach.peaks :as peaks]
             [coach.planner :as planner]
             [coach.readiness-estimate :as readiness-estimate]
             [coach.season :as season]
@@ -81,6 +82,14 @@
          ;; a sync is the app's peak: hand that memory back to the others on the server now, not eventually
          (finally (System/gc)))))
 
+(defn peaks-soon!
+  "Peak bagging for the new activities (OSM peaks per tile, prominence, GPS matching) in the
+  background: it can take minutes, and the sync is done without it."
+  [ds]
+  (when (peaks/request!) ; marked at once, so the page sees it running; a running update goes round again
+    (future (try (peaks/work! ds)
+                 (catch Throwable e (println "Peak bagging failed:" (ex-message e)))))))
+
 (defn run-job!
   "Runs `f` with a Garmin source in the background unless a sync or history
   load is already running (one Garmin session at a time), and records the
@@ -134,7 +143,8 @@
            (let [r (try (run-coros! ds {:force force})
                         (catch Throwable e {:ok false :message (ex-message e)}))]
              (swap! sync-state assoc :running false :job nil
-                    :finished_at (or (:finished_at r) (str (java.time.Instant/now))))))))
+                    :finished_at (or (:finished_at r) (str (java.time.Instant/now))))
+             (peaks-soon! ds)))))
       @sync-state)))
 
 (defn run-sync!
@@ -153,6 +163,7 @@
                 ;; our training load (rides Garmin never saw) learns from Garmin's newest loads
                 (try (load-model/update! ds)
                      (catch Throwable e (println "Training load refit failed:" (ex-message e))))
+                (peaks-soon! ds)
                 (cond
                   (costs/credits-out ds) (assoc result :plan_check_skipped "no Claude credits")
                   (costs/limit-reached ds) (assoc result :plan_check_skipped "Claude spending limit reached")

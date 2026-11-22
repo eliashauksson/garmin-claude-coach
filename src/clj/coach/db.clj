@@ -18,6 +18,11 @@
    ;; sync, backfill and the API server may write concurrently
    (jdbc/get-datasource {:dbtype "sqlite" :dbname path :busy_timeout 15000})))
 
+(defn peaks-datasource
+  "The database all athletes share (peaks, their prominence, loaded regions): shared/peaks.db."
+  []
+  (datasource (paths/shared-file "peaks.db")))
+
 (defn read-only-datasource
   "Another athlete's database (coach.paths/athletes), opened read-only: their
   app keeps writing it."
@@ -257,7 +262,49 @@
       source_id   TEXT NOT NULL,
       activity_id INTEGER NOT NULL,
       merged      INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (source, source_id))"])
+      PRIMARY KEY (source, source_id))"
+   ;; a peak reached: source gps (from an activity), manual, or dismissed (a wrong gps one, kept so it stays gone)
+   "CREATE TABLE IF NOT EXISTS summits (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      osm_id      INTEGER NOT NULL,
+      activity_id INTEGER,
+      date        TEXT NOT NULL,
+      time_s      REAL,
+      dist_m      REAL,
+      source      TEXT NOT NULL,
+      created_at  TEXT NOT NULL)"
+   "CREATE UNIQUE INDEX IF NOT EXISTS summits_peak_activity ON summits(osm_id, activity_id)
+      WHERE activity_id IS NOT NULL"
+   "CREATE INDEX IF NOT EXISTS summits_activity ON summits(activity_id)"])
+
+(def ^:private peaks-ddl
+  "The shared peaks database (coach.peaks): the same for every athlete of an install; what an athlete
+  bagged is in their own database (`summits`)."
+  [;; peak bagging (coach.peaks): OSM peaks per 0.25° tile, fetched once; each with its prominence
+   "CREATE TABLE IF NOT EXISTS peak_tiles (
+      tile       TEXT PRIMARY KEY,
+      peaks      INTEGER NOT NULL,
+      fetched_at TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS osm_peaks (
+      osm_id         INTEGER PRIMARY KEY,
+      name           TEXT,
+      ele            REAL,
+      lat            REAL NOT NULL,
+      lon            REAL NOT NULL,
+      prominence     REAL,
+      prominence_src TEXT,
+      listed         INTEGER NOT NULL DEFAULT 0,
+      tags           TEXT,
+      fetched_at     TEXT NOT NULL)"
+   "CREATE INDEX IF NOT EXISTS osm_peaks_pos ON osm_peaks(lat, lon)"
+   ;; a 1° square somebody asked to download ("46,7": its south-west corner), added by any athlete or by default
+   "CREATE TABLE IF NOT EXISTS peak_squares (
+      square   TEXT PRIMARY KEY,
+      added_at TEXT NOT NULL,
+      message  TEXT)"
+   "CREATE TABLE IF NOT EXISTS meta (
+      k TEXT PRIMARY KEY,
+      v TEXT)"])
 
 (def ^:private data-fixes
   ;; Garmin reports -1/-2 stress for "not enough data"; rows stored before
@@ -299,7 +346,9 @@
    ["proposal_items" "goal" "TEXT"]
    ["proposal_items" "blocks" "TEXT"]
    ;; the heatmap's track: encoded polyline segments (coach.track), "[]" without GPS
-   ["activity_metrics" "track" "TEXT"]])
+   ["activity_metrics" "track" "TEXT"]
+   ;; the coach.summits detector version that last looked at the activity (peak bagging)
+   ["activity_metrics" "summits_checked" "INTEGER"]])
 
 (defn- ensure-column! [ds [table column type]]
   (let [cols (set (map :name (jdbc/execute! ds [(str "PRAGMA table_info(" table ")")]
@@ -312,6 +361,10 @@
   (doseq [stmt ddl] (jdbc/execute! ds [stmt]))
   (doseq [c added-columns] (ensure-column! ds c))
   (doseq [stmt data-fixes] (jdbc/execute! ds [stmt])))
+
+(defn migrate-peaks! [ds]
+  (jdbc/execute! ds ["PRAGMA journal_mode=WAL"])
+  (doseq [stmt peaks-ddl] (jdbc/execute! ds [stmt])))
 
 (defn- now [] (str (java.time.Instant/now)))
 

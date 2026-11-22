@@ -22,6 +22,7 @@
             [coach.i18n :as i18n]
             [coach.overview :as overview]
             [coach.paths :as paths]
+            [coach.peaks :as peaks]
             [coach.plan :as plan]
             [coach.planner :as planner]
             [coach.push :as push]
@@ -345,6 +346,31 @@
                                                            :limit (activities-limit query-params)}))))}]
     ;; every GPS track, for the Map tab's heatmap
     ["/heatmap"     {:get (fn [_] (ok (analysis/heatmap ds)))}]
+    ;; peak bagging: the peaks to draw, the Peaks page, manual bags, the minimum prominence
+    ["/peaks"       {:get (fn [_] (ok (peaks/map-peaks ds)))}]
+    ["/peaks/summary" {:get (fn [_] (ok (peaks/summary ds)))}]
+    ["/peaks/settings" {:put (guarded (fn [req]
+                                        (peaks/set-min-prominence! ds (:min_prominence (body req)))
+                                        (ok (peaks/summary ds))))}]
+    ["/peaks/squares" {:get (fn [_] (ok (peaks/squares-status ds)))
+                       :post (guarded (fn [req]
+                                        (peaks/add-squares! (:squares (body req)))
+                                        (jobs/peaks-soon! ds)
+                                        (ok (peaks/squares-status ds))))}]
+    ["/peaks/squares/:square" {:delete (guarded (fn [{:keys [path-params]}]
+                                                  (peaks/cancel-square! (:square path-params))
+                                                  (ok (peaks/squares-status ds))))}]
+    ["/peaks/search" {:get (fn [{:keys [query-params]}]
+                             (let [q (some-> (get query-params "q") str/trim)]
+                               (when (str/blank? q) (throw (ex-info (i18n/t "Type a place to search for.") {})))
+                               (ok (peaks/search-areas q @i18n/lang))))}]
+    ["/peak-bags" {:post (guarded (fn [req]
+                                      (let [{:keys [peak date]} (body req)]
+                                        (peaks/bag! ds peak date)
+                                        (ok (peaks/summary ds)))))}]
+    ["/peak-bags/:id" {:delete (guarded (fn [{:keys [path-params]}]
+                                           (peaks/unbag! ds (parse-long (:id path-params)))
+                                           (ok (peaks/summary ds))))}]
     ;; recent activities waiting for "How did it go?"
     ["/feedback/due"
      {:get (fn [{:keys [query-params]}] (ok (analysis/feedback-due ds (get query-params "date" (season/today)))))}]
@@ -359,6 +385,8 @@
                  (ok (cond-> a
                        ;; with the watch's all-day heart rate where the activity has none
                        (= "true" (get query-params "streams")) (assoc :streams (first (analysis/stream-with-hr ds a)))
+                       ;; the peaks its track passed
+                       true (assoc :summits (peaks/activity-summits ds id))
                        ;; the planned session it fulfilled, in the current language
                        true (assoc :planned (some->> (plan/planned-for-activity ds a)
                                                      (translate/localize ds @i18n/lang)))))
@@ -586,6 +614,8 @@
      (future (try (let [n (analysis/ensure-tracks! ds)]
                     (when (pos? n) (println "Heatmap tracks computed for" n "activities")))
                   (catch Throwable e (println "Heatmap tracks failed:" (ex-message e)))))
+     ;; peaks for activities from before peak bagging existed (and any tiles still missing)
+     (jobs/peaks-soon! ds)
      (start-batch-poller! ds)
      (when-not @update-checker (start-update-checker!)) ; once, however many athletes
      (swap! started-athletes #(vec (distinct (conj % (context/athlete)))))
