@@ -46,6 +46,24 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - translate: translates Claude's texts once into all languages (translations table)
 - athlete: athlete.md read/save/backup · athlete-chat: editing athlete.md as a chat with Claude
 - auth: Garmin login expiry countdown · backup: zip snapshots of DB + athlete docs
+- peaks: peak bagging, komoot-style. OSM `natural=peak` nodes from Overpass, downloaded per 1° square (the world is cut into
+  squares; resources/peaks/regions.edn is only the default, Switzerland; each square fetched once), prominence from Terrarium
+  elevation tiles (z13, cached on disk under shared/cache/dem while squares load, then deleted), summit detection from GPS streams.
+  Squares come from three places: the default, the athlete's picks on the Peaks page map (≤ 100 at once, name search through
+  Nominatim), and every athlete's tracks: the first round of each athlete queues all squares their activities touch, then each
+  round those of the activities not checked yet (`queue-track-squares!`; virtual/indoor sports touch none).
+  `request!`/`work!` run one background worker per athlete (after each sync, at start, when squares are added; it runs until every
+  height is done while squares load). Shown: a peak on a list or with prominence ≥ the athlete's minimum (30 m, `sync_state`).
+  Shared by all athletes: `osm_peaks`, `peak_tiles`, `peak_squares`, `meta` live in shared/peaks.db (`$COACH_SHARED_DIR`, else
+  shared/ in the app folder; `paths/shared-file`; also the DEM cache), so a square one athlete downloads is there for everybody;
+  one prominence worker per install (`paths/try-lock`), fetches take turns (`paths/with-lock`). Per athlete: `summits`
+  (gps | manual | dismissed), `summits_checked`, the minimum prominence. No SQL joins across the two databases (merged in Clojure).
+  `activity_metrics.peaks` is something else (best HR/power), hence "summits"
+  - summits: pure, detection (track within 75 m of the top and, with altitude, within 80 m below it), tiles/squares, list progress
+  - prominence: pure, highest-first flood over an elevation grid; a peak that is the highest in its window is a lower bound
+  - lists: resources/peaks/lists.edn, made by `make peak-lists` (dev/peak_lists.clj); listed peaks skip the prominence filter.
+    The 4000er list is generated, not hand-checked
+  - privacy: Overpass sees tile/square boxes, Nominatim the search text, the elevation server tiles around peaks; tracks never leave the machine
 
 ## Namespaces (src/cljs, src/cljc)
 - app: state, routing, `fetch!` of /api URLs · ui: formatters + shared components · charts: ECharts/Leaflet mount
@@ -60,6 +78,10 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   session's card), structure (block profile/list, planned vs actual bits)
 - cljc i18n: `t`/`tk`, language from server · i18n-de / i18n-fr: dictionaries keyed by English text
 - cljc sky: pure, the night sky behind the 3D globe (sidereal time, precession, camera frame, galactic coords); data in resources/public/sky/ (`make sky`)
+- cljc peak-density: pure, which peaks the map draws at a zoom (prominence bands: 500 m at the world view … all at zoom 12); the 3D
+  map's layers are made from its `tiers`
+- views/peaks: the Peaks page (`#/peaks`, under More): stats, the download map (`square_map.cljs`: 1° squares, search), lists, bagged peaks; the Map tab
+  draws peaks as triangles (bagged filled with a tick, listed amber, the rest grey)
 - cljc track: pure, GPS tracks for the heatmap (split, simplify, encoded polyline); stored in `activity_metrics.track`
 - cljc workout: pure, a planned session's blocks (steps with hr/pace/power targets): expand, total time, compare with an activity stream
 
