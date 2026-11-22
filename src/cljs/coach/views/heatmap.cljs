@@ -41,6 +41,11 @@
   [ui]
   (not= "off" (or (:heat-show ui) (.getItem js/localStorage "heat-show"))))
 
+(defn pins?
+  "Whether the activity pins are shown (remembered in this browser; on by default)."
+  [ui]
+  (not= "off" (or (:heat-pins ui) (.getItem js/localStorage "heat-pins"))))
+
 (defn dim
   "\"2d\" or \"3d\" (remembered in this browser)."
   [ui]
@@ -76,6 +81,8 @@
                                  [:set-param :sport] {:soft? true}))
        (row (tk "Heat") (ui/seg (if (heat? ui) "on" "off") [["on" (tk "Heat on")] ["off" (tk "Heat off")]]
                                 [:heat-show] {:soft? true}))
+       (row (tk "Pins") (ui/seg (if (pins? ui) "on" "off") [["on" (tk "Pins on")] ["off" (tk "Pins off")]]
+                                [:heat-pins] {:soft? true}))
        (row (tk "Colours") (palette-picker (palette ui)))
        (row (tk "Map") (ui/seg (ground ui) grounds [:heat-base] {:soft? true}))
        (row (tk "View") (ui/seg (dim ui) [["2d" (tk "2D")] ["3d" (tk "3D")]] [:heat-dim] {:soft? true}))
@@ -95,7 +102,8 @@
      (cond
        (nil? items)   nil
        :else          (let [props {:items shown :version (str span "|" sport "|" (count shown))
-                                   :palette (palette ui) :ground (ground ui) :heat? (heat? ui)}]
+                                   :palette (palette ui) :ground (ground ui) :heat? (heat? ui)
+                                   :pins? (pins? ui)}]
                         [:div.heat-base {:class (ground ui)}
                          (if (= "3d" (dim ui)) (heat/map-3d props) (heat/map-2d props))
                          (overlay {:empty? (empty? items) :n (count shown) :span span :sport sport :present present

@@ -121,10 +121,11 @@
     (count ids)))
 
 (defn heatmap
-  "Every activity with a GPS track: [{:id :date :sport :track [encoded …]}], oldest first."
+  "Every activity with a GPS track: [{:id :date :sport :name :distance_m :duration_s :track [encoded …]}],
+  oldest first."
   [ds]
   (mapv #(update % :track json/read-str)
-        (db/query ds ["SELECT a.id, a.date, a.sport, m.track FROM activities a
+        (db/query ds ["SELECT a.id, a.date, a.sport, a.name, a.distance_m, a.duration_s, m.track FROM activities a
                        JOIN activity_metrics m ON m.activity_id = a.id
                        WHERE m.track IS NOT NULL AND m.track <> '[]' ORDER BY a.date"])))
 

@@ -98,3 +98,30 @@
               [i dlo] (value i)
               la (+ la dla) lo (+ lo dlo)]
           (recur i la lo (conj out [(/ la 1e5) (/ lo 1e5)])))))))
+
+(defn- mean-of [ps k]
+  (/ (transduce (map #(get-in % k)) + ps) (count ps)))
+
+(defn cluster
+  "Groups points for the map's pins so no two groups end up closer than `gap` px on screen: a point
+  joins the first group whose centre is within `gap`, then groups that came too close are merged until
+  none are. `points`: [{:px [x y] :ll [lat lng] :v anything}]. Returns [{:ll [lat lng] :vs [v …]}],
+  :ll the mean position of the group."
+  [points gap]
+  (let [lim    (* gap gap)
+        near?  (fn [[ax ay] [bx by]] (< (+ (* (- ax bx) (- ax bx)) (* (- ay by) (- ay by))) lim))
+        group  (fn [ps] {:ps ps :px [(mean-of ps [:px 0]) (mean-of ps [:px 1])]})
+        add    (fn [gs p]
+                 (if-let [i (first (keep-indexed (fn [i g] (when (near? (:px p) (:px g)) i)) gs))]
+                   (update gs i #(group (conj (:ps %) p)))
+                   (conj gs (group [p]))))
+        merge1 (fn [gs]
+                 (first (for [i (range (count gs)) j (range (inc i) (count gs))
+                              :when (near? (:px (gs i)) (:px (gs j)))]
+                          (-> (into (subvec gs 0 j) (subvec gs (inc j)))
+                              (assoc i (group (into (:ps (gs i)) (:ps (gs j)))))))))
+        groups (loop [gs (reduce add [] points)]
+                 (if-let [merged (merge1 gs)] (recur merged) gs))]
+    (mapv (fn [{:keys [ps]}]
+            {:ll [(mean-of ps [:ll 0]) (mean-of ps [:ll 1])] :vs (mapv :v ps)})
+          groups)))

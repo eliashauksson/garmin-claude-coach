@@ -527,6 +527,7 @@
    :backup-started    backup-started!
    :set-theme         (fn [[choice]] (set-theme! choice))
    :heat-show         (heat-setting :heat-show)
+   :heat-pins         (heat-setting :heat-pins)
    :heat-dim          (heat-setting :heat-dim)
    :heat-base         (heat-setting :heat-base)
    :heat-colors       (heat-setting :heat-colors)

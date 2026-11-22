@@ -52,7 +52,8 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   Tabs: Today `#/`, Plan `#/plan?view=…`, Trends `#/trends`, Map `#/map`, More `#/more` (opens `#/athlete`, `#/metrics`,
   `#/settings`; their active tab is More). Activity, Day and Session pages light up Plan. Old links: `#/calendar` →
   Plan calendar view, `#/costs` → Settings' Claude tab, `#/activities` and unknown routes → Today
-- heat: the Map tab's heatmap (canvas), 2D on Leaflet, 3D terrain on MapLibre GL 6 (not bundled: resources/public/vendor/maplibre/, copied by `npm install`, loaded on first 3D use)
+- heat: the Map tab's heatmap (canvas) and activity pins (start points merged by `track/cluster`, a click opens a popup
+  linking to the activity), 2D on Leaflet, 3D terrain on MapLibre GL 6 (not bundled: resources/public/vendor/maplibre/, copied by `npm install`, loaded on first 3D use)
 - views/: today (start page; its cards in views/dashboard/), trends (long-term sections, jump bar), plan (`?view=week|calendar|season`),
   calendar (the Plan page's calendar view), heatmap (Map tab), more (the More tab's list), athlete, settings, costs,
   metrics (explains every metric), day, activity, feedback, load, season, status (error banner), workout (a planned

@@ -24,3 +24,25 @@
       (is (= 2 (count segs)))))
   (testing "fewer than two fixes: nothing"
     (is (nil? (track/segments [[47.0 8.0] [nil 8.0]])))))
+
+(deftest cluster-pins
+  (let [pts [{:px [1 1] :ll [10.0 20.0] :v :a} {:px [10 10] :ll [12.0 22.0] :v :b}
+             {:px [100 5] :ll [30.0 40.0] :v :c}]
+        out (track/cluster pts 44)]
+    (is (= 2 (count out)))
+    (let [pair (first (filter #(= 2 (count (:vs %))) out))]
+      (is (= [:a :b] (:vs pair)))
+      (is (= [11.0 21.0] (:ll pair))))
+    (is (= [] (track/cluster [] 44)))))
+
+(deftest cluster-never-overlaps
+  (testing "points in neighbouring grid squares still merge, and merged groups are re-checked"
+    (let [pts (for [i (range 60)] {:px [(* i 13) (* 7 (mod i 5))] :ll [(double i) 0.0] :v i})
+          out (track/cluster pts 50)
+          px  (fn [g] (let [ps (filter #((set (:vs g)) (:v %)) pts)]
+                        [(/ (reduce + (map #(get-in % [:px 0]) ps)) (count ps))
+                         (/ (reduce + (map #(get-in % [:px 1]) ps)) (count ps))]))
+          cs  (map px out)]
+      (is (= 60 (count (mapcat :vs out))))
+      (is (every? (fn [[a b]] (>= (Math/hypot (- (first a) (first b)) (- (second a) (second b))) 50))
+                  (for [a cs b cs :when (not (identical? a b))] [a b]))))))

@@ -7,10 +7,12 @@
   Zoomed out, 3D is a globe in front of the real night sky (coach.sky): the Yale Bright Star Catalogue and
   ESO's Milky Way panorama (resources/public/sky/, made by `make sky`)."
   (:require ["leaflet" :as L]
+            [clojure.string :as str]
             [coach.charts :as charts]
             [coach.i18n :refer [t tk]]
             [coach.sky :as sky]
-            [coach.track :as track]))
+            [coach.track :as track]
+            [coach.ui :as ui]))
 
 ;; ---------------------------------------------------------------------------
 ;; Colours
@@ -57,11 +59,11 @@
 (def ^:private alpha "Alpha added per track: ~24 overlapping tracks saturate a pixel." 0.042)
 
 (defonce ^:private decoded
-  ;; activity id -> #js {:segs [[lat lng] …] :bounds [s w n e]}; tracks never change
+  ;; activity id -> #js {:segs [[lat lng] …] :bounds [s w n e] :start [lat lng] :item activity}; tracks never change
   (atom {}))
 
-(defn- decoded-track [{:keys [id track]}]
-  (or (@decoded id)
+(defn- decoded-track [{:keys [id track] :as item}]
+  (or (when-let [^js d (@decoded id)] (set! (.-item d) item) d)
       (let [segs (clj->js (map track/decode track))
             b    #js [90 180 -90 -180]]
         (.forEach segs (fn [seg]
@@ -69,7 +71,8 @@
                                          (let [la (aget ll 0) lo (aget ll 1)]
                                            (aset b 0 (min (aget b 0) la)) (aset b 1 (min (aget b 1) lo))
                                            (aset b 2 (max (aget b 2) la)) (aset b 3 (max (aget b 3) lo)))))))
-        (let [d #js {:segs segs :bounds b}]
+        (let [d #js {:segs segs :bounds b :item item
+                     :start (some-> (aget segs 0) (aget 0))}]
           (swap! decoded assoc id d)
           d))))
 
@@ -139,6 +142,118 @@
         (set! (.-shadowColor ctx) "rgba(0,0,0,.75)")
         (set! (.-shadowBlur ctx) (max 1 scale))
         (.drawImage ctx copy 0 0)))))
+
+;; ---------------------------------------------------------------------------
+;; Pins: one per activity at its start, grouped when close; click for the activity
+
+(def ^:private pin-cell "Pins and bubbles closer than this many px (on screen) are merged." 52)
+
+(defn- fam-color
+  "The family's colour as a CSS value (MapLibre can't use CSS variables)."
+  [fam]
+  (let [v (.trim (.getPropertyValue (js/getComputedStyle js/document.documentElement) (:color fam)))]
+    (if (str/blank? v) "#8a90a0" v)))
+
+(defn- dom [tag attrs & kids]
+  (let [e (js/document.createElement tag)]
+    (doseq [[k v] attrs] (.setAttribute e (name k) v))
+    (doseq [k kids :when k] (.appendChild e (if (string? k) (js/document.createTextNode k) k)))
+    e))
+
+(defn- activity-row [{:keys [id date sport distance_m duration_s] :as item}]
+  (let [fam   (ui/family sport)
+        d     (ui/parse-date date)
+        title (if (str/blank? (:name item)) (t (:label fam)) (:name item))
+        stats (str/join " · " (remove nil? [(str (ui/day-month d) " " (.getFullYear d))
+                                            (some-> (ui/km distance_m) (str " km"))
+                                            (ui/hms duration_s)]))]
+    (dom "a" {:class "map-popup-row" :href (str "#/activities/" id)}
+         (dom "span" {:class "map-pin" :style (str "background:var(" (:color fam) ")")})
+         (dom "span" {:class "map-popup-text"} (dom "b" {} title) (dom "span" {:class "sub"} stats)))))
+
+(defn- popup-node
+  "The popup's content for `items`: one activity with a link to open it, or a list of several."
+  [items]
+  (if (= 1 (count items))
+    (let [item (first items)]
+      (dom "div" {:class "map-popup-body"}
+           (activity-row item)
+           (dom "a" {:class "map-popup-open" :href (str "#/activities/" (:id item))} (t "Open activity"))))
+    (apply dom "div" {:class "map-popup-body"}
+           (dom "div" {:class "map-popup-head"} (t "{0} activities here" (count items)))
+           (map activity-row (take 8 (sort-by :date #(compare %2 %1) items))))))
+
+(defn- nearest-track
+  "The track passing within `tol` px of the point [x y] (container px), nil if none. `project` as in
+  `paint!`, `box` [s w n e] is the area around the point in degrees (to skip far tracks cheaply)."
+  [tracks box project [x y] tol]
+  (let [best (volatile! [nil (* tol tol)])]
+    (doseq [^js tr tracks :when (intersects? (.-bounds tr) box)]
+      (.forEach (.-segs tr)
+                (fn [seg]
+                  (dotimes [i (dec (.-length seg))]
+                    (let [a (project (aget (aget seg i) 0) (aget (aget seg i) 1))
+                          b (project (aget (aget seg (inc i)) 0) (aget (aget seg (inc i)) 1))
+                          ax (aget a 0) ay (aget a 1)
+                          dx (- (aget b 0) ax) dy (- (aget b 1) ay)
+                          l2 (+ (* dx dx) (* dy dy))
+                          u  (if (zero? l2) 0 (max 0 (min 1 (/ (+ (* (- x ax) dx) (* (- y ay) dy)) l2))))
+                          ex (- x (+ ax (* u dx))) ey (- y (+ ay (* u dy)))
+                          d2 (+ (* ex ex) (* ey ey))]
+                      (when (< d2 (second @best)) (vreset! best [tr d2])))))))
+    (first @best)))
+
+(defn- box-around
+  "[s w n e] of the square `tol` px around [x y], from `unproject` (container px -> #js [lat lng])."
+  [unproject [x y] tol]
+  (let [a (unproject (- x tol) (+ y tol)) b (unproject (+ x tol) (- y tol))]
+    [(min (aget a 0) (aget b 0)) (min (aget a 1) (aget b 1)) (max (aget a 0) (aget b 0)) (max (aget a 1) (aget b 1))]))
+
+(defn- same-spot?
+  "Whether all these tracks start within about 30 m of each other (zooming in won't separate them)."
+  [tracks]
+  (let [ls (map #(aget (.-start ^js %) 0) tracks)
+        os (map #(aget (.-start ^js %) 1) tracks)]
+    (< (max (- (apply max ls) (apply min ls)) (- (apply max os) (apply min os))) 0.0003)))
+
+(defn- pin-icon [cls html size]
+  (.divIcon L #js {:className "map-pin-wrap" :html (str "<span class=\"" cls "\"" html "</span>")
+                   :iconSize #js [size size]}))
+
+(defn- pins-layer
+  "Leaflet pins for `node`'s tracks (their starts), grouped by screen position, redrawn after every
+  move. A click opens the popup and highlights the track; `select!` does that for an item list."
+  [^js m ^js node select!]
+  (let [group (.layerGroup L)
+        refresh (fn []
+                  (.clearLayers group)
+                  (let [b   (.pad (.getBounds m) 0.1)
+                        pts (for [^js tr (.-__tracks node)
+                                  :let [st (.-start tr)]
+                                  :when (and st (.contains b #js [(aget st 0) (aget st 1)]))]
+                              (let [p (.latLngToContainerPoint m #js [(aget st 0) (aget st 1)])]
+                                {:px [(.-x p) (.-y p)] :ll [(aget st 0) (aget st 1)] :v tr}))]
+                    (doseq [{:keys [ll vs]} (track/cluster pts pin-cell)]
+                      (let [n    (count vs)
+                            mk   (if (= 1 n)
+                                   (let [^js tr (first vs)
+                                         fam (ui/family (:sport (.-item tr)))]
+                                     (.marker L (clj->js ll)
+                                              #js {:icon (pin-icon "map-pin" (str " style=\"background:var("
+                                                                                  (:color fam) ")\">") 18)
+                                                   :title (:name (.-item tr))}))
+                                   (let [s (cond (< n 10) 30 (< n 100) 36 :else 42)]
+                                     (.marker L (clj->js ll)
+                                              #js {:icon (pin-icon "map-pin-group" (str ">" n) s)})))]
+                        (.on mk "click"
+                             (fn []
+                               (if (or (= 1 n) (same-spot? vs) (>= (.getZoom m) 17))
+                                 (select! (mapv #(.-item ^js %) vs) (clj->js ll))
+                                 (.fitBounds m (clj->js (mapv #(vec (.-start ^js %)) vs))
+                                             #js {:padding #js [60 60] :maxZoom 19}))))
+                        (.addTo mk group)))))]
+    (set! (.-refresh group) refresh)
+    group))
 
 ;; ---------------------------------------------------------------------------
 ;; Ground
@@ -220,14 +335,51 @@
                                 m)))
     (set! (.-__ground node) ground)))
 
+(defn- select-2d!
+  "Opens the popup for `items` at `ll` [lat lng]; one activity also gets its track highlighted."
+  [^js node items ll]
+  (let [^js m   (.-__map node)
+        ^js sel (.-__sel node)]
+    (.openOn (doto (.popup L #js {:className "map-popup" :maxWidth 300 :autoPanPaddingTopLeft #js [240 110]
+                                  :autoPanPaddingBottomRight #js [60 60]})
+               (.setLatLng ll)
+               (.setContent (popup-node items)))
+             m)
+    (.clearLayers sel)
+    (when (= 1 (count items))
+      (let [segs (.-segs ^js (decoded-track (first items)))
+            col  (fam-color (ui/family (:sport (first items))))]
+        (.addTo (.polyline L segs #js {:color "#ffffff" :weight 7 :opacity 0.9 :interactive false}) sel)
+        (.addTo (.polyline L segs #js {:color col :weight 4 :opacity 1 :interactive false}) sel)))))
+
+(defn- on-map-click!
+  "A click on the map that isn't on a pin: the track under it (within 10 px), if the heat shows."
+  [^js node ^js e]
+  (let [^js m (.-__map node)
+        pt    (.-containerPoint e)
+        xy    [(.-x pt) (.-y pt)]
+        unproject (fn [x y] (let [ll (.containerPointToLatLng m #js [x y])] #js [(.-lat ll) (.-lng ll)]))
+        project   (fn [la lo] (let [p (.latLngToContainerPoint m #js [la lo])] #js [(.-x p) (.-y p)]))]
+    (when (.-__heat node)
+      (when-let [^js tr (nearest-track (.-__tracks node) (box-around unproject xy 10) project xy 10)]
+        (select-2d! node [(.-item tr)] (.-latlng e))))))
+
+(defn- sync-pins-2d!
+  "Shows or hides the pins layer by the `pins?` setting and redraws it."
+  [^js node]
+  (let [^js m (.-__map node) ^js g (.-__pins-layer node)]
+    (if (.-__pins node)
+      (do (when-not (.hasLayer m g) (.addTo g m)) ((.-refresh g)))
+      (.remove g))))
+
 (defn map-2d
   "Full-page Leaflet heatmap of `items` ([{:id :track [encoded …]}], coach.track) in the colours of
   `palette` on `ground` (dark, light, satellite), shown while `heat?`. `version` changes with the
   filter: the heat is redrawn, the view kept."
-  [{:keys [items version palette ground heat?]}]
+  [{:keys [items version palette ground heat? pins?]}]
   [:div.map.heatmap
    {:replicant/key "heatmap-2d"
-    :data-version (str version "|" palette "|" ground "|" heat?)
+    :data-version (str version "|" palette "|" ground "|" heat? "|" pins?)
     :replicant/on-render
     (fn [{:replicant/keys [life-cycle] :as hook}]
       (let [^js node (:replicant/node hook)
@@ -240,6 +392,7 @@
             (set! (.-__tracks node) tracks)
             (set! (.-__palette node) palette)
             (set! (.-__heat node) heat?)
+            (set! (.-__pins node) pins?)
             (set! (.-__attribution node) (.addTo (.. L -control (attribution #js {:prefix false})) m))
             (set-ground-2d! node m ground)
             (.addTo (.. L -control (zoom #js {:position "topright"})) m)
@@ -255,18 +408,27 @@
               (set! (.-__layer node) layer))
             (set! (.-__version node) version)
             (set! (.-__map node) m)
+            (set! (.-__sel node) (.addTo (.layerGroup L) m))
+            (set! (.-__pins-layer node) (pins-layer m node #(select-2d! node %1 %2)))
+            (.on m "popupclose" #(.clearLayers ^js (.-__sel node)))
+            (.on m "click" #(on-map-click! node %))
+            (.on m "moveend" #(when (.-__pins node) ((.-refresh ^js (.-__pins-layer node)))))
+            (sync-pins-2d! node)
             (charts/observe-resize! node #(.invalidateSize m)))
 
           :replicant.life-cycle/update
           (do (when (not= ground (.-__ground node))
                 (set-ground-2d! node (.-__map node) ground))
               (when (or (not= version (.-__version node)) (not= palette (.-__palette node))
-                        (not= heat? (.-__heat node)))
+                        (not= heat? (.-__heat node)) (not= pins? (.-__pins node)))
                 (set! (.-__version node) version)
                 (set! (.-__tracks node) tracks)
                 (set! (.-__palette node) palette)
                 (set! (.-__heat node) heat?)
-                ((.-redraw (.-__layer node)))))
+                (set! (.-__pins node) pins?)
+                ((.-redraw (.-__layer node)))
+                (.closePopup (.-__map node))
+                (sync-pins-2d! node)))
 
           :replicant.life-cycle/unmount
           (do (some-> (.-__ro node) .disconnect)
@@ -639,6 +801,98 @@
     (.appendChild div b)
     #js {:onAdd (fn [_] div) :onRemove (fn [_] (.remove div))}))
 
+(defn- pin-collection
+  "GeoJSON points (the activities' starts) for MapLibre's clustering."
+  [tracks]
+  (clj->js {:type "FeatureCollection"
+            :features (for [^js tr tracks :let [st (.-start tr)] :when st]
+                        {:type "Feature"
+                         :properties {:id (:id (.-item tr)) :family (name (:id (ui/family (:sport (.-item tr)))))}
+                         :geometry {:type "Point" :coordinates [(aget st 1) (aget st 0)]}})}))
+
+(defn- selected-collection
+  "GeoJSON of the highlighted activity's track (nothing without `item`)."
+  [item]
+  (clj->js {:type "FeatureCollection"
+            :features (when item
+                        [{:type "Feature"
+                          :properties {:color (fam-color (ui/family (:sport item)))}
+                          :geometry {:type "MultiLineString"
+                                     :coordinates (for [seg (.-segs ^js (decoded-track item))]
+                                                    (for [ll seg] [(aget ll 1) (aget ll 0)]))}}])}))
+
+(defn- add-pin-layers!
+  "The pins (clustered by MapLibre) and the highlighted track, as sources and layers."
+  [^js m tracks pins?]
+  (let [vis    #js {:visibility (if pins? "visible" "none")}
+        colors (into ["match" ["get" "family"]]
+                     (concat (mapcat (fn [f] [(name (:id f)) (fam-color f)]) ui/families) ["#8a90a0"]))]
+    (.addSource m "pins" #js {:type "geojson" :data (pin-collection tracks) :cluster true
+                              :clusterRadius pin-cell :clusterMaxZoom 16})
+    (.addSource m "selected" #js {:type "geojson" :data (selected-collection nil)})
+    (doseq [[id w c] [["selected-casing" 7 "#ffffff"] ["selected" 4 ["get" "color"]]]]
+      (.addLayer m (clj->js {:id id :type "line" :source "selected"
+                             :layout {"line-cap" "round" "line-join" "round"}
+                             :paint {"line-color" c "line-width" w}})))
+    (.addLayer m (clj->js {:id "pin-clusters" :type "circle" :source "pins" :filter ["has" "point_count"]
+                           :layout vis
+                           :paint {"circle-color" "#1fb6ff" "circle-opacity" 0.9
+                                   "circle-radius" ["step" ["get" "point_count"] 10 10 14 100 19]
+                                   "circle-stroke-width" 2.5 "circle-stroke-color" "#ffffff"}}))
+    (.addLayer m (clj->js {:id "pin" :type "circle" :source "pins" :filter ["!" ["has" "point_count"]]
+                           :layout vis
+                           :paint {"circle-color" colors "circle-radius" 6
+                                   "circle-stroke-width" 2 "circle-stroke-color" "#ffffff"}}))))
+
+(defn- set-pins-visible! [^js m on?]
+  (doseq [id ["pin-clusters" "pin"]]
+    (.setLayoutProperty m id "visibility" (if on? "visible" "none"))))
+
+(defn- open-popup-3d!
+  "Popup for `items` at `lnglat`; a single activity also gets its track highlighted."
+  [^js ml ^js node ^js m items lnglat]
+  (when-let [^js old (.-__popup node)]
+    (set! (.-__popup node) nil)
+    (.remove old))
+  (let [^js p (-> ^js (new (.-Popup ml) #js {:className "map-popup" :maxWidth "300px"})
+                  (.setLngLat lnglat)
+                  (.setDOMContent (popup-node items))
+                  (.addTo m))]
+    (set! (.-__popup node) p)
+    (.on p "close" (fn []
+                     (when (identical? p (.-__popup node))
+                       (set! (.-__popup node) nil)
+                       (.setData ^js (.getSource m "selected") (selected-collection nil)))))
+    (.setData ^js (.getSource m "selected") (selected-collection (when (= 1 (count items)) (first items))))))
+
+(defn- on-click-3d!
+  "A click: a cluster zooms in (or lists its activities at one spot), a pin opens its popup, else the
+  track under the point (within 10 px) if the heat shows."
+  [^js ml ^js node ^js m ^js e]
+  (let [^js f   (aget (.queryRenderedFeatures m (.-point e) #js {:layers #js ["pin-clusters" "pin"]}) 0)
+        by-id   (fn [id] (some #(when (= id (:id (.-item ^js %))) (.-item ^js %)) (.-__tracks node)))
+        coords  (some-> f .-geometry .-coordinates)
+        xy      [(.. e -point -x) (.. e -point -y)]
+        project (fn [la lo] (let [p (.project m #js [lo la])] #js [(.-x p) (.-y p)]))
+        unproj  (fn [x y] (let [ll (.unproject m #js [x y])] #js [(.-lat ll) (.-lng ll)]))]
+    (cond
+      (and f (some? (.. f -properties -cluster_id)))
+      (let [id (.. f -properties -cluster_id) ^js src (.getSource m "pins")]
+        (-> (.getClusterExpansionZoom src id)
+            (.then (fn [z]
+                     (if (> z 16)
+                       (-> (.getClusterLeaves src id 50 0)
+                           (.then (fn [leaves]
+                                    (open-popup-3d! ml node m
+                                                    (keep #(by-id (.. ^js % -properties -id)) leaves) coords))))
+                       (.easeTo m #js {:center coords :zoom z}))))))
+
+      f (when-let [item (by-id (.. f -properties -id))] (open-popup-3d! ml node m [item] coords))
+
+      (.-__heat node)
+      (when-let [^js tr (nearest-track (.-__tracks node) (box-around unproj xy 10) project xy 10)]
+        (open-popup-3d! ml node m [(.-item tr)] (.-lngLat e))))))
+
 (defn- mount-3d! [^js ml ^js node tracks]
   (let [{:keys [lat lng zoom bearing pitch]} @camera
         ^js m (new (.-Map ml)
@@ -680,9 +934,11 @@
            (.addLayer m #js {:id "heat" :type "raster" :source "heat"
                              :layout #js {:visibility (if (.-__heat node) "visible" "none")}
                              :paint #js {"raster-fade-duration" 0 "raster-resampling" "linear"}})
+           (add-pin-layers! m (.-__tracks node) (.-__pins node))
            (when (and (nil? lat) (seq tracks)) (fit!))
            (redraw)
            (draw-sky)))
+    (.on m "click" #(when (.-__loaded node) (on-click-3d! ml node m %)))
     (.on m "moveend"
          (fn []
            (let [c (.getCenter m)]
@@ -695,10 +951,10 @@
 (defn map-3d
   "The same heatmap on 3D terrain (drag to move, right-drag or ctrl-drag to tilt and turn).
   Props as `map-2d`."
-  [{:keys [items version palette ground heat?]}]
+  [{:keys [items version palette ground heat? pins?]}]
   [:div.map.heatmap.map3d
    {:replicant/key "heatmap-3d"
-    :data-version (str version "|" palette "|" ground "|" heat?)
+    :data-version (str version "|" palette "|" ground "|" heat? "|" pins?)
     :replicant/on-render
     (fn [{:replicant/keys [life-cycle] :as hook}]
       (let [^js node (:replicant/node hook)
@@ -709,6 +965,7 @@
               (set! (.-__palette node) palette)
               (set! (.-__ground node) ground)
               (set! (.-__heat node) heat?)
+              (set! (.-__pins node) pins?)
               (set! (.-__version node) version)
               (-> @maplibre
                   (.then (fn [ml] (when-not (.-__gone node) (mount-3d! ml node tracks))))
@@ -718,14 +975,18 @@
 
           :replicant.life-cycle/update
           (when (or (not= version (.-__version node)) (not= palette (.-__palette node))
-                    (not= ground (.-__ground node)) (not= heat? (.-__heat node)))
+                    (not= ground (.-__ground node)) (not= heat? (.-__heat node)) (not= pins? (.-__pins node)))
             (set! (.-__version node) version)
             (set! (.-__tracks node) tracks)
             (set! (.-__palette node) palette)
+            (set! (.-__pins node) pins?)
             (when-let [^js m (.-__map node)]
               ;; before "load" the layers don't exist yet; the load handler applies __ground and __heat
               (when (.-__loaded node)
                 (when (not= ground (.-__ground node)) (set-ground-3d! node m ground))
+                (some-> (.-__popup node) .remove)
+                (.setData ^js (.getSource m "pins") (pin-collection tracks))
+                (set-pins-visible! m pins?)
                 (.setLayoutProperty m "heat" "visibility" (if heat? "visible" "none"))))
             (set! (.-__ground node) ground)
             (set! (.-__heat node) heat?)
