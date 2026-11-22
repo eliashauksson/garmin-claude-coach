@@ -27,3 +27,6 @@ claude-limits.edn
 !.clj-kondo/config.edn
 /sync.lock
 /athletes/
+
+# shared by all athletes of an install (peaks database, elevation cache)
+/shared/

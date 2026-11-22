@@ -193,6 +193,60 @@
   [& parts]
   (str (apply io/file (data-dir) parts)))
 
+;; ---------------------------------------------------------------------------
+;; Shared by every athlete of this install (data that is the same for all of them)
+
+(def ^:private shared-dir* (atom nil))
+
+(defn shared-dir
+  "The folder for what all athletes share (the peaks database, the elevation tile cache):
+  $COACH_SHARED_DIR, else shared/ in the app folder, which every copy of the app already shares
+  and which updates leave alone."
+  ^File []
+  (or @shared-dir*
+      (.getAbsoluteFile (io/file (or (not-empty (System/getenv "COACH_SHARED_DIR")) (app-file "shared"))))))
+
+(defn use-shared-dir! [dir] (reset! shared-dir* (some-> dir io/file .getAbsoluteFile)))
+
+(defn shared-file
+  "Path (a string) of a file in the shared folder."
+  [& parts]
+  (str (apply io/file (shared-dir) parts)))
+
+(defonce ^:private named-locks (atom {}))
+
+(defn- jvm-lock ^java.util.concurrent.locks.ReentrantLock [lock-name]
+  (or (get @named-locks lock-name)
+      (get (swap! named-locks (fn [m] (if (contains? m lock-name) m
+                                          (assoc m lock-name (java.util.concurrent.locks.ReentrantLock. true)))))
+           lock-name)))
+
+(def busy "What `try-lock` returns when somebody else holds the lock." ::busy)
+
+(defn- locked [lock-name wait? f]
+  (let [jl (jvm-lock lock-name)]
+    (if-not (if wait? (do (.lock jl) true) (.tryLock jl))
+      busy
+      (try
+        (.mkdirs (shared-dir))
+        (with-open [raf (RandomAccessFile. (io/file (shared-dir) (str lock-name ".lock")) "rw")]
+          (let [ch (.getChannel raf)
+                ^FileLock fl (if wait? (.lock ch) (.tryLock ch))]
+            (if fl (try (f) (finally (.release fl))) busy)))
+        (finally (.unlock jl))))))
+
+(defn with-lock
+  "Runs `f` holding the named lock, waiting for whoever has it. The lock is a file in the shared
+  folder (held between separate apps) plus one inside this app (a file lock can't be taken twice by one
+  process, and one app serves all athletes on a server). Not re-entrant per name."
+  [lock-name f]
+  (locked lock-name true f))
+
+(defn try-lock
+  "Like `with-lock`, but returns `busy` at once when somebody else holds the lock."
+  [lock-name f]
+  (locked lock-name false f))
+
 (defn clean-label
   "Pure: a display name as written in a label file: one line, spaces
   collapsed, at most 40 characters; nil when empty."

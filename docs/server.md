@@ -392,6 +392,10 @@ it again with `--label "Nadine M."`. The script lists the athlete in `athletes.e
 folder, `~/.local/share/garmin-coach/`), restarts the one installed app, which serves all athletes
 from a single process, each on their own port, passes the new port on with `tailscale serve`, and
 prints the address. The other athletes are back within seconds. Then, on that address:
+Peak data (OSM peaks, their prominence, the loaded regions) is the same for everybody and lives once in
+`shared/` in the app folder (`$COACH_SHARED_DIR` to move it): a region one athlete loads is there for all.
+Only the bagged peaks are per athlete. It isn't in the backups; it downloads again.
+
 1. Settings › General: log in to Garmin and connect Coros with **anna's** accounts. The Claude
    key is already there.
 2. The Athlete tab: write anna's profile.
