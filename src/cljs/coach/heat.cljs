@@ -588,8 +588,13 @@
           :replicant.life-cycle/mount
           (let [^js m (L/map node #js {:zoomControl false :attributionControl false :minZoom 2})
                 _ (.addEventListener node "contextmenu" #(.preventDefault %)) ; no browser menu over the map
+                sized? #(let [sz (.getSize m)] (and (> (.-x sz) 60) (> (.-y sz) 60)))
                 fit! #(when-let [[s w n e] (all-bounds (.-__tracks node))]
-                        (.fitBounds m #js [#js [s w] #js [n e]] #js {:padding #js [24 24]}))]
+                        (if (sized?)
+                          (.fitBounds m #js [#js [s w] #js [n e]] #js {:padding #js [24 24]})
+                          (set! (.-__pending-fit node) true)))
+                good-camera? (fn [{:keys [lat lng zoom]}]
+                               (and (js/isFinite lat) (js/isFinite lng) (js/isFinite zoom)))]
             (set! (.-__tracks node) tracks)
             (set! (.-__palette node) palette)
             (set! (.-__heat node) heat?)
@@ -599,12 +604,14 @@
             (set! (.-__attribution node) (.addTo (.. L -control (attribution #js {:prefix false})) m))
             (set-ground-2d! node m ground)
             (.addTo (.. L -control (zoom #js {:position "topright"})) m)
-            (if-let [{:keys [lat lng zoom]} @camera]
+            (if-let [{:keys [lat lng zoom]} (let [c @camera] (when (and c (good-camera? c)) c))]
               (.setView m #js [lat lng] (js/Math.round zoom))
-              (if (seq tracks) (fit!) (.setView m #js [46.8 8.2] 7)))
+              (do (.setView m #js [46.8 8.2] 7)
+                  (when (seq tracks) (fit!))))
             (.on m "moveend" (fn []
                                (let [c (.getCenter m)]
-                                 (swap! camera assoc :lat (.-lat c) :lng (.-lng c) :zoom (.getZoom m)))))
+                                 (when (and (sized?) (js/isFinite (.-lat c)) (js/isFinite (.-lng c)))
+                                   (swap! camera assoc :lat (.-lat c) :lng (.-lng c) :zoom (.getZoom m))))))
             (.addTo (charts/reset-control fit! (t "Show all activities")) m)
             (when js/document.fullscreenEnabled (.addTo (fullscreen-control-2d node) m))
             (let [layer (heat-layer #(vector (.-__tracks node) (.-__palette node) (.-__heat node)))]
@@ -627,7 +634,11 @@
                                  (load-peaks-2d! node))))
             (sync-peaks-2d! node)
             (when peaks (load-peaks-2d! node))
-            (charts/observe-resize! node #(.invalidateSize m)))
+            (charts/observe-resize! node (fn []
+                                           (.invalidateSize m)
+                                           (when (and (.-__pending-fit node) (sized?))
+                                             (set! (.-__pending-fit node) false)
+                                             (fit!)))))
 
           :replicant.life-cycle/update
           (do (when (not= ground (.-__ground node))
