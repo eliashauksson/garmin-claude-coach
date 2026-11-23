@@ -38,6 +38,14 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - readiness: pure morning readiness check · adapt: signals that the plan should adapt
 - readiness-score: pure, Garmin's training readiness rebuilt from raw data (six factors + combination, `fit`) · readiness-estimate: its DB glue, shown when Garmin has no score, refit after each sync, CLI `compare`
 - epoc: pure, Garmin-style training load (peak EPOC) from HR or power, acute load · load-model: its DB glue, fitted to Garmin's loads (refit every 20 new ones), power calibration, CLI `compare`; gives rides Garmin never saw (Coros) `activity_metrics.load_est`
+- cycle: pure, opt-in cycle tracking (women only): period starts (athlete's log wins over Garmin's), typical length, phase per day (counted from
+  the last start, so ovulation/luteal are estimates; hormonal contraception → bleeding days only), `predict`, `flags` (missed/irregular periods, heavy
+  bleeding: a prompt to see a doctor, never a diagnosis), `patterns` (her own HRV/RHR/symptom/RPE by phase over six cycles; the planner and
+  readiness use it from 3 cycles), `context` for the planner · cycle-data: its DB glue: profile (`sex_override`, `cycle_tracking`,
+  `contraception` in sync_state; effective sex is the override else Garmin's, never used for hrTSS), `cycle_log` (athlete: period start + end (the logged end shortens or lengthens the menstrual phase and fills the bleeding days), flow, severity symptoms, yes/no `tags` in groups mood/sex/discharge/other; only mood + illness tags reach the planner) + `cycle_days` (Garmin,
+  `CycleSource`/`get_menstrual_calendar_data`, parser `garmin-mcp/cycle-rows` guesses the undocumented shape), `sync!`, `overview` (Today card and Day page), `days` (calendar), `summary` (Trends, `/api/cycle/summary`: stats, history rows, `symptom-map` by cycle day, phase days, patterns; shown as tiles, a bar per cycle with the usual 21–35 band, a symptom heatmap and HRV/RHR by phase). Everything is
+  off unless female + tracking on. Evidence says no phase-based periodization: the planner's `cycle-rules` (added to the system prompt only when the
+  data has `menstrual_cycle`) adapt to logged symptoms and individual readiness, not to the phase alone
 - plan-rules: pure checks of a week against training-principles.md (warnings only)
 - season: date helpers + week position in the season · season-plan: Claude drafts every week to race day
 - plan: storage for weeks, proposals and accepted workouts · planner: Claude week proposals, adjustments, session structure
