@@ -1,214 +1,179 @@
-# garmin-claude-coach
+<div align="center">
 
-A personal training dashboard that runs locally on my own Garmin data, with Claude as the coach.
-Garmin data comes from a local [garmin_mcp](https://github.com/Taxuspt/garmin_mcp) server and is
-only ever **read**: nothing is written back to Garmin.
+<img src="installer/icon.png" width="96" alt="">
 
-## Pages
-- **Today** (start page): what to do today and whether you are ready: today's session, this morning's
-  readiness and vitals (a tap opens a vital's history), "How did it go?", the week so far and the last
-  activity. See `coach-dashboard-spec.md`.
-- **Plan**: a switch at the top picks the view (`?view=`): **Week** (default) has the week plans drafted
-  by Claude, with adjustments when training, feedback or wellness call for it; **Calendar** shows
-  activities and planned sessions per week, with a small health block per day, and opens the **day
-  page** (that day's health data, including heart rate, stress, Body Battery and steps); **Season** is
-  the season plan to race day.
-- **Trends**: the long term, with a bar that jumps between the sections: training load (CTL/ATL/TSB, form
-  forecast, weekly volume), the goal race against Garmin's race predictions, recovery over 30 days,
-  training over 28 days and 26 weeks, cycling power, and VO₂ max and endurance score.
-- **Map**: a heatmap of every activity with GPS, by time range and sport, in five colour schemes on a
-  dark, light or satellite map. In 3D the heat lies on the terrain; zoomed out the map becomes a globe
-  in front of the real night sky (stars, Milky Way, sun and moon where they are now).
-- **More**: **Athlete** (the athlete document, edited with Claude), **Metrics explained**, **Settings**
-  (language, appearance, backup and Garmin login under **General**; Claude's models and costs under
-  **Claude & API costs**).
+# Garmin Coach
 
-Each activity has its own page, opened from Today, the calendar or a day.
+**A self-hosted training dashboard for your Garmin data, with Claude as your coach.**<br>
+TrainingPeaks-style metrics, a season plan to race day, a 3D heatmap of everywhere you've been,
+and every summit you've ever stood on. It runs on your own machine.
 
-## How it works
+[![Latest release](https://img.shields.io/github/v/release/eliashauksson/garmin-claude-coach?style=flat-square&color=2577d9)](https://github.com/eliashauksson/garmin-claude-coach/releases/latest)
+![Windows | Linux](https://img.shields.io/badge/runs%20on-Windows%20%7C%20Linux%20%7C%20your%20server-16181d?style=flat-square)
+![Clojure](https://img.shields.io/badge/Clojure-1.12-5881d8?style=flat-square&logo=clojure&logoColor=white)
+![Claude](https://img.shields.io/badge/coach-Claude-d97757?style=flat-square&logo=anthropic&logoColor=white)
+![Languages](https://img.shields.io/badge/i18n-EN%20%C2%B7%20DE%20%C2%B7%20FR-46c37b?style=flat-square)
 
-**Data.** Every sync stores activities, daily health and per-second activity data in
-`data/coach.db` (SQLite). Garmin keeps intraday detail only about 4 months, so each sync saves
-every day in that window not stored yet; saved days are kept for good. Training status, race
-predictions and endurance score are only available for today, so each sync stores that day's, and
-their trends fill in over time.
+[Features](#features) · [Install](#install) · [User guide](docs/user-guide.html) · [Server setup](docs/server.md) · [Development](docs/development.md)
 
-**Planning.** The planner reads `training-principles.md` (the general method) and the athlete
-document (the athlete, goal race and season outline, edited with Claude on the Athlete page (More)). Claude
-drafts the season plan to race day; the coach then keeps the next two weeks planned. Rule checks
-in code guard every plan.
+<br>
 
-**Personal data stays local.** Only the general principles are in git. The athlete document, plans
-and all Garmin data live in `data/`, which git ignores. Personal values (heart-rate thresholds,
-limits, race date and goal time) are read from the athlete document, never hard-coded.
+<img src="docs/img/today.png" width="74%" alt="The Today page: training readiness, sleep, HRV, resting heart rate, Body Battery and today's planned session">&nbsp;
+<img src="docs/img/phone.png" width="23%" alt="The same page on a phone">
 
-**Languages.** English, German (Swiss Standard German) and French (as written in Switzerland). The
-language is a server setting, so the coach's signals and warnings follow it. Texts Claude writes are
-translated once when they come back and stored, so switching is instant. To save cost, the
-Translations task can be set to translate into the selected language only; switching then takes
-about a minute.
+</div>
 
-**Claude costs.** Settings › Claude & API costs lists every request with its tokens and cost
-(at list prices), per day, task and model. Per task you choose the model, the effort and, for plans
-and adjustments, the delivery:
-- **Batch when automatic** (default): requests nobody waits for, like proposals after a sync, go
-  through the half-price Batches API (answers usually within an hour); your own clicks stay instant.
-- **Always batch** / **Always instant**.
+## Why
 
-## Install (Windows and Linux)
-No programming tools needed: the installer fetches everything the app needs into one folder,
-adds a **Garmin Coach** shortcut to the desktop and the app menu, and starts it. No admin rights.
-A step-by-step guide for people who aren't technical, from installing to costs and backups:
-[`docs/user-guide.html`](docs/user-guide.html).
+- 🧠 **A coach that thinks, and asks first.** Claude drafts your season, plans your weeks and
+  adapts them to how you slept, how you felt and what you actually did. Nothing changes until you
+  press *Accept*.
+- 🔒 **Your data, on your disk.** Garmin data syncs into a local SQLite database. Sync only reads:
+  nothing goes back to Garmin until you press *Send to device*.
+- ⚡ **One-line install.** No dev tools, no admin rights, no account to make. Windows, Linux, or a
+  €5 server you open from your phone.
 
-- **Windows:** download `install-windows.cmd` from the
-  [latest release](https://github.com/eliashauksson/garmin-claude-coach/releases/latest) and
-  double-click it. If Windows says it protected your PC, click **More info › Run anyway**.
-  Or press Win+R and paste:
-  `powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/install.ps1 | iex"`
-- **Linux:** open a terminal (Ctrl+Alt+T) and paste:
-  `curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/install.sh | bash`
+## Features
 
-The browser opens on the Dashboard, whose **Getting started** checklist walks through the rest:
-log in to Garmin and paste a Claude API key (both in Settings › General), then the first sync.
+### 🤖 An AI coach that plans your season
 
-The app then runs in the background (syncing every 2 h) until **Settings › General › Quit the app**
-or the computer shuts down; the shortcut starts it again, or just opens it if it's running.
-Settings › General also has:
-- **Start with the computer**: starts the app in the background at login, so syncing never pauses
-  (Garmin keeps training status and race predictions only for the day itself).
-- **Update now**, when a newer release exists (checked at start and twice a day). It runs the
-  installer, which replaces the app and restarts it; the data stays. Running the installer by
-  hand does the same.
-- **Data folder**: move the data elsewhere (e.g. a folder that is backed up), or point the app
-  at a folder that already has coach data. The app restarts.
-- **Restore a backup**, from the list or from a file kept elsewhere. The app restarts.
+<img src="docs/img/plan-season.png" alt="The season plan: 23 weeks of weekly TSS bars from base to taper and race week">
 
-Where things are:
+- **Season plan to race day.** Claude lays out base, specific, taper and race week with weekly
+  load targets, cutback weeks and test weeks, and explains why.
+- **Always two weeks ahead.** Every Monday the coach plans a new week from your training so far.
+  Workouts come with heart-rate, pace or power targets and a block structure.
+- **It adapts.** Poor sleep, a niggle, a missed session, *"sick since yesterday"*: the coach
+  signals when the plan should change and proposes a re-plan. You accept or reject it.
+- **Guard rails in code.** Every week is checked against
+  [training principles](training-principles.md): load and recovery, intensity distribution,
+  hard-session spacing, long-run progression, heavy leg days before key sessions. Anything off
+  shows up as a warning next to the plan.
+- **Send to device.** One button puts a planned workout on your Garmin watch or COROS schedule,
+  steps and targets included.
+- **Cost you can see.** Every Claude request is logged with tokens and cost. Background work
+  goes through the half-price Batches API, and you pick model and effort per task.
 
-| | Windows | Linux |
-|---|---|---|
-| App | `%LOCALAPPDATA%\GarminCoach` | `~/.local/share/garmin-coach` |
-| Data (unless moved in Settings) | `data\` in the app folder | `data/` in the app folder |
-| Log | `app.log` in the data folder | `app.log` in the data folder |
-| Uninstall | Start menu › Uninstall Garmin Coach | `~/.local/share/garmin-coach/uninstall.sh` |
+<img src="docs/img/plan-week.png" alt="A planned week: runs, gym sessions and a hike with heart-rate targets">
 
-The installer downloads Java 21 ([Adoptium](https://adoptium.net)), [uv](https://github.com/astral-sh/uv)
-(which runs the Garmin connector and fetches Python for it) and the app itself, `garmin-coach.jar`,
-from the latest release.
+### 💚 Know if you're ready, every morning
 
-## Install on a server (phone and always on)
-Optional. On a small always-on server the app syncs every 2 h whether the laptop is on or not, and
-you open the same dashboard on your phone and laptop. It is never on the open internet: it listens
-on the server's 127.0.0.1 only, and [Tailscale](https://tailscale.com) (free for personal use)
-passes it on over HTTPS to your own devices, at an address like `https://coach.tail1234.ts.net`.
-About half an hour. Full guide: [`docs/server.md`](docs/server.md).
+- Training readiness, sleep, overnight HRV, resting heart rate and Body Battery on one page, each
+  with its history a tap away.
+- When Garmin doesn't give a readiness score, the app **rebuilds it from the raw data**: six
+  factors, fitted to your own Garmin scores.
+- A morning check that turns it into one line: *"Ready for quality work today"* or
+  *"move the run to the evening"*.
 
-You need a Debian/Ubuntu server with **2 GB of memory or more** (e.g. a Hetzner Cloud VPS for
-about €5 a month, with public IPv4 kept on; or a Raspberry Pi 4/5 at home), an SSH key for it, and
-Tailscale on your phone and laptop.
+### 📈 The numbers serious athletes want
 
-1. **Create the server** with Ubuntu 24.04 and your SSH key, and log in: `ssh root@<server-ip>`.
-2. **Run the setup script.** It updates the system, opens only SSH in the firewall, sets the time
-   zone, creates a user `coach`, installs Tailscale (open the sign-in link it prints) and the app as
-   a systemd user service, and turns on `tailscale serve`. It prints the dashboard's address.
-   ```sh
-   curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/server-setup.sh \
-     | sudo bash -s -- --timezone Europe/Zurich
-   ```
-   Running it again is safe: finished steps are skipped and the app is updated.
-3. **Tailscale admin console › Machines:** ⋯ › **Disable key expiry** for the server.
-4. **Move your data and logins:** Download backup in the laptop app, then Restore from a file on
-   the server's page. Log in to Garmin, paste the Claude key and connect Coros there (or copy
-   `~/.garminconnect`, `~/.config/coach/anthropic-key` and `coros.json` over; see the guide).
-5. **Laptop app:** turn off Start with the computer and quit it, so only the server syncs.
-6. **Phone:** with Tailscale on, open the address and add it to the home screen (on Android in
-   Chrome; the DuckDuckGo browser can't open Tailscale addresses). It opens full-screen with the
-   app icon.
+<img src="docs/img/trends.png" alt="Trends: fitness (CTL), fatigue (ATL) and form (TSB) over 180 days">
 
-Updates: **Update now** in Settings, or run the setup script again.
+- **Fitness, fatigue and form** (CTL / ATL / TSB), ramp rate and a form forecast to race day.
+- **TSS, NP and IF** for every activity: power where you have it, heart rate or pace where you don't.
+- **Power curve, eFTP and cycling VO₂ max** from your rides.
+- **Training load the Garmin way.** A peak-EPOC model fitted to Garmin's own numbers, so rides
+  Garmin never saw (from a COROS bike computer) still count.
+- Race predictions, endurance score and recovery trends, with every metric explained in the app.
 
-**More athletes (optional).** One install is one athlete. To coach someone else on the same
-server, with the same Claude key: `curl -fsSL …/installer/add-athlete.sh | sudo bash -s -- anna`.
-They get their own dashboard (`https://coach.tail1234.ts.net:8443/`), data and Garmin/Coros
-logins; the cost page shows what each athlete costs. On a small server their syncs take turns and
-swap is added, so more athletes make it slower, never crash it. See
-[`docs/server.md`](docs/server.md#11-more-athletes-optional).
+### 🗺️ Everywhere you've been, in 3D
 
-## Making a release
-Push a version tag (`git tag v1.0.0 && git push origin v1.0.0`): the Release workflow runs the
-tests, builds `garmin-coach.jar` and publishes it with the installers. To try an installer with a
-local build, run `make app` and then `bash installer/install.sh` (or `installer\install-windows.cmd`)
-from the repository: it installs `target/garmin-coach.jar` instead of the release.
+<img src="docs/img/map-3d.jpg" alt="A 3D satellite view of the Bernese Alps with activity tracks and bagged summits">
 
-## Development
-### Requirements
-- Clojure CLI and Java 21
-- Node 18 or newer, for the ClojureScript build
-- `uv`/`uvx`, which runs the Garmin MCP server
+- A **heatmap of every GPS activity**, filtered by time and sport, in five colour schemes.
+- **Real 3D terrain** you can tilt and fly through, on satellite, topo or street maps
+  (OpenStreetMap, Esri, Tracestrack, OpenTopoMap, CyclOSM, swisstopo and more).
+- Zoom all the way out and the map becomes a **globe floating in the real night sky**: stars,
+  the Milky Way, the sun and the moon where they are right now.
 
-The page makes no outside requests except for map tiles: OpenStreetMap, Esri satellite imagery and
-Mapterhorn terrain for the 3D map (`npm install` copies the font and Leaflet's CSS into
-`resources/public/`). The server talks to Garmin, Claude and, in the
-installed app only, GitHub (the update check).
+<img src="docs/img/globe.jpg" alt="The globe in space with the sun, stars and the Milky Way">
 
-### Setup
-```sh
-npm install
-npm run release                       # builds resources/public/js/main.js
-make run                              # http://127.0.0.1:8081/
+### ⛰️ Peak bagging for the whole planet
+
+<img src="docs/img/peaks.png" alt="The Peaks page: 72 peaks bagged, highest Grosses Wannenhorn 3906 m">
+
+- **11.9 million summits**: every peak on Earth with at least 30 m prominence, from the
+  Kirmse / de Ferranti world prominence dataset.
+- Your GPS tracks are checked automatically: pass within 75 m of a top and it's **bagged**,
+  shown in crimson on the map.
+- Names from swisstopo and OpenStreetMap. Choose how prominent a summit has to be to count.
+
+### And also
+
+- 🚴 **COROS rides** merged in next to your Garmin activities, deduplicated.
+- 📱 **Installable on your phone** as a web app, over [Tailscale](https://tailscale.com) from your own server.
+- 👥 **Several athletes on one server**, each with their own data, logins and dashboard.
+- 🌍 **English, German and French** (Swiss style), including everything Claude writes.
+- 💾 **Daily backups** and one-click restore.
+- 📝 **An athlete document** about you, your goals and your race that you edit by chatting with Claude.
+
+## Install
+
+The installer fetches everything the app needs into one folder, adds a **Garmin Coach** shortcut
+and starts it.
+
+**Windows:** download `install-windows.cmd` from the
+[latest release](https://github.com/eliashauksson/garmin-claude-coach/releases/latest) and
+double-click it (if Windows says it protected your PC: **More info › Run anyway**). Or press Win+R
+and paste:
 ```
-The Dashboard then shows a **Getting started** checklist until everything is set up:
-1. **Connect Garmin**: log in with your Garmin email and password (and the code, with two-step
-   verification) in Settings › General. In a terminal: `clojure -M -m coach.auth login`.
-2. **First sync**: loads the last 4 weeks (starts by itself after logging in).
-3. **Claude**: paste your API key in Settings › General. It's saved in
-   `~/.config/coach/anthropic-key`, readable only by you; `ANTHROPIC_API_KEY` works too.
-4. **Load full history**: everything before the first sync, then the per-second data of each
-   activity (an hour or two, in the background; resumes after a restart). It stops where Garmin
-   has nothing older. In a terminal: `clojure -M -m coach.sync history`.
-5. **Athlete information and season plan**, on the Plan page.
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/install.ps1 | iex"
+```
 
-### Run
-| Command | What it does |
+**Linux:** open a terminal and paste:
+```sh
+curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/install.sh | bash
+```
+
+Then follow the **Getting started** checklist on the dashboard:
+1. Log in to Garmin (Settings › General).
+2. Paste a [Claude API key](https://platform.claude.com/), which you need for the coach.
+3. Let the first sync run, then load your full history and write your athlete document.
+
+New to all this? The [step-by-step user guide](docs/user-guide.html) covers installing, costs and
+backups. Day-to-day use, file locations and fixes for common problems are in
+[docs/troubleshooting.md](docs/troubleshooting.md).
+
+### 📱 On your phone, always on
+
+Run it on a small always-on server (a ~€5/month VPS or a Raspberry Pi) and it syncs every two hours
+whether your laptop is on or not. One script sets everything up. The app is never on the open
+internet: [Tailscale](https://tailscale.com) gives your own devices a private HTTPS address you can
+add to your home screen.
+```sh
+curl -fsSL https://raw.githubusercontent.com/eliashauksson/garmin-claude-coach/main/installer/server-setup.sh \
+  | sudo bash -s -- --timezone Europe/Zurich
+```
+Full guide, including more athletes: [docs/server.md](docs/server.md).
+
+## Privacy
+
+| Goes out | Why |
 |---|---|
-| `make run` (or `make start`) | Dashboard on http://127.0.0.1:8081/ (8080 is the installed app's); syncs on start and every 2 h (06–22 h) |
-| `make offline` | Dashboard on port 8090, no syncing |
-| `make watch` | Rebuilds the frontend on every change (reload the page) |
-| `make build` | Release build of the frontend |
-| `make sync` | Incremental sync, like the Sync now button |
-| `make status` | Row counts and sync progress |
-| `make test` | Runs the tests |
-| `make app` | Builds the installable `target/garmin-coach.jar` (frontend included) |
-| `make backup` / `make backups` | Makes a backup / lists them |
-| `make restore FILE=…` | Restores a backup (dashboard stopped) |
+| Garmin Connect / COROS | reading your data, and writing a workout only when you press *Send to device* |
+| Claude API | the coach: training summaries, your athlete document and plans |
+| Map tile servers | the map area you look at |
+| GitHub, Overpass, Nominatim | the peak dataset blocks, summit names and place search |
 
-The data is in `data/`; `COACH_DATA_DIR=… make run` uses another folder, e.g. the installed app's
-(`~/.local/share/garmin-coach/data`). Only one app runs on a data folder at a time (a lock file
-in it): quit the installed app first.
+Your GPS tracks, health data and plans **never leave your machine** except as summaries sent to
+Claude. The app listens only on `127.0.0.1`.
 
-Single sync steps: `clojure -M -m coach.sync <step>`, where the step is `intraday [days]`,
-`history` (everything before the first sync), `thresholds` (LTHR, threshold pace, FTP, HR zones), `overview` (training status, predictions,
-endurance, sleep need) or `metrics` (recomputes TSS and the other metrics).
-`clojure -M -m coach.auth` shows the Garmin login countdown.
+## Built with
 
-## When something goes wrong
-A banner above every page says what failed and what to do:
-- **Garmin login expired.** Log in again in Settings › General (or run `clojure -M -m coach.auth login`
-  and press Sync now). No restart needed.
-- **Rate limit, network or Garmin error.** Usually temporary; the next automatic sync tries again.
-  If a Garmin error keeps coming back, check `data/mcp-server.log`.
-- **Claude credits ran out.** Planning pauses. Add funds on the
-  [Claude Console billing page](https://platform.claude.com/settings/billing), then press
-  **I've added funds, check again**.
-- **The server isn't running.** Open the app from its shortcut (or run `make run`); the page
-  reconnects by itself. If it won't start, `app.log` in the data folder says why.
+[Clojure](https://clojure.org) 1.12 (reitit, ring, next.jdbc, malli) · [SQLite](https://sqlite.org) ·
+[ClojureScript](https://clojurescript.org) with shadow-cljs and [Replicant](https://github.com/cjohansen/replicant) ·
+[ECharts](https://echarts.apache.org) · [Leaflet](https://leafletjs.com) · [MapLibre GL](https://maplibre.org) ·
+[anthropic-java](https://github.com/anthropics/anthropic-sdk-java) · [garmin_mcp](https://github.com/Taxuspt/garmin_mcp) ·
+COROS's official MCP server · the Garmin FIT SDK
 
-A failed sync never damages stored data: a day that comes back empty never replaces a stored day.
+To hack on it: `npm install && npm run release && make run`. See
+[docs/development.md](docs/development.md) for the commands, how the data and planning work, and
+how to make a release.
 
-## Backups
-Before the first sync of each day, the dashboard zips the database and the athlete document into
-`backups/` in the data folder and keeps the newest 14. **Download backup** in Settings makes a
-fresh one to keep elsewhere. **Restore a backup** in Settings restores one from the list or from a
-file; the current state is backed up first, and the app restarts. In a terminal (app stopped):
-`make restore FILE=data/backups/coach-backup-….zip`.
+## Credits
+
+Summits from Andrew Kirmse and Jonathan de Ferranti's world prominence dataset; names from
+[swisstopo](https://www.swisstopo.admin.ch) swissNAMES3D and [OpenStreetMap](https://www.openstreetmap.org)
+contributors. Terrain by [Mapterhorn](https://mapterhorn.com), satellite imagery by Esri, stars from the
+Yale Bright Star Catalogue, Milky Way by ESO/S. Brunier. Garmin and COROS are trademarks of their
+owners; this project is not affiliated with either.
