@@ -85,6 +85,11 @@
       :read (tk "A fitter heart beats more slowly at rest, so over months of training it slowly falls. A few beats above your usual for several days in a row can mean fatigue, illness, heat, alcohol or stress.")
       :example (tk "Most adults are between 60 and 100 bpm, people who train a lot often between 40 and 60. What matters is your own usual value.")
       :see ["vital-history"]}
+     {:id "cycle" :name (tk "Cycle and phase") :src :app
+      :what (tk "Where you are in your menstrual cycle: the cycle day and the phase. Shown only when you turned on cycle tracking in Settings.")
+      :how (tk "Counted from your period starts, which you log or Garmin's cycle tracking provides. Menstruation is as logged; ovulation (about 14 days before the next period) and the luteal phase are estimates from your usual cycle length, so they can be off by days. With hormonal contraception there is no natural cycle: only bleeding days are shown. The bar on the Today card shows the phases of this cycle, today and the window in which the next period is expected: half the usual swing in your cycle length either side, at least 1 and at most 5 days, 3 days until you have three cycles recorded.")
+      :read (tk "Research finds at most tiny average differences in performance between phases and no benefit from training by phase, and people differ a lot. So the coach does not plan by phase: it adapts to the symptoms you log and how sessions felt. Resting heart rate tends to be a little higher and HRV lower in the luteal phase, so one of them alone is not read as fatigue then. These are worth mentioning to a doctor, over the last six months: no period for 45 days or only one or two periods (low energy availability), cycle lengths 17 or more days apart, two cycles under 21 days, two periods of ten days or more, spotting in two cycles, or heavy bleeding (iron deficiency). The app never diagnoses.")
+      :see ["rhr" "hrv"]}
      {:id "body-battery" :name (tk "Body Battery") :src :garmin
       :what (tk "Garmin's estimate of your energy reserve, from 0 (empty) to 100 (full), like a phone battery.")
       :how (tk "It charges while you rest and sleep and drains with activity and stress. Garmin works it out from your HRV and heart rate.")

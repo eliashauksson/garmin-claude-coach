@@ -4,10 +4,18 @@
             [coach.i18n :refer [t tk]]
             [coach.ui :as ui]
             [coach.views.dashboard.common :refer
-             [cat-base chart-card day-label empty-line off-grid-ends padded-range rows-tip]]))
+             [cat-base chart-card day-label empty-line off-grid-ends padded-range rows-tip]]
+            [coach.views.dashboard.cycle :as cycle]))
 
-(defn- hrv-chart [nights]
+(defn- cycle-row
+  "The tooltip line for the cycle day of `date`, nil without cycle data."
+  [by-date date]
+  (when-let [{:keys [cycle_day phase]} (by-date date)]
+    {:label (t "cycle") :value (str (t "day {0}" cycle_day) " · " (t (get cycle/phases phase phase)))}))
+
+(defn- hrv-chart [nights cyc]
   (let [dates (mapv :date nights)
+        by-date (into {} (map (juxt :date identity)) cyc)
         vals  (concat (keep :hrv_night nights) (keep :hrv_balanced_low nights) (keep :hrv_balanced_up nights)
                       (keep :hrv_weekly nights))
         teal  (c/css-var "--fam-swim")]
@@ -21,7 +29,7 @@
                                   :y-fmt (fn [v] (str v " ms"))
                                   :tooltip-fmt (rows-tip nights
                                                          (fn [n] [(day-label (:date n))
-                                                                  [{:label (t "overnight")
+                                                                  (remove nil? [{:label (t "overnight")
                                                                     :value (some-> (:hrv_night n) (str " ms"))
                                                                     :color teal}
                                                                    {:label (t "7-day average")
@@ -31,11 +39,13 @@
                                                                              (str (:hrv_balanced_low n) "–"
                                                                                   (:hrv_balanced_up n) " ms"))}
                                                                    {:label (t "status")
-                                                                    :value (ui/enum (:hrv_status n))}]]))}))
+                                                                    :value (ui/enum (:hrv_status n))}
+                                                                   (cycle-row by-date (:date n))])]))}))
                  {:series
-                  [{:type "line" :stack "band" :symbol "none" :silent true :lineStyle {:opacity 0}
-                    :tooltip {:show false}
-                    :data (mapv :hrv_balanced_low nights)}
+                  [(cond-> {:type "line" :stack "band" :symbol "none" :silent true :lineStyle {:opacity 0}
+                            :tooltip {:show false}
+                            :data (mapv :hrv_balanced_low nights)}
+                     (seq cyc) (assoc :markArea {:silent true :data (cycle/phase-areas cyc dates)}))
                    {:type "line" :stack "band" :symbol "none" :silent true :lineStyle {:opacity 0}
                     :tooltip {:show false}
                     :areaStyle {:color teal :opacity 0.13}
@@ -142,8 +152,9 @@
                     :itemStyle {:color (c/css-var "--surface") :borderColor blue :borderWidth 2}
                     :data (mapv :bb_latest days)}]}))}))))
 
-(defn- rhr-chart [days]
+(defn- rhr-chart [days cyc]
   (let [rows (vec days)
+        by-date (into {} (map (juxt :date identity)) cyc)
         i    (last (keep-indexed #(when (:rhr %2) %1) rows))]
     (if-not i
       (empty-line)
@@ -159,13 +170,17 @@
                  (cat-base (mapv :date rows)
                           {:y-min lo :y-max hi
                            :tooltip-fmt (rows-tip rows (fn [r] [(day-label (:date r))
-                                                                [{:label (t "resting HR")
-                                                                  :value (some-> (:rhr r) (str " bpm"))
-                                                                  :color (c/css-var "--red")}]]))}))
+                                                                (remove nil?
+                                                                        [{:label (t "resting HR")
+                                                                          :value (some-> (:rhr r) (str " bpm"))
+                                                                          :color (c/css-var "--red")}
+                                                                         (cycle-row by-date (:date r))])]))}))
                 (assoc-in [:grid :right] pad)
                 (merge {:series [(c/line (t "Resting heart rate") "--red" (mapv :rhr rows)
                                          :lineStyle {:width 2.2} :connectNulls true :sampling nil
-                                         :areaStyle {:color (c/fade "--red" 0.26)})
+                                         :areaStyle {:color (c/fade "--red" 0.26)}
+                                         :markArea (when (seq cyc)
+                                                     {:silent true :data (cycle/phase-areas cyc (mapv :date rows))}))
                                  {:type "scatter" :silent true :symbolSize 8 :tooltip {:show false}
                                   :itemStyle {:color (c/css-var "--red") :borderColor (c/css-var "--surface")
                                               :borderWidth 2}
@@ -200,14 +215,15 @@
                                               :lineStyle {:color (c/css-var "--text-3") :type "dashed" :width 1}
                                               :data [{:yAxis 25}]})]}))}))))
 
-(defn recovery [{:keys [nights days]}]
+(defn recovery [{:keys [nights days]} cyc]
   (list
    [:div.section-head {:replicant/key "rec-head" :id "tr-recovery"}
     [:h2.section-title (t "Recovery") [:span.section-note (t "Last 30 days")]]]
    [:div.chart-grid {:replicant/key "rec"}
     (chart-card {:key "hrv" :info "hrv" :wide? true :title (t "Overnight HRV against your baseline")
-                 :text (t "Nightly average in ms. The shaded band is Garmin's balanced range for you; the dashed line is the 7-day average.")
-                 :body (hrv-chart nights)})
+                 :text (str (t "Nightly average in ms. The shaded band is Garmin's balanced range for you; the dashed line is the 7-day average.")
+                            (when (seq cyc) (str " " (t "The background colour is your cycle phase."))))
+                 :body (hrv-chart nights cyc)})
     (chart-card {:key "sleep" :info "sleep" :title (t "Sleep stages per night")
                  :text (t "Hours asleep in each stage; the dark tick is the sleep Garmin says you needed.")
                  :body (sleep-chart nights)})
@@ -215,8 +231,9 @@
                  :text (t "From the day's low to its high; the ring is where the day ended.")
                  :body (bb-chart days)})
     (chart-card {:key "rhr" :info "rhr" :title (t "Resting heart rate")
-                 :text (t "Beats per minute at rest, each day.")
-                 :body (rhr-chart days)})
+                 :text (str (t "Beats per minute at rest, each day.")
+                            (when (seq cyc) (str " " (t "The background colour is your cycle phase."))))
+                 :body (rhr-chart days cyc)})
     (chart-card {:key "stress" :info "stress" :title (t "Average stress per day")
                  :text (t "Garmin's stress score from 0 to 100; below the dashed line at 25 is rest.")
                  :body (stress-chart days)})]))

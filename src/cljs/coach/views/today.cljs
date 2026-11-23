@@ -8,6 +8,7 @@
   (:require [coach.i18n :refer [t tk]]
             [coach.ui :as ui]
             [coach.views.dashboard.common :refer [lower tone]]
+            [coach.views.dashboard.cycle :as cycle]
             [coach.views.dashboard.detail :as detail]
             [coach.views.dashboard.morning :as morning]
             [coach.views.dashboard.week :as week]
@@ -138,6 +139,7 @@
        (list
         (takeaway d)
         (week/today-card (get data check-url) plan today)
+        (when-let [c (:cycle d)] (cycle/card c today))
         [:div.morning {:replicant/key "morning"}
          (morning/readiness-card (:readiness d))
          (morning/vitals-grid d)]

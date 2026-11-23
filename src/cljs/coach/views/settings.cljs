@@ -12,6 +12,8 @@
 (def key-url "/api/claude/key")
 (def app-url "/api/app")
 (def map-keys-url "/api/map-keys")
+(def profile-url "/api/profile")
+(def cycle-url "/api/cycle")
 
 (defn tab [route] (get-in route [:params :tab] "general"))
 
@@ -25,9 +27,9 @@
   "What the page loads; `sync` says if an extra athlete is looking (they don't load the costs or the key)."
   [route sync]
   (cond
-    (false? (:admin sync)) [status/backup-url app-url map-keys-url]
+    (false? (:admin sync)) [status/backup-url app-url map-keys-url profile-url]
     (= "claude" (tab route)) [(costs/url route) costs/settings-url]
-    :else [status/backup-url key-url app-url map-keys-url]))
+    :else [status/backup-url key-url app-url map-keys-url profile-url]))
 
 (defn- choice
   "A row of buttons; the current one is highlighted."
@@ -38,6 +40,43 @@
                       :on {:click [(conj action v)]}}
                      attrs)
       label])])
+
+(defn- put-choice
+  "Like `choice`, but each button saves its own body to the profile."
+  [current options]
+  [:div.choice
+   (for [[v label body] options]
+     [:button {:replicant/key (str v) :class (when (= v current) "on") :aria-pressed (= v current)
+               :on {:click [[:api "PUT" profile-url body]]}}
+      label])])
+
+(defn- profile-card
+  "Sex and, for a woman, the opt-in cycle tracking (the Today card, the calendar and the coach's planning)."
+  [{:keys [sex sex_source garmin_sex cycle_tracking contraception]}]
+  (ui/card {:flex "1 1 320px"}
+           [:div.lab (t "Profile")]
+           (put-choice sex [["MALE" (t "Male") {:sex "MALE"}] ["FEMALE" (t "Female") {:sex "FEMALE"}]])
+           [:div.sub (if (and garmin_sex (= "garmin" sex_source))
+                       (t "Taken from your Garmin profile. It is only used for cycle tracking; your training load keeps Garmin's value.")
+                       (t "Your choice. It is only used for cycle tracking; your training load keeps Garmin's value."))]
+           (when (= "FEMALE" sex)
+             (list
+              [:div.lab {:replicant/key "l1" :style {:margin-top "14px"}} (t "Cycle tracking")]
+              (put-choice cycle_tracking [[true (t "On") {:cycle_tracking true}]
+                                          [false (t "Off") {:cycle_tracking false}]])
+              (when cycle_tracking
+                (list
+                 [:div.lab {:replicant/key "l2" :style {:margin-top "14px"}} (t "Contraception")]
+                 (put-choice contraception [["natural" (t "Natural cycle") {:contraception "natural"}]
+                                            ["hormonal" (t "Hormonal contraception") {:contraception "hormonal"}]
+                                            ["unspecified" (t "Not specified") {:contraception "unspecified"}]])
+                 [:div.sub {:replicant/key "s1"}
+                  (t "Cycle data stays on this computer. When tracking is on, the coach (Claude) sees your cycle phase and the symptoms you log, and the Today page, the plan calendar and Trends show your cycle. Phases are counted from your period starts, so ovulation and the luteal phase are estimates. Research finds no benefit from training by cycle phase, so the coach adapts to symptoms and how you feel, not to the phase alone.")]
+                 [:details.connect-replace {:replicant/key "del"}
+                  [:summary (t "Delete cycle data")]
+                  [:div.connect-row
+                   [:button.btn-ink {:on {:click [[:api "DELETE" cycle-url nil]]}}
+                    (t "Yes, delete all cycle data and turn tracking off")]]]))))))
 
 (defn- language-card [admin]
   (ui/card {:flex "1 1 320px"}
@@ -377,6 +416,7 @@
         [:div.row {:replicant/key "rc"} (coros-card sync (get-in s [:ui :coros]))
          (maps-card (get data map-keys-url) (get-in s [:ui :map-key]))]
         [:div.row {:replicant/key "r1"} (language-card admin) (appearance-card theme-choice)]
+        [:div.row {:replicant/key "rp"} (profile-card (get data profile-url))]
         [:div.row {:replicant/key "r2"} (app-card (get data app-url) (:ui s))
          (when admin (data-card (get data app-url) (get-in s [:ui :data-dir])))]
         [:div.row {:replicant/key "r3"} (backup-card (get data status/backup-url) (get-in s [:ui :restore]))]))]))

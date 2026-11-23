@@ -45,7 +45,9 @@
         today  (ui/iso-today)
         past?  (not (pos? (compare start today)))]
     (cond-> {:acts (str "/api/activities?from=" start "&to=" end)
-             :plan (str "/api/plan?from=" start "&to=" end)}
+             :plan (str "/api/plan?from=" start "&to=" end)
+             ;; the cycle phase of each day, empty unless the athlete tracks their cycle (Settings)
+             :cyc  (str "/api/cycle?from=" start "&to=" end)}
       past? (assoc :load (str "/api/load?from=" start "&to=" (min-date end today))
                    :well (str "/api/wellness?from=" start "&to=" (min-date end today))))))
 
@@ -218,7 +220,22 @@
           (row (t (:label f)) (ui/hm sec) (:color f) (js/Math.round (* 100 (/ sec (max total 1))))))
         (when (pos? km) (row (t "Distance") (str (js/Math.round km) " km")))])]))
 
-(defn- week-row [monday acts-by-date plan-by-date load-by-date well-by-date today by-act]
+(def ^:private cycle-tags
+  {"menstrual" ["period" (tk "Period")] "bleed" ["period" (tk "Period")]
+   "follicular" ["follicular" (tk "Follicular")] "ovulation" ["ovulation" (tk "Ovulation")]
+   "luteal" ["luteal" (tk "Luteal")] "late-luteal" ["late-luteal" (tk "Late luteal")]})
+
+(defn- cycle-item
+  "The day's cycle phase as a small tag (faded when predicted). Phases but menstruation are estimates."
+  [{:keys [phase cycle_day predicted estimated logged]}]
+  (when-let [[cls label] (cycle-tags phase)]
+    [:div.cal-cycle {:replicant/key "cycle"
+                     :class (remove nil? [cls (when predicted "predicted") (when logged "logged")])
+                     :title (str (t "Day {0}" cycle_day) " · " (t label) (when estimated (str " (" (t "estimated") ")"))
+                                 (when logged (str " · " (t "logged"))) " · " (t "Open the day to log your cycle"))}
+     (t label)]))
+
+(defn- week-row [monday acts-by-date plan-by-date load-by-date well-by-date cycle-by-date today by-act]
   (let [days (mapv #(ui/add-days monday %) (range 7))]
     [:div.cal-week {:replicant/key monday :data-monday monday}
      (for [[i d] (map-indexed vector days)]
@@ -229,6 +246,7 @@
           [:div.cal-date [:span.cal-dow ((day-names) i)] (day-label d)]
           [:a.cal-date {:href (str "#/day/" d) :title (t "Open the day")} [:span.cal-dow ((day-names) i)]
            (day-label d)])
+        (cycle-item (cycle-by-date d))
         (health-item d (well-by-date d))
         (map #(activity-item by-act %) (acts-by-date d))
         (map planned-item (remove #(= "done" (:status %)) (plan-by-date d)))])
@@ -273,6 +291,7 @@
         load-by (into {} (map (juxt :date identity)) (got :load))
         plan-by (group-by :date (mapcat :workouts (map #(get data (:plan %)) chunks)))
         well-by (into {} (map (juxt :date identity)) (got :well))
+        cyc-by  (into {} (map (juxt :date identity)) (mapcat #(:days (get data (:cyc %))) chunks))
         by-act  (into {} (keep #(when (:activity_id %) [(:activity_id %) %])) (mapcat val plan-by))
         mondays (take-while #(not (pos? (compare % to))) (iterate #(ui/add-days % 7) from))
         shown   (or (get-in ui [:cal :month]) (subs (ui/add-days (anchor route) 3) 0 7))]
@@ -289,8 +308,10 @@
         [:button {:on {:click [[:cal-jump (ui/monday today)]]}} (t "Today")]]]
       [:div.cal-head (for [d (day-names)] [:div {:replicant/key d} d]) [:div (t "Summary")]]]
      (some (fn [u] (when-let [e (get errors u)] [:div.error (t "Could not load: {0}" e)]))
-           (mapcat (juxt :acts :load :well) chunks))
+           (mapcat (juxt :acts :load :well :cyc) chunks))
      (when (loaded? s)
        [:div.card.cal {:replicant/on-render (scroll-hook (anchor route))}
-        (for [m mondays] (week-row m by-date plan-by load-by well-by today by-act))])
-     [:div.sub (t "The small block at the top of a day is its health data (readiness, sleep, resting heart rate, HRV): click it, or the date, for the whole day. Planned sessions have a dashed outline; once done they're replaced by the recorded activity.")]]))
+        (for [m mondays] (week-row m by-date plan-by load-by well-by cyc-by today by-act))])
+     [:div.sub (t "The small block at the top of a day is its health data (readiness, sleep, resting heart rate, HRV): click it, or the date, for the whole day. Planned sessions have a dashed outline; once done they're replaced by the recorded activity.")]
+     (when (seq cyc-by)
+       [:div.sub (t "The coloured tag at the top of a day is its cycle phase, counted from your period starts, so all but the period itself are estimates. Faded tags are predicted.")])]))

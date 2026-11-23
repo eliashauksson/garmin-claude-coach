@@ -980,3 +980,106 @@ details.peak > summary .sp { flex: 1; }
 .square-popup .btn-ghost { margin-top: 6px; }
 .btn-ghost { font: inherit; font-size: 13px; font-weight: 600; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 12px; cursor: pointer; }
 .btn-ghost:hover { border-color: var(--text-2); }
+
+/* cycle phase tag in a calendar day (coach.views.calendar) */
+.cal-cycle { font-size: 10px; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 999px; align-self: flex-start;
+  background: var(--surface-2); color: var(--text-2, var(--text)); border-left: 3px solid var(--line); }
+.cal-cycle.period { border-left-color: var(--red); }
+.cal-cycle.follicular { border-left-color: var(--blue); }
+.cal-cycle.ovulation { border-left-color: var(--green); }
+.cal-cycle.luteal { border-left-color: var(--purple); }
+.cal-cycle.late-luteal { border-left-color: var(--amber); }
+.cal-cycle.predicted { opacity: 0.55; }
+
+
+/* cycle bar on the Today card (coach.views.dashboard.cycle/phase-bar) */
+.cycle-bar { margin: 10px 0 6px; }
+.cycle-bar-track { position: relative; display: flex; height: 12px; border-radius: 6px; overflow: hidden;
+  background: var(--line); }
+.cycle-seg { display: block; height: 100%; }
+.cycle-seg.est { opacity: 0.45; }
+.cycle-window { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(
+  45deg, rgba(255,255,255,0.55) 0 3px, transparent 3px 6px); }
+.cycle-today { position: absolute; top: -2px; bottom: -2px; width: 3px; margin-left: -1.5px; border-radius: 2px;
+  background: var(--text); box-shadow: 0 0 0 1.5px var(--surface); }
+
+/* Trends' cycle section (coach.views.dashboard.cycle-trends): one grid of day columns, cells touch */
+.cyc-sentence { margin: 4px 0 12px; font-size: 15px; }
+.cyc-key { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 10px; font-size: 12px; color: var(--text-2); }
+.cyc-key span { display: inline-flex; align-items: center; gap: 6px; }
+.cyc-key i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; background: var(--line); }
+.cyc-key i.red { background: var(--red); }
+.cyc-key i.pale { background: var(--tint-red); }
+.cyc-key i.dash { background: transparent; border: 1px dashed var(--text-3); }
+.cyc-key i.band { background: color-mix(in srgb, var(--blue) 14%, transparent); }
+.cyc-key i.amber { background: color-mix(in srgb, var(--amber) 35%, transparent); }
+.cyc-key i.amber.strong { background: var(--amber); }
+.cyc-key i.good { background: var(--fam-swim); }
+.cyc-key i.bad { background: var(--amber); }
+.cyc-grid { --lab: 112px; --tail: 84px; --gap: 8px; position: relative; display: grid;
+  grid-template-columns: var(--lab) 1fr var(--tail); column-gap: var(--gap); row-gap: 3px; align-items: center; max-width: 760px; }
+.cyc-label { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.cyc-tail { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; }
+.cyc-tail.warn { color: var(--amber); font-weight: 600; }
+.cyc-axis { position: relative; height: 14px; font-size: 11px; color: var(--text-3); }
+.cyc-axis span { position: absolute; transform: translateX(-50%); }
+.cyc-cells { display: grid; position: relative; }
+.cc { display: block; height: 14px; background: var(--line); }
+.cc:first-child { border-radius: 4px 0 0 4px; }
+.cc:last-child { border-radius: 0 4px 4px 0; }
+.cc.b { background: var(--red); }
+.cc.s { background: var(--tint-red); }
+.cc.x { background: transparent; box-shadow: inset 0 0 0 1px var(--text-3); opacity: 0.6; }
+.heat .cc { height: 12px; background: color-mix(in srgb, var(--line) 55%, transparent); }
+.cyc-band, .cyc-typical { position: absolute; top: 18px; bottom: 0; pointer-events: none;
+}
+.cyc-band { background: color-mix(in srgb, var(--blue) 12%, transparent); border-radius: 4px; }
+.cyc-typical { border-left: 2px dashed var(--text-3);
+  pointer-events: auto; }
+.heat .cyc-band { display: none; }
+.cyc-body { display: grid; grid-template-columns: minmax(150px, 1.2fr) 1fr 1fr; gap: 6px 14px; align-items: center; }
+.cyc-head { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.cyc-head small { display: block; font-weight: 400; color: var(--text-3); }
+.cyc-phase { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.cyc-phase i { flex: 0 0 10px; height: 10px; border-radius: 50%; }
+.cyc-phase small { display: block; font-size: 11px; color: var(--text-3); }
+.dv { position: relative; display: flex; align-items: center; height: 18px; }
+.dv-half { flex: 1; display: flex; height: 12px; }
+.dv-half.neg { justify-content: flex-end; border-right: 2px solid var(--text-3); }
+.dv-half i { display: block; height: 100%; }
+.dv-half.neg i { border-radius: 4px 0 0 4px; }
+.dv-half.pos i { border-radius: 0 4px 4px 0; }
+.dv i.good { background: var(--fam-swim); }
+.dv i.bad { background: var(--amber); }
+.dv-num { flex: 0 0 62px; padding-left: 8px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.dv-none { color: var(--text-3); }
+@media (max-width: 640px) {
+  .cyc-grid { --lab: 74px; --tail: 60px; --gap: 5px; }
+  .cyc-body { grid-template-columns: 1fr 1fr; }
+  .cyc-body .cyc-head:first-child { display: none; }
+  .cyc-phase { grid-column: 1 / -1; margin-top: 6px; }
+}
+
+/* Today's cycle card: the bar's key and the collapsed log */
+.cycle-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 8px; font-size: 12px; color: var(--text-2); }
+.cycle-key span { display: inline-flex; align-items: center; gap: 5px; }
+.cycle-key i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.cycle-key i.est { opacity: 0.45; }
+.cycle-key i.next { background: repeating-linear-gradient(45deg, var(--text-3) 0 2px, transparent 2px 4px); }
+.cycle-key i.now { width: 3px; height: 12px; border-radius: 2px; background: var(--text); }
+.cycle-key small { color: var(--text-3); }
+.cycle-log { margin-top: 10px; }
+.cycle-log > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--accent, var(--text-2)); }
+.cycle-log[open] > summary { margin-bottom: 8px; }
+
+/* the grouped cycle log */
+.log-group { margin: 0 0 10px; }
+.log-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); margin: 0 0 5px; }
+.pill .ico { font-size: 14px; line-height: 1; }
+.log-group .pill { border: 1px solid transparent; }
+.log-group .pill.on { background: var(--ink); color: var(--on-ink); }
+.log-group .pill.on::before { content: "✓"; font-size: 11px; }
+.log-group .pill.pain-on { border-color: var(--red); }
+.cal-cycle.logged::after { content: "•"; margin-left: 4px; }
+.cycle-log a.sub { display: block; margin-top: 8px; }

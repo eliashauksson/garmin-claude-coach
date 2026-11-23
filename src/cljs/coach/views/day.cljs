@@ -5,6 +5,7 @@
             [coach.charts :as c]
             [coach.i18n :as i18n :refer [t tk]]
             [coach.ui :as ui]
+            [coach.views.dashboard.cycle :as cycle]
             [coach.views.workout :as workout]))
 
 ;; ---------------------------------------------------------------------------
@@ -328,6 +329,7 @@
        (when-let [e (get errors url)] [:div.error (t "Could not load: {0}" e)])
        (when d
          (list
+          (when-let [c (:cycle d)] (cycle/day-card c date today))
           [:div.row {:replicant/key "r1"}
            (readiness-card w (:readiness_estimate d)) (body-battery-card w day i) (sleep-card w day)]
           [:div {:replicant/key "r2"} (heart-rate-card w day i)]
