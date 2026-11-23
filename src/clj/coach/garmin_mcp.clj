@@ -26,7 +26,9 @@
     "get_lactate_threshold" "get_heart_rate_zones" "get_cycling_ftp"
     "get_heart_rates" "get_steps_data"
     ;; the dashboard's coach overview (coach.overview)
-    "get_training_load_balance" "get_race_predictions" "get_endurance_score"})
+    "get_training_load_balance" "get_race_predictions" "get_endurance_score"
+    ;; cycle tracking, only called when the athlete turned it on (coach.cycle)
+    "get_menstrual_calendar_data"})
 
 (defn- uvx-path
   "The uvx the installer put next to the app (runtime/uv), else the one uv's
@@ -346,7 +348,57 @@
     (map? res) (or (:activities res) (:result res) [])
     :else []))
 
+;; ---------------------------------------------------------------------------
+;; Cycle days. The shape of get_menstrual_calendar_data is not documented, so this reads what it can: any map with a
+;; calendar date and a cycle day or phase. The athlete's own log (coach.cycle) works without it.
+
+(defn- first-of [row ks] (some #(let [v (get row %)] (when (some? v) v)) ks))
+
+(defn- phase-word [v]
+  (when (string? v)
+    (let [s (str/lower-case v)]
+      (cond (re-find #"menstru|period" s) "menstrual"
+            (re-find #"follic" s)         "follicular"
+            (re-find #"ovulat|fertile" s) "ovulation"
+            (re-find #"luteal" s)         "luteal"))))
+
+(defn cycle-rows
+  "Normalised cycle days from a get_menstrual_calendar_data answer ([{:date :cycle_day :phase :period :predicted
+  :raw}], one per date, empty when there are none)."
+  [res]
+  (let [found (atom {})
+        walk  (fn walk [x]
+                (cond
+                  (map? x) (let [date (first-of x [:calendarDate :date])]
+                             (when (and (string? date) (re-matches #"\d{4}-\d{2}-\d{2}.*" date)
+                                        (first-of x [:dayInCycle :cycleDay :currentPhaseType :phaseType :phase
+                                                     :currentPhase :isPeriod :periodDay]))
+                               (let [d     (subs date 0 10)
+                                     phase (phase-word (first-of x [:phase :currentPhase :phaseName :phaseType]))
+                                     day   (first-of x [:dayInCycle :cycleDay])
+                                     bleed (or (= "menstrual" phase)
+                                               (true? (first-of x [:isPeriod :periodDay :isPeriodDay])))]
+                                 (swap! found assoc d
+                                        {:date d :cycle_day (when (number? day) (long day)) :phase phase
+                                         :period (if bleed 1 0)
+                                         :predicted (if (true? (first-of x [:isPredicted :predicted :isPredictedCycle
+                                                                            :isPredictedDay]))
+                                                      1 0)
+                                         :raw x})))
+                             (doseq [v (vals x)] (walk v)))
+                  (sequential? x) (doseq [v x] (walk v))))]
+    (walk res)
+    (vec (sort-by :date (vals @found)))))
+
 (defrecord GarminMcpSource [client delay-ms]
+  source/CycleSource
+  (fetch-cycle [_ start-date end-date]
+    (Thread/sleep (long delay-ms))
+    ;; "No menstrual calendar data found" comes back as plain text: no data, not an error
+    (try (cycle-rows (call client "get_menstrual_calendar_data" {"start_date" start-date "end_date" end-date}))
+         (catch clojure.lang.ExceptionInfo e
+           (if (re-find #"(?i)no menstrual" (str (ex-message e))) [] (throw e)))))
+
   source/DataSource
   (fetch-activities [this start-date end-date]
     (let [page-size 100

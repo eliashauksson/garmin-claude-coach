@@ -241,6 +241,23 @@
       need_min   REAL,
       raw        TEXT NOT NULL,
       fetched_at TEXT NOT NULL)"
+   ;; cycle tracking, only filled when the athlete turns it on (coach.cycle): days synced from the watch's app ...
+   "CREATE TABLE IF NOT EXISTS cycle_days (
+      date       TEXT PRIMARY KEY,
+      cycle_day  INTEGER,
+      phase      TEXT,
+      period     INTEGER NOT NULL DEFAULT 0,
+      predicted  INTEGER NOT NULL DEFAULT 0,
+      raw        TEXT NOT NULL,
+      fetched_at TEXT NOT NULL)"
+   ;; ... and the athlete's own log: period start, flow, symptoms {name severity 1-3}
+   "CREATE TABLE IF NOT EXISTS cycle_log (
+      date         TEXT PRIMARY KEY,
+      period_start INTEGER NOT NULL DEFAULT 0,
+      flow         TEXT,
+      symptoms     TEXT,
+      note         TEXT,
+      updated_at   TEXT NOT NULL)"
    ;; Claude's texts in every dashboard language (coach.translate)
    "CREATE TABLE IF NOT EXISTS translations (
       hash       TEXT NOT NULL,
@@ -379,7 +396,11 @@
    ;; the heatmap's track: encoded polyline segments (coach.track), "[]" without GPS
    ["activity_metrics" "track" "TEXT"]
    ;; the coach.summits detector version that last looked at the activity (peak bagging)
-   ["activity_metrics" "summits_checked" "INTEGER"]])
+   ["activity_metrics" "summits_checked" "INTEGER"]
+   ;; the cycle log's yes/no tags (mood, sex, discharge, other) as a JSON list
+   ["cycle_log" "tags" "TEXT"]
+   ;; the day she marked as the last bleeding day of a period
+   ["cycle_log" "period_end" "INTEGER NOT NULL DEFAULT 0"]])
 
 (defn- ensure-column! [ds [table column type]]
   (let [cols (set (map :name (jdbc/execute! ds [(str "PRAGMA table_info(" table ")")]
@@ -457,6 +478,9 @@
 (defn upsert-load-trend! [ds rows] (upsert! ds "load_trend" "date" [:date :acute :chronic :raw :fetched_at] rows))
 (defn upsert-endurance! [ds rows] (upsert! ds "endurance_score" "date" [:date :score :raw :fetched_at] rows))
 (defn upsert-sleep-need! [ds rows] (upsert! ds "sleep_need" "date" [:date :need_min :raw :fetched_at] rows))
+
+(defn upsert-cycle-days! [ds rows]
+  (upsert! ds "cycle_days" "date" [:date :cycle_day :phase :period :predicted :raw :fetched_at] rows))
 
 (defn query [ds sqlvec]
   (jdbc/execute! ds sqlvec {:builder-fn rs/as-unqualified-lower-maps}))

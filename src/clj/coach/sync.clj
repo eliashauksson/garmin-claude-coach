@@ -10,6 +10,7 @@
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [coach.analysis :as analysis]
+            [coach.cycle-data :as cycle-data]
             [coach.db :as db]
             [coach.season :as season]
             [coach.source :as source]
@@ -267,6 +268,7 @@
                   #(some->> (source/fetch-race-predictions src) vector (db/upsert-race-predictions! ds)))
   (overview-step! "endurance score"
                   #(some->> (source/fetch-endurance src today) vector (db/upsert-endurance! ds)))
+  (overview-step! "cycle" #(cycle-data/sync! src ds today))
   (let [stored (into #{} (map :date) (db/query ds ["SELECT date FROM sleep_need"]))]
     (doseq [date (sleep-need-dates today stored)]
       (overview-step! (str "sleep need " date)

@@ -19,6 +19,7 @@
             [coach.context :as context]
             [coach.coros-auth :as coros-auth]
             [coach.costs :as costs]
+            [coach.cycle-data :as cycle-data]
             [coach.db :as db]
             [coach.i18n :as i18n]
             [coach.overview :as overview]
@@ -119,7 +120,7 @@
         days (cond-> (vec days)
                est (update (dec (count days)) assoc :readiness (:score est) :readiness_estimated true))
         ws   (filter #(= "planned" (:status %)) (plan/workouts ds t t))]
-    (assoc (readiness/check days ws (athlete/settings))
+    (assoc (readiness/check days ws (athlete/settings) (cycle-data/readiness-input ds t))
            :date t :workouts ws)))
 
 (defn plan-routes [ds]
@@ -298,7 +299,9 @@
                                                   ;; the app's own score when Garmin has none
                                                   :readiness_estimate (readiness-estimate/for-date ds date))
                                      ;; suggestions for today's sessions, from this morning's readiness
-                                     (= date (season/today)) (assoc :readiness_check (readiness-today ds)))))))}]
+                                     (= date (season/today)) (assoc :readiness_check (readiness-today ds))
+                                     (cycle-data/tracking? ds)
+                                     (assoc :cycle (cycle-data/overview ds (season/today) date)))))))}]
     ;; the dashboard's coach overview (coach-dashboard-spec.md)
     ["/overview"    {:get (guarded
                            (fn [{:keys [query-params]}]
@@ -307,7 +310,8 @@
                              (let [date (iso-date! (get query-params "date" (season/today)))
                                    job  (when (claude/api-key?) (athlete-chat/ensure-summary!))]
                                (ok (cond-> (overview/overview ds date)
-                                     (:summarising job) (assoc :summarising true))))))}]
+                                     (:summarising job) (assoc :summarising true)
+                                     (cycle-data/tracking? ds) (assoc :cycle (cycle-data/overview ds date)))))))}]
     (plan-routes ds)
     (athlete-routes ds)
     (app-routes)
@@ -415,6 +419,26 @@
                        true (assoc :planned (some->> (plan/planned-for-activity ds a)
                                                      (translate/localize ds @i18n/lang)))))
                  (json-response 404 {:error "not found"}))))}]
+    ;; sex and cycle tracking (Settings): the choices, the phases per day, the athlete's own log
+    ["/profile"     {:get (fn [_] (ok (cycle-data/profile ds)))
+                     :put (guarded (fn [req] (ok (cycle-data/save-profile! ds (body req)))))}]
+    ["/cycle"
+     ["" {:get    (fn [{:keys [query-params]}]
+                    (let [[from to] (date-range query-params 90)]
+                      (ok {:enabled (cycle-data/tracking? ds)
+                           :days    (cycle-data/days ds (iso-date! from) (iso-date! to))})))
+          :delete (guarded (fn [_] (ok (cycle-data/delete-data! ds))))}]
+     ["/summary" {:get (fn [_] (ok (cycle-data/summary ds (season/today))))}]
+     ["/log" {:get (fn [{:keys [query-params]}]
+                     (let [[from to] (date-range query-params 90)]
+                       (ok (if (cycle-data/tracking? ds)
+                             (cycle-data/log-rows ds (iso-date! from) (iso-date! to))
+                             []))))}]
+     ["/log/:date" {:put (guarded (fn [{:keys [path-params] :as req}]
+                                    (when-not (cycle-data/tracking? ds)
+                                      (throw (ex-info (i18n/t "Cycle tracking is off. Turn it on in Settings.") {})))
+                                    (ok {:log (cycle-data/save-log! ds (:date path-params) (body req))
+                                         :cycle (cycle-data/overview ds (season/today))})))}]]
     ["/wellness"    {:get (fn [{:keys [query-params]}]
                             (let [[from to] (date-range query-params 90)]
                               (ok (analysis/wellness ds from to))))}]

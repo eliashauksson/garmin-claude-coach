@@ -45,3 +45,9 @@
   (fetch-full-activity [this summary]
     "One activity in full: {:activity row (coach.db columns, with :raw)
     :stream columnar stream or nil}."))
+
+(defprotocol CycleSource
+  "Menstrual cycle days from the watch's app (read-only, only asked for when the athlete turned cycle tracking on)."
+  (fetch-cycle [this start-date end-date]
+    "Days in [start-date, end-date] (ISO dates) as [{:date :cycle_day :phase :period :predicted :raw}], where
+    :period and :predicted are 0 or 1. Empty when the app has no cycle data."))
