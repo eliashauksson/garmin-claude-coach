@@ -62,8 +62,9 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   Squares come from three places: the default (Switzerland), the athlete's picks on the Peaks page map (≤ 100 at once, name
   search through Nominatim), and every athlete's tracks: the first round of each athlete queues all squares their activities
   touch, then each round those of the activities not checked yet (`queue-track-squares!`; virtual/indoor sports touch none).
-  The whole world's dataset can be asked for in one go (main athlete, Peaks page; `request-world!`, `/api/peaks/world`, meta `world`): `load-world!`
-  loads every block of blocks.edn, one per step, resuming after a stop or failure (~1.5 GB in shared/peaks.db). No Overpass names for it
+  The whole world's dataset can be asked for in one go (main athlete, Peaks page; `request-world!`, `/api/peaks/world`, meta `world`): `world-work!`
+  (its own worker and lock `peaks-world`, started by `jobs/peaks-soon!`, so it never waits behind the names) loads every block of
+  blocks.edn, one per step, resuming after a stop or failure (~1.5 GB in shared/peaks.db). No Overpass names for it
   (weeks for ~200k tiles): those still come per requested square, other summits show their height or "Near X".
   One peak worker runs at a time for the whole install (`peaks-work` lock) and waits between steps while the machine's
   CPU is above `peaks/cpu-limit` (60%); detection indexes the track in a grid, so a peak is only compared with nearby fixes.

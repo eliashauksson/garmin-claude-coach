@@ -88,7 +88,11 @@
   [ds]
   (when (peaks/request!) ; marked at once, so the page sees it running; a running update goes round again
     (future (try (peaks/work! ds)
-                 (catch Throwable e (println "Peak bagging failed:" (ex-message e)))))))
+                 (catch Throwable e (println "Peak bagging failed:" (ex-message e))))))
+  ;; the whole world's blocks, when asked for, never wait behind the update's slow name fetching
+  (when (peaks/claim-world-work!)
+    (future (try (peaks/world-work!)
+                 (catch Throwable e (println "World peaks failed:" (ex-message e)))))))
 
 (defn run-job!
   "Runs `f` with a Garmin source in the background unless a sync or history

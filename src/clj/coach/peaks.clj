@@ -516,6 +516,8 @@
                                                        (str/join "," (repeat (count ids) "?")) ")")]
                                                  ids)))))))
 
+(defonce ^:private world-running (atom false))
+
 (def ^:private bytes-per-peak "What a summit takes in peaks.db with its indexes (measured: 17 MB for 149k)." 115)
 
 (defn world-status
@@ -545,7 +547,7 @@
 
 (defn- load-world!
   "While the world is asked for: the blocks not loaded yet, one after the other (`load-block!` takes the
-  install's download lock and breathes). Stops at the first failure and notes it; the update tries again
+  install's download lock and breathes). Stops at the first failure and notes it; `world-work!` tries again
   later. Returns {:blocks n :failed? bool}."
   []
   (if-not (meta-get :world)
@@ -586,12 +588,32 @@
                                         :else "queued")]]
                   {:square k :state state :requested true :message msg
                    :peaks (if loaded? (long (:shown (get counts k) 0)) 0) :bagged (get bagged k 0)})]
-    {:status (if (working?) "running" "idle") ; "running" makes the page ask again shortly
+    {:status (if (or (working?) @world-running) "running" "idle") ; "running" makes the page ask again shortly
      :squares (vec squares)
      :downloaded (count (filter #(#{"names" "ready"} (:state %)) squares))
      :loading (count (remove #(= "ready" (:state %)) squares))
      :peaks (reduce + 0 (map :peaks squares))
      :world (world-status)}))
+
+(defn world-requested? [] (boolean (meta-get :world)))
+
+(defn claim-world-work!
+  "True when the caller should run `world-work!`: it was asked for and none runs in this process."
+  []
+  (and (world-requested?) (compare-and-set! world-running false true)))
+
+(defn world-work!
+  "After `claim-world-work!` said true: the blocks of the world, in a worker and a lock of their own. They
+  must not wait behind the update, which can spend hours fetching names from a public server one tile at a
+  time. A failed block is tried again after `retry-ms`, up to `max-attempts` times."
+  []
+  (try
+    (loop [attempt 1]
+      (let [r (paths/with-lock "peaks-world" load-world!)]
+        (when (and (:failed? r) (< attempt max-attempts) (world-requested?))
+          (Thread/sleep retry-ms)
+          (recur (inc attempt)))))
+    (finally (reset! world-running false))))
 
 (defn- note-failure! [square e]
   (println "Peaks: square" square "failed:" (ex-message e))
@@ -774,13 +796,11 @@
         {:keys [blocks] failed-data? :failed?} (load-datasets!)
         _ (backfill-near-names!)
         [activities found] (detect-ready! ds pending)
-        {world-blocks :blocks failed-world? :failed?} (load-world!)
         {:keys [chunks] failed-names? :failed?} (load-names!)
         relinked (relink-summits! ds)
-        r {:queued queued :blocks (+ blocks world-blocks) :chunks chunks :activities activities :summits found
-           :relinked relinked}]
+        r {:queued queued :blocks blocks :chunks chunks :activities activities :summits found :relinked relinked}]
     (when (some pos? (vals r)) (println "Peaks:" r))
-    (assoc r :failed? (boolean (or failed-data? failed-world? failed-names?)))))
+    (assoc r :failed? (boolean (or failed-data? failed-names?)))))
 
 (defn request!
   "Asks for an update. True when the caller should run `work!` (none is running for this athlete); a

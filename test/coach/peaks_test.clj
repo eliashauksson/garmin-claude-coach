@@ -267,6 +267,24 @@
         (is (= 0 (:blocks (#'peaks/load-world!)))))
       (is (false? (:requested (peaks/world-status)))))))
 
+(deftest the-world-has-a-worker-of-its-own
+  (let [ds (temp-ds) asked (atom [])
+        all (count (#'peaks/blocks))]
+    (testing "nothing to do unless it is asked for"
+      (is (not (peaks/claim-world-work!))))
+    (peaks/request-world!)
+    (testing "the update (names, squares) does not load the world's blocks: it can take hours"
+      (with-redefs-fn {#'peaks/load-names! (fn [] {:chunks 0 :failed? false})} ; no public server in a test
+        (fn [] (with-release (fake-release asked) #(#'peaks/run-once! ds))))
+      (is (< (:loaded (peaks/world-status)) 5)))
+    (testing "the world worker does, once per process at a time"
+      (is (peaks/claim-world-work!))
+      (is (not (peaks/claim-world-work!)))
+      (with-redefs [peaks/fetch-data (fn [_] (gz []))]
+        (peaks/world-work!))
+      (is (= all (:loaded (peaks/world-status))))
+      (is (false? @@#'peaks/world-running) "free again when done"))))
+
 (defn- queued [] (set (map :square (#'peaks/requested-squares))))
 
 (defn- track-activity! [ds id sport lat lon]
