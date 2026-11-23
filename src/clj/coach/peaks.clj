@@ -41,7 +41,9 @@
   "Where the dataset's blocks are (assets of a release of this repository, made by `make prominence-data` and
   `make official-names`). $COACH_PEAKS_DATA_URL may point elsewhere: a URL or a folder."
   "https://github.com/eliashauksson/garmin-claude-coach/releases/download/peaks-data-2023")
-(def default-min-prominence 30)
+(def min-prominence
+  "The smallest summit that counts (m of prominence): the dataset's floor, the usual rule for a summit of its own."
+  30)
 (def retry-ms "When a server was busy, the update tries the failed chunks again after this long …" 300000)
 (def max-attempts "… up to this many times." 6)
 
@@ -99,17 +101,6 @@
   ([ds k v]
    (jdbc/execute! ds ["INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v"
                       (name k) (str v)])))
-
-;; ---------------------------------------------------------------------------
-;; Settings
-
-(defn min-prominence [ds]
-  (or (some-> (db/get-state ds :peak_min_prominence) parse-double) default-min-prominence))
-
-(defn set-min-prominence! [ds m]
-  (when-not (and (number? m) (<= 0 m 2000))
-    (throw (ex-info "The minimum prominence must be between 0 and 2000 m." {:value m})))
-  (db/set-state! ds :peak_min_prominence (double m)))
 
 ;; ---------------------------------------------------------------------------
 ;; Overpass: the named peaks of a tile
@@ -601,7 +592,7 @@
   queued (waiting) | failed (will retry) | names (peaks loaded, names being added) | ready."
   [ds]
   (let [states (square-states)
-        shown (shown-per-square (min-prominence ds) (map :square (filter :loaded? states)))
+        shown (shown-per-square min-prominence (map :square (filter :loaded? states)))
         bagged (bagged-per-square ds)
         squares (for [{:keys [square state message loaded?]} states]
                   {:square square :state state :requested true :message message
@@ -914,7 +905,7 @@
   zoom (`coach.peak-density`), at most `max-view-peaks` of it, plus every bagged peak."
   ([ds] (visible-peaks ds {}))
   ([ds {:keys [bbox zoom cell bagged-only?]}]
-   (let [m (min-prominence ds)
+   (let [m min-prominence
          visits (visit-counts ds)
          bagged (peaks-by-ids (keys visits) m)
          rows (cond
@@ -953,14 +944,13 @@
      :this_year (count (filter #(= year (some-> (:first %) (subs 0 4))) bagged))
      :visits (reduce + 0 (map :visits bagged))
      :highest (some-> highest (select-keys [:id :name :ele]))
-     :min_prominence (min-prominence ds)
      :loading (count (remove #(= "ready" (:state %)) (square-states)))
      :peaks (vec (sort-by :last #(compare %2 %1) bagged))}))
 
 (defn activity-summits
   "The peaks an activity passed (visible ones): [{:id :name :ele :lat :lon :prominence :visit_id :source}]."
   [ds activity-id]
-  (let [m (min-prominence ds)
+  (let [m min-prominence
         visits (db/query ds ["SELECT id AS visit_id, peak_id, source, dist_m, time_s FROM summits
                               WHERE activity_id = ? AND source <> 'dismissed' ORDER BY time_s" activity-id])
         peaks (when (seq visits)

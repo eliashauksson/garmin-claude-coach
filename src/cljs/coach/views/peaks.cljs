@@ -1,19 +1,27 @@
 (ns coach.views.peaks
-  "The Peaks page (komoot-style peak bagging): the peaks the GPS tracks passed, and how small a summit may be
-  (prominence) to count."
+  "The Peaks page (komoot-style peak bagging): the peaks the GPS tracks passed, sortable, and the download map."
   (:require [clojure.string :as str]
             [coach.i18n :refer [t]]
             [coach.square-map :as square-map]
             [coach.ui :as ui]))
 
 (def url "/api/peaks/summary")
-(def settings-url "/api/peaks/settings")
 (def squares-url square-map/squares-url)
 (def max-squares 100)
 
-(def prominences
-  "How far a summit must stand above its saddle to count (m); the dataset has nothing under 30 m."
-  [[30 "30 m"] [50 "50 m"] [100 "100 m"]])
+(def sorts
+  "How the athlete's peaks can be ordered: [key label]."
+  [["last" "Last summit"] ["ele" "Height"] ["visits" "Times summited"]])
+
+(defn sort-peaks
+  "`peaks` ordered by `how` (a key of `sorts`): the last summit, height or visit count, biggest first; ties
+  and peaks without a height go by the last summit."
+  [how peaks]
+  (let [by-last (sort-by #(or (:last %) "") #(compare %2 %1) peaks)]
+    (case how
+      "ele"    (sort-by #(or (:ele %) js/Number.NEGATIVE_INFINITY) > by-last)
+      "visits" (sort-by #(or (:visits %) 0) > by-last)
+      by-last)))
 
 (defn- metres [x] (when (ui/num? x) (str (js/Math.round x) " m")))
 
@@ -122,18 +130,17 @@
          (ui/tile {:label (t "Summit visits") :value (str (:visits d)) :size "md"})
          (ui/tile {:label (t "Highest") :value (some-> (:highest d) :ele js/Math.round str) :unit "m" :size "md"
                    :sub (get-in d [:highest :name])})]
-        [:div {:replicant/key "prominence"}
-         (ui/card {}
-                  [:div.lab (t "Smallest summit that counts") (ui/info "prominence")]
-                  (ui/seg (:min_prominence d) prominences [:peak-prominence])
-                  [:div.sub (t "Prominence is how far a summit stands above the saddle to higher ground. The dataset lists every summit of at least 30 m, the usual rule for a summit of its own; raise the limit to keep only bigger ones.")]
-                  (when (pos? (:loading d))
-                    [:div.sub (t "Adding names to {0} more squares in the background; the peaks are already on the map." (:loading d))]))]
         (when sq (download-card sq (:squares ui-state)))
         (when-let [w (:world sq)] (world-card w (true? (:admin sync))))
         [:div {:replicant/key "peaks"}
          (ui/card {}
                   [:div.lab (t "Your peaks")]
+                  (when (pos? (:loading d))
+                    [:div.sub (t "Adding names to {0} more squares in the background; the peaks are already on the map." (:loading d))])
+                  (when (seq (:peaks d))
+                    (ui/seg (or (get-in ui-state [:peaks :sort]) "last") sorts [:set-in-ui :peaks :sort]
+                            {:soft? true}))
                   (if (seq (:peaks d))
-                    (into [:div.peak-list] (map #(peak-row open-id %) (:peaks d)))
+                    (into [:div.peak-list]
+                          (map #(peak-row open-id %) (sort-peaks (get-in ui-state [:peaks :sort]) (:peaks d))))
                     [:div.sub (t "No peaks yet. They appear here after a sync, once an activity passes a summit.")]))]))]))

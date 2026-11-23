@@ -70,13 +70,13 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   CPU is above `peaks/cpu-limit` (60%); detection indexes the track in a grid, so a peak is only compared with nearby fixes.
   Square states: queued (block missing) → names (peaks loaded, OSM names to come) → ready; failed keeps the error and retries.
   `request!`/`work!` run one background worker per athlete (after each sync, at start, when squares are added). Shown: a peak
-  with prominence ≥ the athlete's minimum (30 m, `sync_state`). The map gets only what its view draws (`/api/peaks?bbox&zoom&cell`:
+  with prominence ≥ 30 m (`peaks/min-prominence`, fixed). The map gets only what its view draws (`/api/peaks?bbox&zoom&cell`:
   `coach.peak-density` prominence floors per zoom, then the most prominent √n peaks per ~80 px cell; there are 11.9 M peaks in the
   world, 1 M on the server): never load the whole `peaks` table. The `listed` columns are unused (peak lists were removed).
   Shared by all athletes: `peaks`, `dataset_blocks`, `official_peaks`, `peak_links`, `osm_peaks`, `peak_tiles`, `peak_squares`,
   `meta` live in shared/peaks.db (`$COACH_SHARED_DIR`, else shared/ in the app folder; `paths/shared-file`), so a block one
   athlete loads is there for everybody; downloads take turns (`paths/with-lock "peaks-fetch"`). Per athlete: `summits`
-  (gps | manual | dismissed), `summits_checked`, the minimum prominence. No SQL joins across the two databases (merged in Clojure).
+  (gps | manual | dismissed), `summits_checked`. No SQL joins across the two databases (merged in Clojure).
   `activity_metrics.peaks` is something else (best HR/power), hence "summits"
   - summits: pure, detection (track within 75 m of the top and, with altitude, within 80 m below it), tiles/squares,
     dataset ids and `match-donors`

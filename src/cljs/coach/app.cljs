@@ -574,7 +574,6 @@
    :heat-show         (heat-setting :heat-show)
    :heat-pins         (heat-setting :heat-pins)
    :heat-peaks        (heat-setting :heat-peaks)
-   :peak-prominence   (fn [[v]] (api! "PUT" peaks/settings-url {:min_prominence v}))
    :square-key        (on-enter (fn [_] (search-places!)))
    :square-search     (fn [_] (search-places!))
    :square-pick       (fn [[i]] (pick-place! i))

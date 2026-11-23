@@ -125,9 +125,7 @@
 
 (deftest minimum-prominence
   (let [[ds _] (set-up!)]
-    (is (= 2 (count (peaks/visible-peaks ds))) "both are at least 30 m")
-    (peaks/set-min-prominence! ds 100)
-    (is (= [id-big] (map :id (peaks/visible-peaks ds))))))
+    (is (= 2 (count (peaks/visible-peaks ds))) "both are at least 30 m")))
 
 (deftest detection-and-dismissing
   (let [[ds _] (set-up!)]
