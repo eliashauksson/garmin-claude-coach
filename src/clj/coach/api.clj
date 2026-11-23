@@ -5,7 +5,8 @@
             [coach.adapt :as adapt]
             [coach.ai-settings :as ai]
             [coach.analysis :as analysis]
-            [coach.api.http :as http :refer [athlete-tr body guarded iso-date! json-response ok ok-tr wrap-errors]]
+            [coach.api.http :as http :refer [athlete-tr body guarded iso-date! json-response ok ok-tr wrap-errors
+                                                     wrap-gzip]]
             [coach.api.jobs :as jobs]
             [coach.api.security :as security
              :refer [admin-only coros-callback-url same-origin-fetch? token-guard wrap-local-only]]
@@ -536,6 +537,7 @@
          {:not-found (constantly (json-response 404 {:error "not found"}))})))
       wrap-not-modified
       wrap-revalidate
+      wrap-gzip
       wrap-errors
       wrap-params
       wrap-local-only

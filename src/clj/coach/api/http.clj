@@ -3,8 +3,12 @@
   body, and the turning of bad input (ex-info) into a 400 and of anything else
   into a 500."
   (:require [clojure.data.json :as json]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
             [coach.i18n :as i18n]
-            [coach.translate :as translate]))
+            [coach.translate :as translate])
+  (:import (java.io ByteArrayOutputStream)
+           (java.util.zip GZIPOutputStream)))
 
 (defn json-response [status body]
   {:status  status
@@ -51,3 +55,38 @@
          (catch Throwable e
            (println "Error on" (:request-method req) (:uri req) "-" (str e))
            (json-response 500 {:error (str "Server error: " (or (ex-message e) (str (class e))))})))))
+
+(def ^:private compressible
+  #"(?i)^(application/(json|javascript|manifest\+json)|text/|image/svg\+xml)")
+
+(defn- body-bytes
+  "The response body as bytes (a string, file or stream), or nil for other kinds."
+  ^bytes [body]
+  (cond
+    (string? body)                           (.getBytes ^String body "UTF-8")
+    (instance? java.io.File body)            (with-open [in (io/input-stream body)] (.readAllBytes in))
+    (instance? java.io.InputStream body)     (with-open [in ^java.io.InputStream body] (.readAllBytes in))))
+
+(defn wrap-gzip
+  "Gzips JSON, JS, CSS, HTML and SVG answers (over 1 KB) for clients that accept it:
+  the JS bundle and the heatmap tracks are the big ones."
+  [handler]
+  (fn [req]
+    (let [r  (handler req)
+          ct (get-in r [:headers "Content-Type"] "")]
+      (if (and r
+               (= 200 (:status r))
+               (some-> (get-in req [:headers "accept-encoding"]) (str/includes? "gzip"))
+               (re-find compressible ct)
+               (not (get-in r [:headers "Content-Encoding"])))
+        (if-let [raw (body-bytes (:body r))]
+          (if (< (alength raw) 1024)
+            (assoc r :body raw)
+            (let [out (ByteArrayOutputStream.)]
+              (with-open [gz (GZIPOutputStream. out)] (.write gz raw))
+              (-> r
+                  (assoc :body (.toByteArray out))
+                  (update :headers #(-> (dissoc % "Content-Length")
+                                        (assoc "Content-Encoding" "gzip" "Vary" "Accept-Encoding"))))))
+          r)
+        r))))
