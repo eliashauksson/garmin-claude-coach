@@ -1,10 +1,23 @@
 (ns coach.charts
   "ECharts and Leaflet, mounted through Replicant's :replicant/on-render hook.
   Options are built at render time from the CSS tokens, so light/dark both work."
-  (:require ["echarts" :as echarts]
+  (:require ["echarts/core" :as echarts]
+            ["echarts/lib/chart/bar"]
+            ["echarts/lib/chart/custom"]
+            ["echarts/lib/chart/line"]
+            ["echarts/lib/chart/scatter"]
+            ["echarts/lib/component/grid"]
+            ["echarts/lib/component/markArea"]
+            ["echarts/lib/component/markLine"]
+            ["echarts/lib/component/tooltip"]
+            ["echarts/lib/renderer/installSVGRenderer.js" :as svg-renderer]
             ["leaflet" :as L]
             [coach.i18n :refer [t]]
             [coach.ui :as ui]))
+
+;; Only the parts of ECharts the dashboard draws (the full package is over 1 MB): a new
+;; chart type or component (legend, dataZoom, pie…) needs its own require above.
+(echarts/use #js [(.-install svg-renderer)])
 
 (defn css-var [n]
   (.trim (.getPropertyValue (js/getComputedStyle js/document.documentElement) n)))
