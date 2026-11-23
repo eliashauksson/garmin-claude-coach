@@ -857,6 +857,11 @@
             (assoc p :visits (or (:visits v) 0) :first (:first v) :last (:last v))))
         rows))
 
+(def ^:private prominence-index-floor
+  "From this prominence floor on a view's query reads the prominence index: zoomed out the floor is what makes the
+  rows few, and SQLite (no statistics) would otherwise walk the position index through most of the world's peaks."
+  500)
+
 (def ^:private thin-zoom-max "From this zoom on every peak the zoom draws is sent, not one per screen cell." 13)
 
 (defn- view-peaks
@@ -866,7 +871,8 @@
   [{:keys [bbox zoom cell floor]}]
   (let [[s w n e] bbox
         box      (if bbox " AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?" "")
-        box-args (if bbox [s n w e] [])]
+        box-args (if bbox [s n w e] [])
+        from     (if (>= floor prominence-index-floor) "FROM peaks INDEXED BY peaks_prominence" "FROM peaks")]
     (db/query
      (shared)
      (if (and cell (pos? cell) (< zoom thin-zoom-max))
@@ -875,10 +881,10 @@
                    "          COUNT(*) OVER (PARTITION BY cx, cy) AS n FROM ("
                    "  SELECT " peak-columns ", CAST((lat + 90) / ? AS INTEGER) AS cx,"
                    "         CAST((lon + 360) / ? AS INTEGER) AS cy"
-                   "  FROM peaks WHERE prominence >= ?" box "))"
+                   "  " from " WHERE prominence >= ?" box "))"
                    " WHERE rn * rn <= n")]
              (concat [cell cell floor] box-args))
-       (into [(str "SELECT " peak-columns " FROM peaks WHERE prominence >= ?" box
+       (into [(str "SELECT " peak-columns " " from " WHERE prominence >= ?" box
                    " ORDER BY prominence DESC LIMIT " max-view-peaks)]
              (concat [floor] box-args))))))
 

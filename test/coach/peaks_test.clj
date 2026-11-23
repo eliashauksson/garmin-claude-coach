@@ -373,6 +373,15 @@
       (is (= #{id-big id-bump} (ids {:zoom 12 :bbox box :cell 0.05})))
       (is (= #{id-big id-bump} (ids {:zoom 13 :bbox box :cell 1.0}))))
 
+    (testing "zoomed out only the biggest: 1500 m of prominence at the world view, 1000 m from zoom 3"
+      (doseq [[id lon prom] [[901 80.0 1600] [902 -70.0 1200]]]
+        (jdbc/execute! (peaks/shared)
+                       ["INSERT INTO peaks (id, lat, lon, ele_dem, prominence) VALUES (?, 30.0, ?, 5000, ?)" id lon prom]))
+      (is (= #{901} (ids {:zoom 0})))
+      (is (= #{901} (ids {:zoom 2 :bbox [-60.0 -180.0 80.0 180.0] :cell 8.0})))
+      (is (= #{901 902} (ids {:zoom 3 :bbox [-60.0 -180.0 80.0 180.0] :cell 1.0})))
+      (jdbc/execute! (peaks/shared) ["DELETE FROM peaks WHERE id IN (901, 902)"]))
+
     (is (= 2 (count (peaks/visible-peaks ds))) "without a zoom, all of them")
     (testing "a cell with more peaks keeps more: the square root of them, the most prominent"
       (doseq [[i prom] [[1 300] [2 200] [3 100] [4 80]]]

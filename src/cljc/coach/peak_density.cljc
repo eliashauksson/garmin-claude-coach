@@ -3,12 +3,12 @@
 
 (def steps
   "[zoom prominence], by zoom: from this zoom on, unbagged peaks of at least this prominence show."
-  [[0 500] [6 300] [7 150] [8 100] [9 50] [10 0]])
+  [[0 1500] [3 1000] [5 500] [6 300] [7 150] [8 100] [9 50] [10 0]])
 
 (defn min-prominence
   "The smallest prominence an unbagged peak needs to be drawn at `zoom`."
   [zoom]
-  (or (some (fn [[z m]] (when (>= zoom z) m)) (reverse steps)) 500))
+  (or (some (fn [[z m]] (when (>= zoom z) m)) (reverse steps)) 1500))
 
 (defn shown?
   "Whether a peak is drawn at `zoom`: bagged ones always, the rest by prominence. The athlete's own minimum has

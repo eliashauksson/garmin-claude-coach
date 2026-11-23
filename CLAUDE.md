@@ -95,7 +95,7 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   session's card), structure (block profile/list, planned vs actual bits)
 - cljc i18n: `t`/`tk`, language from server · i18n-de / i18n-fr: dictionaries keyed by English text
 - cljc sky: pure, the night sky behind the 3D globe (sidereal time, precession, camera frame, galactic coords); data in resources/public/sky/ (`make sky`)
-- cljc peak-density: pure, which peaks the map draws at a zoom (prominence bands: 500 m at the world view … all at zoom 10); the 3D
+- cljc peak-density: pure, which peaks the map draws at a zoom (prominence bands: 1500 m at the world view, 1000 m from zoom 3, 500 m at 5 … all at zoom 10); the 3D
   map's layers are made from its `tiers`
 - views/peaks: the Peaks page (`#/peaks`, under More): stats, the download map (`square_map.cljs`: 1° squares, search), bagged peaks; the Map tab
   draws peaks like komoot: rounded triangles with a white outline (grey, bagged crimson), under the activity pins
