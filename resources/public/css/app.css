@@ -282,8 +282,12 @@ main.full > .error { padding: 12px 16px; }
 /* light map: OSM's colours, muted; a thin dark edge keeps the pale end of the heat visible */
 .heat-base.light .map.heatmap { background: #e8e8e4; }
 .heat-base.light .map.heatmap .map-tiles { filter: grayscale(.6) contrast(.9); }
-.heat-base.light .map .heat-canvas, .heat-base.satellite .map .heat-canvas { filter: drop-shadow(0 0 1px rgba(0,0,0,.75)); }
+.heat-base.light .map .heat-canvas, .heat-base.satellite .map .heat-canvas, .heat-base.own-colours .map .heat-canvas {
+  filter: drop-shadow(0 0 1px rgba(0,0,0,.75)); }
 .heat-base.satellite .map.heatmap .map-tiles { filter: none; }
+/* topo, cycling and national maps keep their own colours */
+.heat-base.own-colours .map.heatmap { background: #e8e8e4; }
+.heat-base.own-colours .map.heatmap .map-tiles { filter: none; }
 /* 3D (MapLibre): same box; our credit line instead of MapLibre's */
 .map.map3d { position: relative; color: var(--text-2); font: 500 13px/1.4 var(--font); }
 /* zoomed out the 3D map is a globe: space around it, whatever the ground */

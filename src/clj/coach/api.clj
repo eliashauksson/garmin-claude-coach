@@ -53,6 +53,17 @@
 
 (declare claude-check!)
 
+(defn- map-keys [] {:tracestrack (:tracestrack-key (paths/read-config))})
+
+(defn- save-map-keys!
+  "Saves the Tracestrack key (blank removes it)."
+  [{:keys [tracestrack]}]
+  (let [k (str/trim (str tracestrack))]
+    (when-not (or (empty? k) (re-matches #"[A-Za-z0-9_\-]{8,200}" k))
+      (throw (ex-info (i18n/t "That doesn't look like a Tracestrack key. Copy it from console.tracestrack.com.") {})))
+    (paths/update-config! assoc :tracestrack-key (not-empty k))
+    (map-keys)))
+
 (defn- claude-key-saved!
   "Saves `k`, then checks it with one tiny request. A key the API rejects is
   taken out again (the previous one, if any, comes back)."
@@ -442,6 +453,9 @@
     ["/claude/key"   {:get    (fn [_] (ok (claude/key-status)))
                       :put    (admin-only (guarded (fn [req] (ok (claude-key-saved! ds (:key (body req)))))))
                       :delete (admin-only (fn [_] (ok (claude/remove-key!))))}]
+    ;; the Tracestrack key of the Map tab's topo layer: in this athlete's config.edn, sent to their browser
+    ["/map-keys"     {:get (fn [_] (ok (map-keys)))
+                      :put (guarded (fn [req] (ok (save-map-keys! (body req)))))}]
     ["/claude/test"  {:post (fn [_] (ok (assoc (claude-check! ds) :key (claude/key-status))))}]
     ;; everything before the first sync, in the background
     ["/history"      {:post (fn [_] (json-response 202 (jobs/run-history! ds)))}]

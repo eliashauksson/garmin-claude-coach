@@ -4,6 +4,7 @@
             [coach.heat :as heat]
             [coach.i18n :refer [t tk]]
             [coach.ui :as ui]
+            [coach.views.settings :as settings]
             [coach.views.status :as status]))
 
 (def url "/api/heatmap")
@@ -28,14 +29,32 @@
   [ui]
   (or (:heat-colors ui) (.getItem js/localStorage "heat-colors") "blue"))
 
-(def grounds
-  [["dark" (tk "Dark map")] ["light" (tk "Light map")] ["satellite" (tk "Satellite")]])
+(def map-keys-url settings/map-keys-url)
+
+(defn- tracestrack-key [data] (not-empty (:tracestrack (get data map-keys-url))))
+
+(defn grounds
+  "The map choices: Tracestrack Topo only with its key (Settings)."
+  [tracestrack-key]
+  (let [available (set (heat/available-grounds tracestrack-key))]
+    (into [["dark" (tk "Dark map")] ["light" (tk "Light map")] ["satellite" (tk "Satellite")]]
+          (for [[id label] [["topo" (tk "Tracestrack Topo")] ["opentopomap" (tk "OpenTopoMap")]
+                            ["cyclosm" (tk "CyclOSM")] ["swisstopo" (tk "swisstopo")]
+                            ["hot" (tk "Humanitarian")]]
+                :when (available id)]
+            [id label]))))
 
 (defn ground
-  "What's under the heat: \"dark\", \"light\" or \"satellite\" (remembered in this browser; light at first)."
-  [ui]
+  "What's under the heat: one of `grounds` (remembered in this browser; light at first or when the
+  remembered one is gone, e.g. the Tracestrack key was removed)."
+  [ui tracestrack-key]
   (let [g (or (:heat-base ui) (.getItem js/localStorage "heat-base"))]
-    (if (some #(= g (first %)) grounds) g "light")))
+    (if (some #(= g (first %)) (grounds tracestrack-key)) g "light")))
+
+(defn- own-colours?
+  "Whether the ground keeps its own colours (not OpenStreetMap dark/light or satellite)."
+  [g]
+  (contains? (set heat/extra-grounds) g))
 
 (defn heat?
   "Whether the heat is shown (remembered in this browser; off at first)."
@@ -70,7 +89,7 @@
 (defn- overlay
   "Top-left over the map: one pill with the title, the number of activities and the filter summary;
   it opens the settings."
-  [{:keys [empty? n span sport present sync ui]}]
+  [{:keys [empty? n span sport present sync ui tracestrack-key]}]
   (let [summary (str/join " · " (remove nil? [(t (some #(when (= span (first %)) (second %)) ranges))
                                               (when (seq sport)
                                                 (t (:label (some #(when (= sport (name (:id %))) %) ui/families))))]))]
@@ -94,7 +113,7 @@
        (row (tk "Peaks") (ui/seg (if (peaks? ui) "on" "off") [["on" (tk "Peaks on")] ["off" (tk "Peaks off")]]
                                  [:heat-peaks] {:soft? true}))
        (row (tk "Colours") (palette-picker (palette ui)))
-       (row (tk "Map") (ui/seg (ground ui) grounds [:heat-base] {:soft? true}))
+       (row (tk "Map") (ui/seg (ground ui tracestrack-key) (grounds tracestrack-key) [:heat-base] {:soft? true}))
        (row (tk "View") (ui/seg (dim ui) [["2d" (tk "2D")] ["3d" (tk "3D")]] [:heat-dim] {:soft? true}))
        [:div.map-row (status/sync-button sync)]]]]))
 
@@ -106,15 +125,17 @@
         in-time (cond->> items from (filter #(>= (:date %) from)))
         fam-of  #(name (:id (ui/family (:sport %))))
         present (set (map fam-of items))
-        shown   (vec (cond->> in-time (seq sport) (filter #(= sport (fam-of %)))))]
+        shown   (vec (cond->> in-time (seq sport) (filter #(= sport (fam-of %)))))
+        tkey    (tracestrack-key data)
+        g       (ground ui tkey)]
     [:div {:style {:display "contents"}}
      (when-let [e (get errors url)] [:div.error (t "Could not load: {0}" e)])
      (cond
        (nil? items)   nil
        :else          (let [props {:items shown :version (str span "|" sport "|" (count shown))
-                                   :palette (palette ui) :ground (ground ui) :heat? (heat? ui)
+                                   :palette (palette ui) :ground g :heat? (heat? ui) :tracestrack-key tkey
                                    :pins? (pins? ui) :peaks (when (peaks? ui) (get data peaks-url))}]
-                        [:div.heat-base {:class (ground ui)}
+                        [:div.heat-base {:class [g (when (own-colours? g) "own-colours")]}
                          (if (= "3d" (dim ui)) (heat/map-3d props) (heat/map-2d props))
                          (overlay {:empty? (empty? items) :n (count shown) :span span :sport sport :present present
-                                  :sync sync :ui ui})]))]))
+                                  :sync sync :ui ui :tracestrack-key tkey})]))]))

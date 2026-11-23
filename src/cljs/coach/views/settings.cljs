@@ -11,6 +11,7 @@
 
 (def key-url "/api/claude/key")
 (def app-url "/api/app")
+(def map-keys-url "/api/map-keys")
 
 (defn tab [route] (get-in route [:params :tab] "general"))
 
@@ -24,9 +25,9 @@
   "What the page loads; `sync` says if an extra athlete is looking (they don't load the costs or the key)."
   [route sync]
   (cond
-    (false? (:admin sync)) [status/backup-url app-url]
+    (false? (:admin sync)) [status/backup-url app-url map-keys-url]
     (= "claude" (tab route)) [(costs/url route) costs/settings-url]
-    :else [status/backup-url key-url app-url]))
+    :else [status/backup-url key-url app-url map-keys-url]))
 
 (defn- choice
   "A row of buttons; the current one is highlighted."
@@ -333,6 +334,34 @@
                [:div {:replicant/key "res" :class (if (:ok result) "ok-line" "error")}
                 (if (:ok result) (t "Claude answered: the key works.") (:error result))]))))
 
+(defn- maps-card
+  "The Tracestrack key: its topo map is on the Map tab once a key is saved."
+  [{:keys [tracestrack]} {:keys [input busy error]}]
+  (let [saved? (seq tracestrack)
+        field [:input.note {:type "text" :autocomplete "off" :spellcheck "false"
+                            :placeholder (t "Tracestrack API key") :value (or input "")
+                            :aria-label (t "Tracestrack API key")
+                            :on {:input [[:set-in-ui :map-key :input :event/target-value]]}}]
+        save [:button.btn-ink {:disabled (or busy (empty? input)) :on {:click [[:map-key :save]]}} (t "Save")]]
+    (ui/card {:flex "1 1 360px" :class "connect"}
+             [:div.lab (t "Maps")]
+             [:div {:replicant/key "t"}
+              (t "The Map tab also offers OpenTopoMap, CyclOSM, swisstopo and Humanitarian maps. Tracestrack Topo needs a free key:")
+              " "
+              [:a {:href "https://console.tracestrack.com" :target "_blank" :rel "noopener noreferrer"}
+               "console.tracestrack.com"]]
+             (if saved?
+               (list
+                [:div {:replicant/key "k"} (t "Key saved")
+                 [:span.sub " · " (t "saved on this computer only, in {0}" "config.edn")]]
+                [:div.connect-row {:replicant/key "b"}
+                 [:button.pill {:disabled busy :on {:click [[:map-key :remove]]}} (t "Remove key")]]
+                [:details.connect-replace {:replicant/key "r"}
+                 [:summary (t "Replace key")]
+                 [:div.connect-row field save]])
+               [:div.connect-row {:replicant/key "f"} field save])
+             (when error [:div.error {:replicant/key "e"} error]))))
+
 (defn view [{:keys [data route sync] :as s} theme-choice]
   (let [admin (admin? sync)
         tb    (if admin (tab route) "general")]
@@ -345,7 +374,8 @@
        (list
         [:div.row {:replicant/key "r0"} (garmin-card sync (get-in s [:ui :garmin-login]))
          (when admin (claude-card (get data key-url) (get-in s [:ui :claude-key])))]
-        [:div.row {:replicant/key "rc"} (coros-card sync (get-in s [:ui :coros]))]
+        [:div.row {:replicant/key "rc"} (coros-card sync (get-in s [:ui :coros]))
+         (maps-card (get data map-keys-url) (get-in s [:ui :map-key]))]
         [:div.row {:replicant/key "r1"} (language-card admin) (appearance-card theme-choice)]
         [:div.row {:replicant/key "r2"} (app-card (get data app-url) (:ui s))
          (when admin (data-card (get data app-url) (get-in s [:ui :data-dir])))]

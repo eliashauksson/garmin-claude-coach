@@ -67,7 +67,7 @@
     :day        [(day/url (:date route))]
     :activity   [(str "/api/activities/" id "?streams=true")]
     :workout    [(workout/url id)]
-    :map        [heatmap/url heatmap/peaks-url]
+    :map        [heatmap/url heatmap/peaks-url heatmap/map-keys-url]
     :peaks      [peaks/url peaks/squares-url]
     :plan       (plan/urls route (:ui @state))
     :today      (today/urls route)
@@ -408,6 +408,20 @@
         (.then done)
         (.catch #(done {:ok false :error (.-message %)})))))
 
+;; the Tracestrack map key (Settings): saved per athlete in config.edn
+(defn- map-key! [[op]]
+  (let [path [:ui :map-key]
+        body {:tracestrack (if (= op :save) (get-in @state (conj path :input)) "")}]
+    (swap! state update-in path assoc :busy true :error nil)
+    (-> (js/fetch settings/map-keys-url #js {:method "PUT" :headers #js {"Content-Type" "application/json"}
+                                             :body (js/JSON.stringify (clj->js body))})
+        (.then (fn [res] (.then (.json res) #(let [r (js->clj % :keywordize-keys true)]
+                                               (if (.-ok res) r {:error (:error r)})))))
+        (.then (fn [r]
+                 (swap! state #(cond-> (assoc-in % path {:error (:error r)})
+                                 (not (:error r)) (assoc-in [:data settings/map-keys-url] r)))))
+        (.catch #(swap! state assoc-in path {:error (.-message %)})))))
+
 ;; Garmin login from Settings: email + password, then the code if Garmin sends one
 (defn- garmin-login! [[op]]
   (let [path [:ui :garmin-login]
@@ -539,6 +553,7 @@
    :claude-limits     claude-limits!
    :claude-check      claude-check!
    :claude-key        claude-key!
+   :map-key           map-key!
    :garmin-login      garmin-login!
    :garmin-login-key  (fn [[op ev]] (when (= "Enter" (.-key ev)) (garmin-login! [op])))
    :coros-login       coros-login!

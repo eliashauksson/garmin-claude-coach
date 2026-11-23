@@ -2,8 +2,9 @@
   "The Map tab's heatmap: every track drawn additively onto a canvas, then each pixel coloured by how
   often it was covered. 2D on Leaflet; 3D (terrain to tilt and turn) on MapLibre GL, which is not in
   the app bundle: /vendor/maplibre/ (copied there by `npm install`) is loaded the first time 3D is shown.
-  Ground: the OpenStreetMap map (dark or light) or Esri satellite imagery; terrain: Mapterhorn (swisstopo's
-  swissALTI3D in Switzerland, Copernicus and other open elevation models elsewhere).
+  Ground: the OpenStreetMap map (dark or light), Esri satellite imagery or a topographic/cycling map
+  (`extra-grounds`: Tracestrack Topo with the athlete's key, OpenTopoMap, CyclOSM, swisstopo, Humanitarian);
+  terrain: Mapterhorn (swisstopo's swissALTI3D in Switzerland, Copernicus and other open elevation models elsewhere).
   Zoomed out, 3D is a globe in front of the real night sky (coach.sky): the Yale Bright Star Catalogue and
   ESO's Milky Way panorama (resources/public/sky/, made by `make sky`)."
   (:require ["leaflet" :as L]
@@ -390,6 +391,49 @@
 (def ^:private esri-credit "Imagery &copy; Esri")
 (def ^:private terrain-credit "Terrain <a href=\"https://mapterhorn.com/attribution\">&copy; Mapterhorn</a>")
 
+(def extra-grounds
+  "Ground ids besides dark, light and satellite, in the order the picker shows them."
+  ["topo" "opentopomap" "cyclosm" "swisstopo" "hot"])
+
+(defn- extra-def
+  "The tiles of an extra ground: `:url` (`{s}` is replaced by `:subs`), `:max-native` (the highest zoom
+  with tiles of its own, Leaflet/MapLibre scale them beyond) and `:credit`. Nil when it needs a key
+  (`tracestrack-key`, from Settings) that isn't there."
+  [id tracestrack-key]
+  (case id
+    "topo" (when (seq tracestrack-key)
+             {:url (str "https://tile.tracestrack.com/topo__/{z}/{x}/{y}.png?key=" tracestrack-key)
+              :max-native 19
+              :credit (str "&copy; <a href=\"https://tracestrack.com\">Tracestrack</a> · " osm-credit)})
+    "opentopomap" {:url "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png" :subs ["a" "b" "c"] :max-native 17
+                   :credit (str "&copy; <a href=\"https://opentopomap.org\">OpenTopoMap</a> (CC-BY-SA) · " osm-credit)}
+    "cyclosm" {:url "https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png" :subs ["a" "b" "c"]
+               :max-native 20
+               :credit (str "&copy; <a href=\"https://www.cyclosm.org\">CyclOSM</a> · " osm-credit)}
+    "swisstopo" {:url (str "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe/default/current/3857"
+                           "/{z}/{x}/{y}.jpeg")
+                 :max-native 18
+                 :credit "&copy; <a href=\"https://www.swisstopo.admin.ch\">swisstopo</a>"}
+    "hot" {:url "https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png" :subs ["a" "b"] :max-native 19
+           :credit (str "&copy; <a href=\"https://www.hotosm.org\">Humanitarian OSM Team</a> · " osm-credit)}
+    nil))
+
+(defn available-grounds
+  "The extra grounds that can be shown with this Tracestrack key (nil: without it)."
+  [tracestrack-key]
+  (filterv #(extra-def % tracestrack-key) extra-grounds))
+
+(defn- ground-def
+  "{:url :subs :max-native :credit} of any ground; dark, light and anything unavailable are OpenStreetMap."
+  [ground tracestrack-key]
+  (cond
+    (= "satellite" ground) {:url satellite-url :max-native 18 :credit esri-credit}
+    (extra-def ground tracestrack-key) (extra-def ground tracestrack-key)
+    :else {:url osm-url :max-native 19 :credit osm-credit}))
+
+(defn- expand-subs [{:keys [url subs]}]
+  (if (seq subs) (mapv #(str/replace url "{s}" %) subs) [url]))
+
 (defonce ^:private camera
   ;; the last view, shared by 2D and 3D so the Map tab (and a switch between them) keeps the place.
   ;; :zoom is on Leaflet's scale (MapLibre's is one less).
@@ -505,18 +549,18 @@
     layer))
 
 (defn- set-ground-2d!
-  "OpenStreetMap (dark or light by CSS) or satellite tiles, with their credit."
+  "The ground's tiles (OpenStreetMap dark or light by CSS, satellite, a topo map …) with their credit."
   [^js node ^js m ground]
-  (let [sat? (= "satellite" ground)
+  (let [{:keys [url subs max-native credit]} (ground-def ground (.-__gkey node))
         ^js attribution (.-__attribution node)]
     (some->> (.-__tiles node) (.removeLayer m))
-    (.removeAttribution attribution osm-credit)
-    (.removeAttribution attribution esri-credit)
-    (.addAttribution attribution (if sat? esri-credit osm-credit))
+    (some->> (.-__credit-html node) (.removeAttribution attribution))
+    (.addAttribution attribution credit)
+    (set! (.-__credit-html node) credit)
     (set! (.-__tiles node)
-          (.bringToBack (.addTo (if sat?
-                                  (L/tileLayer satellite-url #js {:maxZoom 19 :maxNativeZoom 18 :className "map-tiles"})
-                                  (L/tileLayer osm-url #js {:maxZoom 19 :className "map-tiles"}))
+          (.bringToBack (.addTo (L/tileLayer url #js {:maxZoom 19 :maxNativeZoom max-native
+                                                      :subdomains (clj->js (or subs ["a"]))
+                                                      :className "map-tiles"})
                                 m)))
     (set! (.-__ground node) ground)))
 
@@ -575,11 +619,12 @@
 
 (defn map-2d
   "Full-page Leaflet heatmap of `items` ([{:id :track [encoded …]}], coach.track) in the colours of
-  `palette` on `ground` (dark, light, satellite), shown while `heat?`. `version` changes with the
-  filter: the heat is redrawn, the view kept. `peaks` (coach.peaks' map data) are drawn when not nil."
-  [{:keys [items version palette ground heat? pins? peaks]}]
+  `palette` on `ground` (dark, light, satellite or one of `extra-grounds`; `tracestrack-key` unlocks
+  \"topo\"), shown while `heat?`. `version` changes with the filter: the heat is redrawn, the view kept.
+  `peaks` (coach.peaks' map data) are drawn when not nil."
+  [{:keys [items version palette ground heat? pins? peaks tracestrack-key]}]
   [:div.map.heatmap
-   {:replicant/key "heatmap-2d"
+   {:replicant/key (str "heatmap-2d|" tracestrack-key) ; a new key starts the map again
     :data-version (str version "|" palette "|" ground "|" heat? "|" pins? "|" (peaks-key peaks))
     :replicant/on-render
     (fn [{:replicant/keys [life-cycle] :as hook}]
@@ -598,6 +643,7 @@
                                (and (js/isFinite lat) (js/isFinite lng) (js/isFinite zoom)))]
             (set! (.-__tracks node) tracks)
             (set! (.-__palette node) palette)
+            (set! (.-__gkey node) tracestrack-key)
             (set! (.-__heat node) heat?)
             (set! (.-__pins node) pins?)
             (set! (.-__peaks node) peaks)
@@ -747,6 +793,9 @@
                  :sky ["#c9dcef" "#f4f5f2"]
                  :tint {"raster-brightness-min" 0 "raster-brightness-max" 1 "raster-hue-rotate" 0
                         "raster-saturation" -0.6 "raster-contrast" -0.1}}
+    ;; the extra grounds keep their own colours, like a light map without the tint
+    ("topo" "opentopomap" "cyclosm" "swisstopo" "hot")
+    {:osm "none" :sat "none" :bg "#e8e8e4" :shade 0.2 :sky ["#c9dcef" "#f4f5f2"] :tint {}}
     {:osm "visible" :sat "none" :bg "#0f1115" :shade 0.35
      :sky ["#0f1115" "#262b36"]
      ;; brightness min above max inverts: the same darkened map as in 2D
@@ -759,25 +808,36 @@
        ;; the blue glow round the globe when far out, gone close up
        "atmosphere-blend" #js ["interpolate" #js ["linear"] #js ["zoom"] 0 1 5 1 7 0]})
 
-(defn- style-3d [ground]
+(defn- style-3d [ground tracestrack-key]
   (let [{:keys [osm sat bg shade tint] :as g} (ground-3d ground)
-        dem #js {:type "raster-dem" :url terrain-tilejson :tileSize 512 :encoding "terrarium"}]
+        dem #js {:type "raster-dem" :url terrain-tilejson :tileSize 512 :encoding "terrarium"}
+        extras (available-grounds tracestrack-key)
+        extra-source (fn [id] (let [d (extra-def id tracestrack-key)]
+                                #js {:type "raster" :tiles (clj->js (expand-subs d)) :tileSize 256
+                                     :maxzoom (:max-native d)}))]
     #js {:version 8
-         :sources #js {:osm   #js {:type "raster" :tiles #js [osm-url] :tileSize 256 :maxzoom 19}
-                       :sat   #js {:type "raster" :tiles #js [satellite-url] :tileSize 256 :maxzoom 18}
-                       :dem   dem
-                       :shade (js/Object.assign #js {} dem)}
+         :sources (let [o #js {:osm   #js {:type "raster" :tiles #js [osm-url] :tileSize 256 :maxzoom 19}
+                               :sat   #js {:type "raster" :tiles #js [satellite-url] :tileSize 256 :maxzoom 18}
+                               :dem   dem
+                               :shade (js/Object.assign #js {} dem)}]
+                    (doseq [id extras] (aset o (str "g-" id) (extra-source id)))
+                    o)
          ;; a globe when zoomed out, blending into the flat map close up (as in Google Earth)
          :projection #js {:type "globe"}
          :terrain #js {:source "dem" :exaggeration 1.0}
          :sky (sky-props (:sky g))
-         :layers #js [#js {:id "bg" :type "background" :paint #js {"background-color" bg}}
-                      #js {:id "osm" :type "raster" :source "osm" :layout #js {:visibility osm} :paint (clj->js tint)}
-                      #js {:id "sat" :type "raster" :source "sat" :layout #js {:visibility sat}}
-                      #js {:id "shade" :type "hillshade" :source "shade"
-                           :paint #js {"hillshade-exaggeration" shade
-                                       "hillshade-shadow-color" "rgba(0,0,0,.55)"
-                                       "hillshade-highlight-color" "rgba(255,255,255,.12)"}}]}))
+         :layers (clj->js
+                  (concat
+                   [{:id "bg" :type "background" :paint {"background-color" bg}}
+                    {:id "osm" :type "raster" :source "osm" :layout {:visibility osm} :paint tint}
+                    {:id "sat" :type "raster" :source "sat" :layout {:visibility sat}}]
+                   (for [id extras]
+                     {:id (str "g-" id) :type "raster" :source (str "g-" id)
+                      :layout {:visibility (if (= id ground) "visible" "none")}})
+                   [{:id "shade" :type "hillshade" :source "shade"
+                     :paint {"hillshade-exaggeration" shade
+                             "hillshade-shadow-color" "rgba(0,0,0,.55)"
+                             "hillshade-highlight-color" "rgba(255,255,255,.12)"}}]))}))
 
 ;; ---------------------------------------------------------------------------
 ;; Night sky behind the globe
@@ -1004,13 +1064,15 @@
   "The 3D credit line: ground, terrain, and the sky while it's visible."
   [^js node ^js m]
   (set! (.-innerHTML (.-__credit node))
-        (str (if (= "satellite" (.-__ground node)) esri-credit osm-credit) " · " terrain-credit
+        (str (:credit (ground-def (.-__ground node) (.-__gkey node))) " · " terrain-credit
              (when (< (.getZoom m) (second sky-fade)) (str " · " sky-credit)))))
 
 (defn- set-ground-3d! [^js node ^js m ground]
   (let [{:keys [osm sat bg shade tint] :as g} (ground-3d ground)]
     (.setLayoutProperty m "osm" "visibility" osm)
     (.setLayoutProperty m "sat" "visibility" sat)
+    (doseq [id (available-grounds (.-__gkey node))]
+      (.setLayoutProperty m (str "g-" id) "visibility" (if (= id ground) "visible" "none")))
     (doseq [[k v] tint] (.setPaintProperty m "osm" k v))
     (.setPaintProperty m "bg" "background-color" bg)
     (.setPaintProperty m "shade" "hillshade-exaggeration" shade)
@@ -1199,7 +1261,7 @@
 (defn- mount-3d! [^js ml ^js node tracks]
   (let [{:keys [lat lng zoom bearing pitch]} @camera
         ^js m (new (.-Map ml)
-                   #js {:container node :style (style-3d (.-__ground node))
+                   #js {:container node :style (style-3d (.-__ground node) (.-__gkey node))
                         :center (if lat #js [lng lat] #js [8.2 46.8])
                         :zoom (cond zoom (dec zoom) (seq tracks) 6 :else 1.5)
                         :pitch (or pitch 60) :bearing (or bearing 0)
@@ -1259,9 +1321,9 @@
 (defn map-3d
   "The same heatmap on 3D terrain (drag to move, right-drag or ctrl-drag to tilt and turn).
   Props as `map-2d`."
-  [{:keys [items version palette ground heat? pins? peaks]}]
+  [{:keys [items version palette ground heat? pins? peaks tracestrack-key]}]
   [:div.map.heatmap.map3d
-   {:replicant/key "heatmap-3d"
+   {:replicant/key (str "heatmap-3d|" tracestrack-key)
     :data-version (str version "|" palette "|" ground "|" heat? "|" pins? "|" (peaks-key peaks))
     :replicant/on-render
     (fn [{:replicant/keys [life-cycle] :as hook}]
@@ -1272,6 +1334,7 @@
           (do (set! (.-__tracks node) tracks)
               (set! (.-__palette node) palette)
               (set! (.-__ground node) ground)
+              (set! (.-__gkey node) tracestrack-key)
               (set! (.-__heat node) heat?)
               (set! (.-__pins node) pins?)
               (set! (.-__peaks node) peaks)
