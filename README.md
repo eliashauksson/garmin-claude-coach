@@ -13,6 +13,7 @@ and every summit you've ever stood on. It runs on your own machine.
 ![Clojure](https://img.shields.io/badge/Clojure-1.12-5881d8?style=flat-square&logo=clojure&logoColor=white)
 ![Claude](https://img.shields.io/badge/coach-Claude-d97757?style=flat-square&logo=anthropic&logoColor=white)
 ![Languages](https://img.shields.io/badge/i18n-EN%20%C2%B7%20DE%20%C2%B7%20FR-46c37b?style=flat-square)
+[![MIT license](https://img.shields.io/badge/license-MIT-a3aab7?style=flat-square)](LICENSE)
 
 [Features](#features) · [Install](#install) · [User guide](docs/user-guide.html) · [Server setup](docs/server.md) · [Development](docs/development.md)
 
@@ -177,3 +178,8 @@ Summits from Andrew Kirmse and Jonathan de Ferranti's world prominence dataset; 
 contributors. Terrain by [Mapterhorn](https://mapterhorn.com), satellite imagery by Esri, stars from the
 Yale Bright Star Catalogue, Milky Way by ESO/S. Brunier. Garmin and COROS are trademarks of their
 owners; this project is not affiliated with either.
+
+## License
+
+The code is [MIT](LICENSE). Map tiles, the summit dataset and place names keep their own licences
+and terms.
