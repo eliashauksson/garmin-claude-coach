@@ -47,12 +47,15 @@
 (defn- osm-peak [id name ele lat lon]
   {:osm_id id :name name :ele ele :lat lat :lon lon :tags "{}"})
 
+(def ^:private tile-sql
+  "INSERT OR REPLACE INTO peak_tiles (tile, peaks, fetched_at, query_version) VALUES (?, 0, ?, ?)")
+
 (defn- load-all! []
   (with-redefs [peaks/fetch-box! (fn [bbox]
                                    (let [now "2026-01-01T00:00:00Z"]
                                      (doseq [t (summits/tiles-in bbox)]
                                        (jdbc/execute! (peaks/shared)
-                                                      ["INSERT OR REPLACE INTO peak_tiles (tile, peaks, fetched_at) VALUES (?, 0, ?)" t now]))
+                                                      [tile-sql t now peaks/osm-query-version]))
                                      0))]
     [(#'peaks/load-datasets!) (#'peaks/load-names!)]))
 
@@ -178,7 +181,7 @@
 (defn- fetched! [k]
   (let [now "2026-01-01T00:00:00Z"]
     (doseq [t (summits/tiles-of-square k)]
-      (jdbc/execute! (peaks/shared) ["INSERT OR REPLACE INTO peak_tiles (tile, peaks, fetched_at) VALUES (?, 0, ?)" t now]))))
+      (jdbc/execute! (peaks/shared) [tile-sql t now peaks/osm-query-version]))))
 
 (defn- block! [k]
   (jdbc/execute! (peaks/shared) ["INSERT OR REPLACE INTO dataset_blocks (block, rows, fetched_at) VALUES (?, 0, 'x')"
@@ -367,3 +370,35 @@
     (is (nil? (near id-big)) "a named summit has none")
     (is (= [[id-bump 46.6 8.0 1200.0 35 0 nil nil "Nachbar"]]
            (filter #(= id-bump (first %)) (peaks/map-peaks ds {:zoom 12 :bbox [46.0 7.5 47.0 8.5]}))))))
+
+(deftest osm-names
+  (is (= "Matterhorn" (peaks/osm-name {:name "Matterhorn" :name:de "Matterhorn (de)"})))
+  (testing "no plain name: German, French, Italian, English in turn, then any language"
+    (is (= "Hornli" (peaks/osm-name {:name:fr "Corne" :name:de "Hornli" :name:en "Horn"})))
+    (is (= "Corne" (peaks/osm-name {:name:en "Horn" :name:fr "Corne"})))
+    (is (= "Fjall" (peaks/osm-name {:name:is "Fjall" :name:ru "Gora"}))))
+  (is (nil? (peaks/osm-name {:name " " :name:de ""})))
+  (is (nil? (peaks/osm-name {:natural "peak" :name:etymology "x"})) "name:etymology is no name"))
+
+(deftest the-query-asks-for-peaks-volcanoes-and-hills
+  (let [q (peaks/peaks-query [46.0 8.0 46.25 8.25])]
+    (is (re-find #"\^\(peak\|volcano\|hill\)\$" q))
+    (is (re-find #"name\(:\[a-z\]\{2,3\}\)\?" q))
+    (is (re-find #"\(46.0,8.0,46.25,8.25\)" q))))
+
+(deftest tiles-fetched-with-an-older-query-are-fetched-again
+  (let [[ds _] (set-up!)
+        asked (atom [])
+        state #(:state (first (filter (fn [s] (= "46,8" (:square s))) (:squares (peaks/squares-status ds)))))]
+    (jdbc/execute! (peaks/shared) ["UPDATE peak_tiles SET query_version = 1"])
+    (testing "the square still counts as downloaded"
+      (is (= "ready" (state))))
+    (with-redefs [peaks/fetch-box! (fn [bbox]
+                                     (swap! asked conj bbox)
+                                     (doseq [t (summits/tiles-in bbox)]
+                                       (jdbc/execute! (peaks/shared)
+                                                      [tile-sql t "2026-02-01T00:00:00Z" peaks/osm-query-version]))
+                                     0)]
+      (is (pos? (:chunks (#'peaks/load-names!))))
+      (is (seq @asked))
+      (is (zero? (:chunks (#'peaks/load-names!))) "and once they are current, no more"))))

@@ -106,7 +106,7 @@
     (testing "a donor 50 m away with the surveyed height (75 m higher) names the summit"
       (is (= {1 505} (update-vals (:named (m [(donor 505 46.50045 8.0 4505.0 2)])) :id))))
     (testing "too far, or a height that can't be the same peak"
-      (is (empty? (:named (m [(donor 5 46.504 8.0 4430.0 2)]))) "450 m away")
+      (is (empty? (:named (m [(donor 5 46.51 8.0 4430.0 2)]))) "1.1 km away")
       (is (empty? (:named (m [(donor 6 46.5 8.0 4800.0 2)]))) "370 m above the summit")
       (is (empty? (:named (m [(donor 7 46.5 8.0 4300.0 2)]))) "130 m below: the dataset is never that much higher"))
     (testing "without a height only very close counts"
@@ -202,3 +202,28 @@
     (is (< 200 (:dist (get r 1)) 250))
     (is (not (contains? r 2)) "nothing within 3 km")
     (is (empty? (summits/nearest-names [bump] points 150.0)) "the radius is a limit")))
+
+(deftest the-last-pass-names-a-summit-that-is-a-little-too-far
+  (let [top (summit 1 46.5 8.0 1000.0)
+        m #(summits/match-donors [top] %)]
+    (testing "450 m away, the same height: not within 250 m, but nothing else wants the name"
+      (is (= [1] (keys (:named (m [(donor 5 46.504 8.0 990.0 2)]))))))
+    (testing "the donor then counts as that peak for the bags"
+      (is (= {5 1} (:links (m [(donor 5 46.504 8.0 990.0 2)])))))
+    (testing "a height that differs by more than 20 m, or none, or beyond 600 m: no"
+      (is (empty? (:named (m [(donor 6 46.504 8.0 960.0 2)]))))
+      (is (empty? (:named (m [(donor 7 46.504 8.0 nil 2)]))))
+      (is (empty? (:named (m [(donor 8 46.506 8.0 1000.0 2)])))))
+    (testing "a point without a name takes nothing"
+      (is (empty? (:named (m [(donor 9 46.504 8.0 1000.0 2 false)])))))
+    (testing "the nearer summit gets the name, and a summit is named once"
+      (let [r (summits/match-donors [top (summit 2 46.505 8.0 1000.0)]
+                                    [(donor 10 46.5035 8.0 1000.0 2)])]
+        (is (= [2] (keys (:named r))) "the donor is 390 m from 1, 170 m from 2: nearest-first gives 2")))
+    (testing "mutual nearest only: a second donor does not take a summit another is nearer to"
+      (let [r (m [(donor 11 46.504 8.0 1000.0 2) (donor 12 46.5045 8.0 1000.0 2)])]
+        (is (= [11] (map :id (vals (:named r)))))))
+    (testing "a donor that is the same peak as a named summit does not name a bump next to it"
+      (let [r (summits/match-donors [top (summit 2 46.504 8.0 1000.0)]
+                                    [(donor 13 46.5001 8.0 1000.0 2) (donor 14 46.5002 8.0 1000.0 2)])]
+        (is (= [1] (keys (:named r))))))))

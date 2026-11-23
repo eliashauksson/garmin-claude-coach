@@ -52,10 +52,10 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   assets of the GitHub release `peaks-data-2023` of this repo (`peaks/data-url`; `$COACH_PEAKS_DATA_URL` may be a URL or a
   folder, for dev/tests). resources/peaks/blocks.edn lists the blocks that exist (rest of the world is sea).
   Flow per requested 1° square (`run-once!`): `load-datasets!` (the square's block into `peaks`, Switzerland's official names
-  once, then `rematch-square!`) → detection for activities whose blocks are loaded → `load-names!` (OSM `natural=peak` named
-  nodes per tile through Overpass, then rematch) → `relink-summits!`. Rematching is from scratch and idempotent.
+  once, then `rematch-square!`) → detection for activities whose blocks are loaded → `load-names!` (OSM `natural=peak|volcano|hill` nodes with a `name` or `name:xx` per tile through Overpass, then rematch; `peak_tiles.query_version` vs
+  `peaks/osm-query-version`: bump it when the query asks for more and tiles of an older version are fetched again, still shown as ready) → `relink-summits!`. Rematching is from scratch and idempotent.
   A dataset summit's id comes from its position (`summits/dataset-peak-id`, ≥ 10^13). Names: swisstopo (Switzerland only) > OSM, one donor per summit
-  (`summits/match-donors`, ≤ 250 m, donor height −60…+250 m over the dataset's, which runs low on sharp summits); a donor's
+  (`summits/match-donors`, ≤ 250 m, donor height −60…+250 m over the dataset's, which runs low on sharp summits); a last pass (`summits/loose-pairs`) lets a leftover named donor within 600 m and ±20 m of a summit name it if mutual nearest; a donor's
   height replaces the dataset's `ele` (`ele_dem` keeps it). OSM/official points with no summit nearby are not shown; a summit nobody named shows "Near X" (`peaks.near_name`/`near_m`: the nearest named summit, OSM or official point within 3 km,
   `summits/nearest-names`, set by `rename-nearby!` at the end of every `rematch-square!`; one-time `backfill-near-names!`) or, with nothing near, unnamed with its height. `peak_links` (OSM id → summit) moves athletes' old bags
   (athlete `summits.osm_id` was renamed `peak_id`). The dataset's licence is not stated: ask the author before publishing a release.

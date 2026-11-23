@@ -153,14 +153,33 @@
         (< round 4) (do (Thread/sleep (* 10000 round)) (recur (inc round)))
         :else (throw (ex-info "The Overpass servers are busy." {}))))))
 
+(def osm-query-version
+  "Bump when `peaks-query` asks for more: tiles fetched with an older one are fetched again (1: natural=peak
+  with a `name`; 2: also volcanoes and hills, and nodes that only have `name:xx`)."
+  2)
+
 (defn peaks-query
-  "Overpass QL for every named natural=peak node in a [south west north east] box (the heights and the
-  unnamed bumps come from the dataset)."
+  "Overpass QL for every natural=peak, volcano or hill node with a name (`name`, or `name:xx` in a language) in a
+  [south west north east] box (the heights and the unnamed bumps come from the dataset)."
   [[s w n e]]
-  (format "[out:json][timeout:120];node[\"natural\"=\"peak\"][\"name\"](%s,%s,%s,%s);out;" s w n e))
+  (format (str "[out:json][timeout:120];"
+               "node[\"natural\"~\"^(peak|volcano|hill)$\"][~\"^name(:[a-z]{2,3})?$\"~\".\"](%s,%s,%s,%s);out;")
+          s w n e))
+
+(def ^:private name-languages "The languages whose names are used when a node has no plain `name`, best first."
+  ["de" "fr" "it" "en"])
+
+(defn osm-name
+  "A node's name: its `name`, else its name in one of `name-languages`, else any `name:xx`; nil when none."
+  [tags]
+  (let [ok #(when-not (str/blank? %) %)
+        lang (fn [k] (ok (get tags (keyword (str "name:" k)))))]
+    (or (ok (:name tags))
+        (some lang name-languages)
+        (some (fn [[k v]] (when (re-matches #"name:[a-z]{2,3}" (name k)) (ok v))) (sort-by key tags)))))
 
 (defn- element->row [{:keys [id lat lon tags]}]
-  {:osm_id id :name (:name tags) :ele (parse-ele (:ele tags)) :lat lat :lon lon :tags (json/write-str tags)})
+  {:osm_id id :name (osm-name tags) :ele (parse-ele (:ele tags)) :lat lat :lon lon :tags (json/write-str tags)})
 
 (defn save-peaks!
   "Upserts OSM peak rows (the names to give) into the shared database."
@@ -186,12 +205,21 @@
     (save-peaks! rows)
     (jdbc/with-transaction [tx (shared)]
       (doseq [tile (summits/tiles-in bbox)]
-        (jdbc/execute! tx ["INSERT OR REPLACE INTO peak_tiles (tile, peaks, fetched_at) VALUES (?, ?, ?)"
-                           tile (get per-tile tile 0) now])))
+        (jdbc/execute! tx ["INSERT OR REPLACE INTO peak_tiles (tile, peaks, fetched_at, query_version)
+                           VALUES (?, ?, ?, ?)"
+                           tile (get per-tile tile 0) now osm-query-version])))
     (count rows)))
 
-(defn fetched-tiles []
+(defn fetched-tiles
+  "The tiles fetched with any query: what the Peaks page counts as downloaded."
+  []
   (into #{} (map :tile) (db/query (shared) ["SELECT tile FROM peak_tiles"])))
+
+(defn- current-tiles
+  "The tiles fetched with the current query (`osm-query-version`); the others are still to fetch again."
+  []
+  (into #{} (map :tile) (db/query (shared) ["SELECT tile FROM peak_tiles WHERE query_version >= ?"
+                                            osm-query-version])))
 
 (defn- fetch-once!
   "Fetches the peaks of a box, one request at a time for the whole install (public servers are shared,
@@ -200,7 +228,7 @@
   [bbox]
   (paths/with-lock "peaks-fetch"
     (fn []
-      (when-not (every? (fetched-tiles) (summits/tiles-in bbox))
+      (when-not (every? (current-tiles) (summits/tiles-in bbox))
         (Thread/sleep 1000)
         (fetch-box! bbox)
         true))))
@@ -546,7 +574,7 @@
   time (the public server is shared). Stops at the first one that fails: the server is busy, and the update
   tries again later. Returns {:chunks n :failed? bool}."
   []
-  (let [have (fetched-tiles)
+  (let [have (current-tiles)
         todo (remove #(= 16 (square-tiles-done (:square %) have)) (requested-squares))]
     (reduce (fn [r {:keys [square]}]
               (try (let [fetched? (fetch-once! (summits/square-bbox square))]

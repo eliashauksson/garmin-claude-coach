@@ -232,6 +232,8 @@
 (def match-m "A name is given to a summit this near (m) …" 250.0)
 (def match-no-ele-m "… or this near when one of the two has no height …" 100.0)
 (def link-m "… and a point this near a summit that took another name only counts as the same peak (m)." 150.0)
+(def loose-m "A last pass names a summit this near (m) when nothing nearer took the name …" 600.0)
+(def loose-ele-m "… and the heights (both known) differ by at most this much (m)." 20.0)
 (def ele-window
   "The donor's height minus the summit's must lie in this range (m): the dataset's terrain model cuts sharp
   summits by up to 190 m (Finsteraarhorn), and hardly ever sits above the surveyed height."
@@ -246,6 +248,21 @@
 
 (defn- cell [lat lon] [(long (Math/floor (/ (double lat) cell-deg))) (long (Math/floor (/ (double lon) cell-deg)))])
 
+(defn- in-radius
+  "The points of a `cell` grid (`by-cell`) within `radius-m` of lat/lon, as [distance point]."
+  [by-cell lat lon radius-m]
+  (let [[ci cj] (cell lat lon)
+        m-per-cell (* 111320.0 cell-deg)
+        lat-cells (long (Math/ceil (/ radius-m m-per-cell)))
+        lon-m (* m-per-cell (max 0.05 (Math/cos (Math/toRadians lat))))
+        lon-cells (long (Math/ceil (/ radius-m lon-m)))]
+    (for [i (range (- ci lat-cells) (+ ci lat-cells 1))
+          j (range (- cj lon-cells) (+ cj lon-cells 1))
+          p (get by-cell [i j])
+          :let [d (dist-m lat lon (:lat p) (:lon p))]
+          :when (<= d radius-m)]
+      [d p])))
+
 (defn- fits?
   "Whether a donor can be this summit: near enough, and of about the same height."
   [{dele :ele :as d} {sele :ele :as s} limit-m]
@@ -256,13 +273,41 @@
            dist)
       (and (<= dist match-no-ele-m) (<= dist limit-m) dist))))
 
+(defn- loose-pairs
+  "The last pass: a named donor nothing took, and not the same peak as a summit (`links`), names the summit
+  nearest to it within `loose-m` whose height is within `loose-ele-m` of its own, when that donor is also the
+  nearest such donor of that summit. Returns [[summit donor] …]."
+  [summits donors named links]
+  (let [taken (into #{} (map :id) (vals named))
+        free (remove #(or (not (:claim? %)) (taken (:id %)) (contains? links (:id %)) (nil? (:ele %)))
+                     donors)
+        open (remove #(or (nil? (:ele %)) (contains? named (:id %))) summits)
+        by-cell (group-by (fn [s] (cell (:lat s) (:lon s))) open)
+        fits (fn [d] (for [[dist s] (in-radius by-cell (:lat d) (:lon d) loose-m)
+                           :when (<= (Math/abs (- (:ele d) (:ele s))) loose-ele-m)]
+                       [dist s]))
+        nearest-summit (into {} (keep (fn [d]
+                                        (when-let [[dist s] (first (sort-by first (fits d)))]
+                                          [(:id d) [dist s d]])))
+                             free)
+        nearest-donor (reduce (fn [m [_ [dist s d]]]
+                                (if (< dist (or (first (get m (:id s))) Double/MAX_VALUE))
+                                  (assoc m (:id s) [dist d])
+                                  m))
+                              {} nearest-summit)]
+    (for [[_ [_ s d]] nearest-summit
+          :when (= (:id d) (:id (second (get nearest-donor (:id s)))))]
+      [s d])))
+
 (defn match-donors
   "Which donor (a point with a name and a height: a peak list, swisstopo, OpenStreetMap) names which summit
   of the prominence dataset. `summits`: [{:id :lat :lon :ele}]; `donors`: [{:id :lat :lon :ele :rank :claim?}]
   where a lower `:rank` goes first and a donor with `:claim?` false (no name) never takes a summit.
   One donor per summit and one summit per donor, the nearest pair first within a rank. A donor left over is
   still the same peak as the nearest summit within `link-m` (a second OSM point on one top), so what an
-  athlete bagged under its id is not lost. Returns {:named {summit-id donor} :links {donor-id summit-id}}."
+  athlete bagged under its id is not lost. A last pass (`loose-pairs`) gives a name that was too far for the first
+  ones (the dataset's tops can lie a few hundred metres off) to the summit it nearly matches.
+  Returns {:named {summit-id donor} :links {donor-id summit-id}}."
   [summits donors]
   (let [by-cell (group-by (fn [s] (cell (:lat s) (:lon s))) summits)
         near (fn [d limit]
@@ -291,8 +336,10 @@
                           (if-let [[_ s] (first (sort-by first (near d link-m)))]
                             (assoc links (:id d) (:id s))
                             links)))
-                      links donors)]
-    {:named named :links links}))
+                      links donors)
+        loose (loose-pairs summits donors named links)]
+    {:named (reduce (fn [named [s d]] (assoc named (:id s) d)) named loose)
+     :links (reduce (fn [links [s d]] (assoc links (:id d) (:id s))) links loose)}))
 
 (def near-m "A summit nobody named is described by the nearest name within this distance (m)." 3000.0)
 
@@ -300,21 +347,9 @@
   "For each of `summits` ([{:id :lat :lon}]) the nearest of `points` ([{:name :lat :lon}], blank names ignored)
   within `radius-m`: {summit-id {:name :dist}}. A summit with no point that near is left out."
   [summits points radius-m]
-  (let [by-cell (group-by (fn [p] (cell (:lat p) (:lon p)))
-                          (remove #(str/blank? (:name %)) points))
-        m-per-cell (* 111320.0 cell-deg)
-        lat-cells (long (Math/ceil (/ radius-m m-per-cell)))]
+  (let [by-cell (group-by (fn [p] (cell (:lat p) (:lon p))) (remove #(str/blank? (:name %)) points))]
     (into {}
           (keep (fn [{:keys [id lat lon]}]
-                  (let [[ci cj] (cell lat lon)
-                        lon-m (* m-per-cell (max 0.05 (Math/cos (Math/toRadians lat))))
-                        lon-cells (long (Math/ceil (/ radius-m lon-m)))
-                        best (first (sort-by :dist
-                                             (for [i (range (- ci lat-cells) (+ ci lat-cells 1))
-                                                   j (range (- cj lon-cells) (+ cj lon-cells 1))
-                                                   p (get by-cell [i j])
-                                                   :let [d (dist-m lat lon (:lat p) (:lon p))]
-                                                   :when (<= d radius-m)]
-                                               {:name (:name p) :dist d})))]
-                    (when best [id best]))))
+                  (when-let [[dist p] (first (sort-by first (in-radius by-cell lat lon radius-m)))]
+                    [id {:name (:name p) :dist dist}])))
           summits)))

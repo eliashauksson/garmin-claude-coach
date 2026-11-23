@@ -406,7 +406,9 @@
 (def ^:private peaks-added-columns
   [;; a summit nobody named: the nearest name around it and how far it is (m), shown as "near X"
    ["peaks" "near_name" "TEXT"]
-   ["peaks" "near_m" "REAL"]])
+   ["peaks" "near_m" "REAL"]
+   ;; which Overpass query (coach.peaks/osm-query-version) fetched the tile; older ones are fetched again
+   ["peak_tiles" "query_version" "INTEGER NOT NULL DEFAULT 1"]])
 
 (defn migrate-peaks! [ds]
   (jdbc/execute! ds ["PRAGMA journal_mode=WAL"])
