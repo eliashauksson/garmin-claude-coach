@@ -81,7 +81,30 @@
                                    :on {:click [[:square-download]]}}
                 (t "Download")]])]))
 
-(defn view [{:keys [data errors route] ui-state :ui}]
+(defn- world-card
+  "The whole world's dataset in one go: the main athlete starts it (it fills the shared database for the
+  whole server), everybody sees how far it is."
+  [{:keys [requested blocks loaded disk_mb message]} admin?]
+  (let [done? (and (pos? blocks) (= loaded blocks))
+        gb    (/ (js/Math.round (/ disk_mb 100)) 10)]
+    (when (or admin? requested)
+      [:div {:replicant/key "world"}
+       (ui/card {}
+                [:div.lab (t "The whole world")]
+                [:div.sub (t "Download the peaks of every continent at once, to find summits anywhere on the Map tab. They take about {0} GB on this server. Names are only added to the squares you download above: the public name server would need weeks for the whole world, so other summits show their height or the nearest name." gb)]
+                (cond
+                  done?     [:div.ok-line (t "All {0} blocks of the world are downloaded." blocks)]
+                  requested (list [:div.sub {:replicant/key "p"}
+                                   (t "Downloading in the background: {0} of {1} blocks." loaded blocks)]
+                                  (when admin?
+                                    [:button.btn-ghost {:replicant/key "stop"
+                                                        :on {:click [[:api "DELETE" "/api/peaks/world" nil]]}}
+                                     (t "Stop")]))
+                  :else     [:button.btn-ghost {:on {:click [[:api "POST" "/api/peaks/world" nil]]}}
+                             (t "Download the whole world")])
+                (when message [:div.error message]))])))
+
+(defn view [{:keys [data errors route sync] ui-state :ui}]
   (let [d       (get data url)
         sq      (get data squares-url)
         open-id (get-in route [:params :peak])]
@@ -106,6 +129,7 @@
                   (when (pos? (:loading d))
                     [:div.sub (t "Adding names to {0} more squares in the background; the peaks are already on the map." (:loading d))]))]
         (when sq (download-card sq (:squares ui-state)))
+        (when-let [w (:world sq)] (world-card w (true? (:admin sync))))
         [:div {:replicant/key "peaks"}
          (ui/card {}
                   [:div.lab (t "Your peaks")]

@@ -516,6 +516,52 @@
                                                        (str/join "," (repeat (count ids) "?")) ")")]
                                                  ids)))))))
 
+(def ^:private bytes-per-peak "What a summit takes in peaks.db with its indexes (measured: 17 MB for 149k)." 115)
+
+(defn world-status
+  "The whole-world download (the dataset only: no OSM names, those come per square): whether it was asked
+  for, the blocks loaded of all, the size on disk when done and the last failure."
+  []
+  (let [have (loaded-blocks)
+        all  (blocks)]
+    {:requested (boolean (meta-get :world))
+     :blocks    (count all)
+     :loaded    (count (filter have (keys all)))
+     :disk_mb   (Math/round (/ (* bytes-per-peak (reduce + 0 (vals all))) 1048576.0))
+     :message   (not-empty (meta-get :world_message))}))
+
+(defn request-world!
+  "Asks for the dataset of every block of the world, one block per step in the background (each athlete's
+  update goes on where the last stopped). Summits without names show their height, \"Near X\" or the names of
+  the squares downloaded as usual."
+  []
+  (meta-set! :world_message "")
+  (meta-set! :world "1"))
+
+(defn stop-world!
+  "Stops asking for more blocks; the loaded ones stay."
+  []
+  (jdbc/execute! (shared) ["DELETE FROM meta WHERE k IN ('world', 'world_message')"]))
+
+(defn- load-world!
+  "While the world is asked for: the blocks not loaded yet, one after the other (`load-block!` takes the
+  install's download lock and breathes). Stops at the first failure and notes it; the update tries again
+  later. Returns {:blocks n :failed? bool}."
+  []
+  (if-not (meta-get :world)
+    {:blocks 0 :failed? false}
+    (let [have (loaded-blocks)]
+      (reduce (fn [r block]
+                (if-not (meta-get :world) ; stopped meanwhile
+                  (reduced r)
+                  (try (cond-> r (load-block! block) (update :blocks inc))
+                       (catch Throwable e
+                         (println "Peaks: world block" block "failed:" (ex-message e))
+                         (meta-set! :world_message (ex-message e))
+                         (reduced (assoc r :failed? true))))))
+              {:blocks 0 :failed? false}
+              (remove have (sort (keys (blocks))))))))
+
 (defn squares-status
   "The Peaks page's download map: every square with something to show. `:state` is
   queued (waiting) | failed (will retry) | names (peaks loaded, names being added) | ready."
@@ -544,7 +590,8 @@
      :squares (vec squares)
      :downloaded (count (filter #(#{"names" "ready"} (:state %)) squares))
      :loading (count (remove #(= "ready" (:state %)) squares))
-     :peaks (reduce + 0 (map :peaks squares))}))
+     :peaks (reduce + 0 (map :peaks squares))
+     :world (world-status)}))
 
 (defn- note-failure! [square e]
   (println "Peaks: square" square "failed:" (ex-message e))
@@ -727,11 +774,13 @@
         {:keys [blocks] failed-data? :failed?} (load-datasets!)
         _ (backfill-near-names!)
         [activities found] (detect-ready! ds pending)
+        {world-blocks :blocks failed-world? :failed?} (load-world!)
         {:keys [chunks] failed-names? :failed?} (load-names!)
         relinked (relink-summits! ds)
-        r {:queued queued :blocks blocks :chunks chunks :activities activities :summits found :relinked relinked}]
+        r {:queued queued :blocks (+ blocks world-blocks) :chunks chunks :activities activities :summits found
+           :relinked relinked}]
     (when (some pos? (vals r)) (println "Peaks:" r))
-    (assoc r :failed? (boolean (or failed-data? failed-names?)))))
+    (assoc r :failed? (boolean (or failed-data? failed-world? failed-names?)))))
 
 (defn request!
   "Asks for an update. True when the caller should run `work!` (none is running for this athlete); a

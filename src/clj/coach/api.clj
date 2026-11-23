@@ -376,6 +376,14 @@
                                         (peaks/add-squares! (:squares (body req)))
                                         (jobs/peaks-soon! ds)
                                         (ok (peaks/squares-status ds))))}]
+    ;; the whole world's dataset (about 1.5 GB in the shared peaks database): the main athlete's choice
+    ["/peaks/world" {:post   (admin-only (guarded (fn [_]
+                                                    (peaks/request-world!)
+                                                    (jobs/peaks-soon! ds)
+                                                    (ok (peaks/squares-status ds)))))
+                     :delete (admin-only (guarded (fn [_]
+                                                    (peaks/stop-world!)
+                                                    (ok (peaks/squares-status ds)))))}]
     ["/peaks/squares/:square" {:delete (guarded (fn [{:keys [path-params]}]
                                                   (peaks/cancel-square! (:square path-params))
                                                   (ok (peaks/squares-status ds))))}]

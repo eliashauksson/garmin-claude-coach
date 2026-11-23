@@ -231,6 +231,42 @@
       (with-release (fake-release (atom [])) #(#'peaks/load-datasets!))
       (is (nil? (:message (first (filter #(= "46,8" (:square %)) (#'peaks/requested-squares))))))))
 
+(deftest the-whole-world-is-loaded-block-by-block
+  (let [ds (temp-ds) asked (atom [])
+        all (count (#'peaks/blocks))
+        empty-block (gz [])]
+    (testing "nothing happens until it is asked for"
+      (is (= {:requested false :loaded 0 :blocks all} (select-keys (peaks/world-status) [:requested :loaded :blocks])))
+      (with-release (fake-release asked) #(is (= 0 (:blocks (#'peaks/load-world!)))))
+      (is (empty? @asked)))
+    (peaks/request-world!)
+    (testing "every block of the release is loaded, with the dataset only (no names are asked for)"
+      (with-redefs [peaks/fetch-data (fn [file] (swap! asked conj file) (if (= "prominence-40_0.csv.gz" file)
+                                                                           (get (fake-release nil) file)
+                                                                           empty-block))]
+        (let [r (#'peaks/load-world!)]
+          (is (= all (:blocks r)))
+          (is (not (:failed? r))))))
+    (is (= all (:loaded (peaks/world-status))))
+    (is (= #{id-big id-bump} (set (map :id (peaks/visible-peaks ds)))))
+    (testing "a failure is noted, the blocks before it stay, and asking again goes on where it stopped"
+      (jdbc/execute! (peaks/shared) ["DELETE FROM dataset_blocks WHERE block IN ('-10_-60', '-10_-50')"])
+      (with-redefs [peaks/fetch-data (fn [file] (if (= "prominence--10_-60.csv.gz" file)
+                                                  (throw (ex-info "offline" {}))
+                                                  empty-block))]
+        (let [r (#'peaks/load-world!)]
+          (is (:failed? r))
+          (is (= 1 (:blocks r)))
+          (is (= "offline" (:message (peaks/world-status))))))
+      (with-redefs [peaks/fetch-data (fn [_] empty-block)]
+        (is (= 1 (:blocks (#'peaks/load-world!))))))
+    (testing "stopping keeps what is loaded and downloads no more"
+      (jdbc/execute! (peaks/shared) ["DELETE FROM dataset_blocks WHERE block = '-10_-60'"])
+      (peaks/stop-world!)
+      (with-redefs [peaks/fetch-data (fn [_] (throw (ex-info "must not be called" {})))]
+        (is (= 0 (:blocks (#'peaks/load-world!)))))
+      (is (false? (:requested (peaks/world-status)))))))
+
 (defn- queued [] (set (map :square (#'peaks/requested-squares))))
 
 (defn- track-activity! [ds id sport lat lon]
