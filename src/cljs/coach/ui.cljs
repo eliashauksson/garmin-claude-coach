@@ -239,6 +239,13 @@
 
 (defn pills [& items] (into [:div.pills] (remove nil? items)))
 
+(defn peak-label
+  "A peak's name; one nobody named is \"Near X\" (the nearest name, `near_name`), else \"Unnamed peak\"."
+  [{:keys [name near_name]}]
+  (cond (not (str/blank? name)) name
+        (not (str/blank? near_name)) (t "Near {0}" near_name)
+        :else (t "Unnamed peak")))
+
 (defn info
   "A small \"?\" link to the Metrics page's entry `id` (views/metrics.cljs)."
   [id]

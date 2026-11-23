@@ -56,7 +56,8 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   nodes per tile through Overpass, then rematch) → `relink-summits!`. Rematching is from scratch and idempotent.
   A dataset summit's id comes from its position (`summits/dataset-peak-id`, ≥ 10^13). Names: swisstopo (Switzerland only) > OSM, one donor per summit
   (`summits/match-donors`, ≤ 250 m, donor height −60…+250 m over the dataset's, which runs low on sharp summits); a donor's
-  height replaces the dataset's `ele` (`ele_dem` keeps it). OSM/official points with no summit nearby are not shown; a summit nobody named shows unnamed with its height. `peak_links` (OSM id → summit) moves athletes' old bags
+  height replaces the dataset's `ele` (`ele_dem` keeps it). OSM/official points with no summit nearby are not shown; a summit nobody named shows "Near X" (`peaks.near_name`/`near_m`: the nearest named summit, OSM or official point within 3 km,
+  `summits/nearest-names`, set by `rename-nearby!` at the end of every `rematch-square!`; one-time `backfill-near-names!`) or, with nothing near, unnamed with its height. `peak_links` (OSM id → summit) moves athletes' old bags
   (athlete `summits.osm_id` was renamed `peak_id`). The dataset's licence is not stated: ask the author before publishing a release.
   Squares come from three places: the default (Switzerland), the athlete's picks on the Peaks page map (≤ 100 at once, name
   search through Nominatim), and every athlete's tracks: the first round of each athlete queues all squares their activities

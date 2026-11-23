@@ -403,9 +403,15 @@
   (doseq [c added-columns] (ensure-column! ds c))
   (doseq [stmt data-fixes] (jdbc/execute! ds [stmt])))
 
+(def ^:private peaks-added-columns
+  [;; a summit nobody named: the nearest name around it and how far it is (m), shown as "near X"
+   ["peaks" "near_name" "TEXT"]
+   ["peaks" "near_m" "REAL"]])
+
 (defn migrate-peaks! [ds]
   (jdbc/execute! ds ["PRAGMA journal_mode=WAL"])
-  (doseq [stmt peaks-ddl] (jdbc/execute! ds [stmt])))
+  (doseq [stmt peaks-ddl] (jdbc/execute! ds [stmt]))
+  (doseq [c peaks-added-columns] (ensure-column! ds c)))
 
 (defn- now [] (str (java.time.Instant/now)))
 

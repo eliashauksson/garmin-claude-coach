@@ -293,3 +293,28 @@
                             links)))
                       links donors)]
     {:named named :links links}))
+
+(def near-m "A summit nobody named is described by the nearest name within this distance (m)." 3000.0)
+
+(defn nearest-names
+  "For each of `summits` ([{:id :lat :lon}]) the nearest of `points` ([{:name :lat :lon}], blank names ignored)
+  within `radius-m`: {summit-id {:name :dist}}. A summit with no point that near is left out."
+  [summits points radius-m]
+  (let [by-cell (group-by (fn [p] (cell (:lat p) (:lon p)))
+                          (remove #(str/blank? (:name %)) points))
+        m-per-cell (* 111320.0 cell-deg)
+        lat-cells (long (Math/ceil (/ radius-m m-per-cell)))]
+    (into {}
+          (keep (fn [{:keys [id lat lon]}]
+                  (let [[ci cj] (cell lat lon)
+                        lon-m (* m-per-cell (max 0.05 (Math/cos (Math/toRadians lat))))
+                        lon-cells (long (Math/ceil (/ radius-m lon-m)))
+                        best (first (sort-by :dist
+                                             (for [i (range (- ci lat-cells) (+ ci lat-cells 1))
+                                                   j (range (- cj lon-cells) (+ cj lon-cells 1))
+                                                   p (get by-cell [i j])
+                                                   :let [d (dist-m lat lon (:lat p) (:lon p))]
+                                                   :when (<= d radius-m)]
+                                               {:name (:name p) :dist d})))]
+                    (when best [id best]))))
+          summits)))

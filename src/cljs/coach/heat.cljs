@@ -236,11 +236,12 @@
   (str "<svg viewBox=\"0 0 26 24\" width=\"26\" height=\"24\" aria-hidden=\"true\">"
        "<path class=\"o\" d=\"" peak-triangle "\"/><path class=\"f\" d=\"" peak-triangle "\"/></svg>"))
 
-;; A peak travels as a short row: [id lat lon ele prominence visits name last-visit] (coach.peaks/map-peaks)
+;; A peak travels as a short row: [id lat lon ele prominence visits name last-visit near-name] (coach.peaks/map-peaks)
 (defn- row-bagged? [r] (pos? (or (nth r 5) 0)))
 
-(defn- row->peak [[id lat lon ele prominence visits name last]]
-  {:id id :lat lat :lon lon :ele ele :prominence prominence :visits visits :name name :last last})
+(defn- row->peak [[id lat lon ele prominence visits name last near-name]]
+  {:id id :lat lat :lon lon :ele ele :prominence prominence :visits visits :name name :last last
+   :near_name near-name})
 
 (defn- bagged? [p] (pos? (or (:visits p) 0)))
 
@@ -278,7 +279,7 @@
                    (.catch (fn [_] nil))))))
          250)))
 
-(defn- peak-title [p] (if (str/blank? (:name p)) (t "Unnamed peak") (:name p)))
+(defn- peak-title [p] (ui/peak-label p))
 
 (defn- peak-popup-node
   "A peak's popup: name, height and prominence; when bagged, how often (linking to the Peaks page);

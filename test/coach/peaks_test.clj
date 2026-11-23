@@ -298,8 +298,8 @@
 
 (deftest compact-map-rows
   (let [[ds _] (set-up!)]
-    (is (= [[id-big 46.5 8.0 3000.0 400 0 "Gross Horn" nil]
-            [id-bump 46.6 8.0 1200.0 35 0 nil nil]]
+    (is (= [[id-big 46.5 8.0 3000.0 400 0 "Gross Horn" nil nil]
+            [id-bump 46.6 8.0 1200.0 35 0 nil nil nil]]
            (sort-by first (peaks/map-peaks ds {:zoom 12 :bbox [46.0 7.5 47.0 8.5]}))))))
 
 (deftest the-map-gets-what-its-zoom-draws
@@ -356,3 +356,14 @@
   (testing "an unknown load never pauses"
     (is (not (peaks/pause? -1.0 0.8)))
     (is (not (peaks/pause? nil 0.8)))))
+
+(deftest an-unnamed-summit-gets-the-nearest-name
+  (let [[ds _] (set-up!)
+        near #(:near_name (first (db/query (peaks/shared) ["SELECT near_name FROM peaks WHERE id = ?" %])))]
+    (is (nil? (near id-bump)) "Gross Horn is 11 km away")
+    (jdbc/execute! (peaks/shared) ["INSERT INTO official_peaks (lat, lon, ele, name) VALUES (46.601, 8.0, 900.0, 'Nachbar')"])
+    (#'peaks/rematch-square! "46,8")
+    (is (= "Nachbar" (near id-bump)) "a point 110 m away that is too low to be the same summit")
+    (is (nil? (near id-big)) "a named summit has none")
+    (is (= [[id-bump 46.6 8.0 1200.0 35 0 nil nil "Nachbar"]]
+           (filter #(= id-bump (first %)) (peaks/map-peaks ds {:zoom 12 :bbox [46.0 7.5 47.0 8.5]}))))))

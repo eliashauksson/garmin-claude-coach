@@ -225,9 +225,9 @@
    (ui/card {}
             [:div.lab (t "Summits") (ui/info "peaks-bagged")]
             (into [:div.peak-list]
-                  (for [{:keys [name ele prominence dist_m visit_id]} summits]
+                  (for [{:keys [ele prominence dist_m visit_id] :as summit} summits]
                     [:div.peak-visit {:replicant/key visit_id}
-                     [:span [:b (if (str/blank? name) (t "Unnamed peak") name)]
+                     [:span [:b (ui/peak-label summit)]
                       [:span.sub (str " " (some-> ele js/Math.round) " m"
                                       (when prominence (str " · " (t "{0} m prominence" (js/Math.round prominence)))))]]
                      [:span.sub (t "{0} m from the top" (js/Math.round dist_m))]

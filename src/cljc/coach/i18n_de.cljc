@@ -1510,6 +1510,7 @@
    "This wasn't a summit visit" "Das war kein Gipfelbesuch"
    "The peak data server answered HTTP {0} for {1}." "Der Server der Gipfeldaten antwortete mit HTTP {0} für {1}."
    "Unnamed peak" "Unbenannter Gipfel"
+   "Near {0}" "Bei {0}"
    "Adding names to {0} more squares in the background; the peaks are already on the map." "Für {0} weitere Felder werden im Hintergrund Namen ergänzt; die Gipfel sind schon auf der Karte."
    "Your peaks" "Deine Gipfel"
    "last {0}" "zuletzt {0}"

@@ -312,9 +312,41 @@
      (for [{:keys [id name ele lat lon]} off]
        {:id (- id) :name name :ele ele :lat lat :lon lon :rank 1 :claim? true}))))
 
+(defn- near-points
+  "The named points around a square (a wider margin than the donors': a summit at its edge has its
+  nearest name on the other side): named summits, OSM and official points."
+  [[s w n e]]
+  (let [m 0.03
+        box [(- s m) (+ n m) (- w m) (+ e m)]
+        q (fn [sql] (db/query (shared) (into [sql] box)))]
+    (concat (q "SELECT name, lat, lon FROM peaks WHERE name IS NOT NULL
+                AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?")
+            (q "SELECT name, lat, lon FROM osm_peaks WHERE name IS NOT NULL
+                AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?")
+            (q "SELECT name, lat, lon FROM official_peaks WHERE name IS NOT NULL
+                AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"))))
+
+(defn- rename-nearby!
+  "The summits of a square that have no name get the nearest name around them (`near_name`, shown as
+  \"near X\"); the others have none. From scratch, after the names are given."
+  [k]
+  (let [[s w n e :as box] (summits/square-bbox k)
+        where " WHERE id >= ? AND lat >= ? AND lat < ? AND lon >= ? AND lon < ?"
+        args [summits/dataset-id-min s n w e]
+        unnamed (db/query (shared) (into [(str "SELECT id, lat, lon FROM peaks" where " AND name IS NULL")] args))
+        near (summits/nearest-names unnamed (near-points box) summits/near-m)]
+    (jdbc/with-transaction [tx (shared)]
+      (jdbc/execute! tx (into [(str "UPDATE peaks SET near_name = NULL, near_m = NULL" where
+                                    " AND (near_name IS NOT NULL OR near_m IS NOT NULL)")]
+                              args))
+      (insert-batched! tx "UPDATE peaks SET near_name = ?, near_m = ? WHERE id = ?"
+                       (for [[id {:keys [name dist]}] near] [name dist id])))
+    (count near)))
+
 (defn- rematch-square!
   "Names the dataset summits of a square from the points around it, from scratch (so it can run again
-  whenever a source has arrived), and records which summit each OSM point is."
+  whenever a source has arrived), and records which summit each OSM point is. Summits that stay unnamed
+  get the nearest name as `near_name`."
   [k]
   (let [[s w n e :as box] (summits/square-bbox k)
         sums (db/query (shared) ["SELECT id, lat, lon, ele_dem AS ele FROM peaks
@@ -331,7 +363,7 @@
                            (:name d) (:ele d) (source-of-rank (:rank d)) summit-id]))
       (doseq [[donor-id summit-id] links :when (pos? donor-id)]
         (jdbc/execute! tx ["INSERT OR REPLACE INTO peak_links (donor_id, peak_id) VALUES (?, ?)" donor-id summit-id])))
-    {:summits (count sums) :named (count named)}))
+    {:summits (count sums) :named (count named) :near (rename-nearby! k)}))
 
 ;; the athletes whose update is running (:running), or running and asked again meanwhile (:again)
 (defonce ^:private running? (atom {}))
@@ -648,12 +680,24 @@
                               (println "Peaks: activity" (:id %) "failed:" (ex-message e)) 0))
                       ready))]))
 
+(defn- backfill-near-names!
+  "Once per install (meta `near_names`): the squares loaded before `near_name` existed get it. Returns how many
+  squares were done."
+  []
+  (when-not (meta-get :near_names)
+    (let [open (set (map :square (unfinished-squares)))
+          done (doall (for [{:keys [square]} (requested-squares) :when (not (open square))]
+                        (do (breathe!) (rematch-square! square) square)))]
+      (meta-set! :near_names "1")
+      (count done))))
+
 (defn- run-once! [ds]
   (remove-dem-cache!)
   (seed-default-squares!)
   (let [pending (pending-activities ds)
         queued (queue-track-squares! ds pending)
         {:keys [blocks] failed-data? :failed?} (load-datasets!)
+        _ (backfill-near-names!)
         [activities found] (detect-ready! ds pending)
         {:keys [chunks] failed-names? :failed?} (load-names!)
         relinked (relink-summits! ds)
@@ -697,7 +741,7 @@
    FROM summits s LEFT JOIN activities a ON a.id = s.activity_id
    WHERE s.source <> 'dismissed'")
 
-(def ^:private peak-columns "id, name, coalesce(ele, ele_dem) AS ele, lat, lon, prominence")
+(def ^:private peak-columns "id, name, near_name, coalesce(ele, ele_dem) AS ele, lat, lon, prominence")
 (def ^:private max-view-peaks "The most unbagged peaks one view gets (there are about a million in the dataset)." 5000)
 
 (defn- peaks-by-ids
@@ -729,7 +773,7 @@
     (db/query
      (shared)
      (if (and cell (pos? cell) (< zoom thin-zoom-max))
-       (into [(str "SELECT id, name, ele, lat, lon, prominence FROM ("
+       (into [(str "SELECT id, name, near_name, ele, lat, lon, prominence FROM ("
                    " SELECT *, ROW_NUMBER() OVER (PARTITION BY cx, cy ORDER BY prominence DESC) AS rn,"
                    "          COUNT(*) OVER (PARTITION BY cx, cy) AS n FROM ("
                    "  SELECT " peak-columns ", CAST((lat + 90) / ? AS INTEGER) AS cx,"
@@ -765,11 +809,11 @@
 (defn map-peaks
   "What the Map tab draws, one short row per peak (there can be a million in the world, so only what a zoom
   draws, in the `bbox` if given; without a zoom the world view):
-  [id lat lon ele prominence visits name last-visit]."
+  [id lat lon ele prominence visits name last-visit near-name]."
   ([ds] (map-peaks ds {:zoom 0 :cell 2.0}))
   ([ds opts]
-   (mapv (fn [{:keys [id lat lon ele prominence visits name last]}]
-           [id lat lon ele (some-> prominence Math/round) visits name last])
+   (mapv (fn [{:keys [id lat lon ele prominence visits name last near_name]}]
+           [id lat lon ele (some-> prominence Math/round) visits name last near_name])
          (visible-peaks ds opts))))
 
 (defn- visits-by-peak [ds]
@@ -800,8 +844,8 @@
                               WHERE activity_id = ? AND source <> 'dismissed' ORDER BY time_s" activity-id])
         peaks (when (seq visits)
                 (into {} (map (juxt :id identity))
-                      (db/query (shared) (into [(str "SELECT id, name, coalesce(ele, ele_dem) AS ele, lat, lon,
-                                                             prominence
+                      (db/query (shared) (into [(str "SELECT id, name, near_name, coalesce(ele, ele_dem) AS ele,
+                                                             lat, lon, prominence
                                                       FROM peaks WHERE id IN ("
                                                      (str/join "," (repeat (count visits) "?")) ")")]
                                                (map :peak_id visits)))))]

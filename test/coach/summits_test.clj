@@ -189,3 +189,16 @@
                         :ele (if (even? i) 2010.0 nil)}))]
       (is (= (brute-detect stream peaks) (summits/detect stream peaks))
           (str "at latitude " base-lat)))))
+
+(deftest naming-the-summits-nobody-named-after-what-is-near
+  (let [bump {:id 1 :lat 46.5 :lon 8.0}
+        far {:id 2 :lat 47.5 :lon 9.0}
+        points [{:name "Rochers" :lat 46.505 :lon 8.0}      ; ~556 m
+                {:name "Closer" :lat 46.502 :lon 8.0}       ; ~222 m
+                {:name "" :lat 46.5001 :lon 8.0}            ; no name: ignored
+                {:name "Too far" :lat 46.54 :lon 8.0}]      ; ~4.4 km
+        r (summits/nearest-names [bump far] points 3000.0)]
+    (is (= "Closer" (:name (get r 1))))
+    (is (< 200 (:dist (get r 1)) 250))
+    (is (not (contains? r 2)) "nothing within 3 km")
+    (is (empty? (summits/nearest-names [bump] points 150.0)) "the radius is a limit")))

@@ -27,10 +27,10 @@
                   :on {:click [[:api "DELETE" (str "/api/peak-bags/" id) nil]]}}
     (t "Remove")]])
 
-(defn- peak-row [open-id {:keys [id name ele prominence visits last visit_list lat lon]}]
+(defn- peak-row [open-id {:keys [id ele prominence visits last visit_list lat lon] :as peak}]
   [:details.peak {:replicant/key id :open (= (str id) open-id)}
    [:summary
-    [:span.peak-name (if (str/blank? name) (t "Unnamed peak") name)]
+    [:span.peak-name (ui/peak-label peak)]
     [:span.sub (str/join " · " (remove nil? [(metres ele)
                                             (when prominence (t "{0} m prominence" (js/Math.round prominence)))]))]
     [:span.sp]
