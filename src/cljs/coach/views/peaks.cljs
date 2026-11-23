@@ -43,7 +43,7 @@
 (defn- legend []
   [:div.square-legend
    (for [[cls label] [["free" (t "Not downloaded")] ["selected" (t "Selected")] ["queued" (t "Waiting")]
-                      ["names" (t "Adding names")] ["ready" (t "Ready")]
+                      ["peaks" (t "Peaks, no names")] ["names" (t "Adding names")] ["ready" (t "Ready")]
                       ["failed" (t "Failed, trying again")]]]
      [:span {:replicant/key cls} [:i {:class ["sq" cls]}] label])])
 
@@ -55,7 +55,7 @@
    [:span.sub (if too_big (t "too big") (t "{0} squares" (count squares)))]])
 
 (defn- download-card
-  [{:keys [squares downloaded loading peaks]} {:keys [q results selected busy error outline fly fly-id]}]
+  [{:keys [squares downloaded loading peaks world]} {:keys [q results selected busy error outline fly fly-id]}]
   (let [n (count selected)]
     [:div {:replicant/key "download"}
      (ui/card {}
@@ -69,7 +69,8 @@
                 (if busy (t "Searching…") (t "Search"))]]
               (when error [:div.error error])
               (when (seq results) (into [:div.area-results] (map-indexed result-row results)))
-              (square-map/view {:squares squares :selected (or selected #{}) :outline outline :fly fly :fly-id fly-id})
+              (square-map/view {:squares squares :selected (or selected #{}) :outline outline :fly fly :fly-id fly-id
+                                 :world world})
               (legend)
               [:div.square-bar
                [:span (cond (pos? n) (t "{0} squares selected" n)

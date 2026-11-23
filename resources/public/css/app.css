@@ -970,6 +970,7 @@ details.peak > summary .sp { flex: 1; }
 .square-legend .sq.selected { background: color-mix(in srgb, var(--amber) 45%, transparent); border-color: var(--amber); }
 .square-legend .sq.queued { border: 1px dashed var(--amber); }
 .square-legend .sq.names { background: color-mix(in srgb, var(--blue) 30%, transparent); border-color: var(--blue); }
+.square-legend .sq.peaks { background: color-mix(in srgb, var(--green) 12%, transparent); border-color: var(--green); }
 .square-legend .sq.ready { background: color-mix(in srgb, var(--green) 30%, transparent); border-color: var(--green); }
 .square-legend .sq.failed { border-color: var(--red); }
 .square-bar { display: flex; align-items: center; gap: 12px; margin-top: 10px; font-size: 13px; }

@@ -1546,6 +1546,7 @@
    "Not downloaded" "Nicht heruntergeladen"
    "Nothing found" "Nichts gefunden"
    "Peaks loaded, adding names" "Gipfel geladen, Namen werden ergänzt"
+   "Peaks, no names" "Gipfel, ohne Namen"
    "Ready" "Bereit"
    "Search" "Suchen"
    "Searching…" "Suche läuft …"

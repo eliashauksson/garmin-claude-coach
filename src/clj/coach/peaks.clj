@@ -529,6 +529,8 @@
     {:requested (boolean (meta-get :world))
      :blocks    (count all)
      :loaded    (count (filter have (keys all)))
+     :loaded_blocks (vec (sort (filter have (keys all))))
+     :pending_blocks (if (meta-get :world) (vec (sort (remove have (keys all)))) [])
      :disk_mb   (Math/round (/ (* bytes-per-peak (reduce + 0 (vals all))) 1048576.0))
      :message   (not-empty (meta-get :world_message))}))
 
@@ -564,30 +566,46 @@
               {:blocks 0 :failed? false}
               (remove have (sort (keys (blocks))))))))
 
+(defn- square-states
+  "[{:square :state :message :loaded?}] of the requested squares, from small tables only (no peaks read)."
+  []
+  (let [have (fetched-tiles)
+        blocks-have (loaded-blocks)
+        done (frequencies (map tile-square have))]
+    (for [{:keys [square message]} (requested-squares)
+          :let [loaded? (boolean (blocks-have (summits/square-block square)))
+                full? (= 16 (get done square 0))]]
+      {:square square :message message :loaded? loaded?
+       :state (cond (and loaded? full?) "ready"
+                    message "failed"
+                    loaded? "names"
+                    :else "queued")})))
+
+(defn- shown-per-square
+  "{square n}: the peaks with prominence >= `m` in each of the loaded `squares`. One query per row of
+  latitude, through the position index, so the world's millions of peaks are not read."
+  [m squares]
+  (into {}
+        (mapcat (fn [[la ks]]
+                  (let [los (map (comp second summits/parse-square) ks)]
+                    (map (juxt :sq :shown)
+                         (db/query (shared) [(str "SELECT " square-sql " AS sq,
+                                                          coalesce(sum(prominence >= ?), 0) AS shown
+                                                   FROM peaks WHERE lat >= ? AND lat < ? AND lon >= ? AND lon < ?
+                                                   GROUP BY sq")
+                                             m la (inc la) (apply min los) (inc (apply max los))])))))
+        (group-by (comp first summits/parse-square) squares)))
+
 (defn squares-status
   "The Peaks page's download map: every square with something to show. `:state` is
   queued (waiting) | failed (will retry) | names (peaks loaded, names being added) | ready."
   [ds]
-  (let [have (fetched-tiles)
-        blocks-have (loaded-blocks)
-        done (frequencies (map tile-square have))
-        requested (into {} (map (juxt :square :message)) (requested-squares))
-        m (min-prominence ds)
-        counts (into {} (map (juxt :sq identity))
-                     (db/query (shared) [(str "SELECT " square-sql " AS sq,
-                                                      coalesce(sum(prominence >= ?), 0) AS shown
-                                               FROM peaks GROUP BY sq") m]))
+  (let [states (square-states)
+        shown (shown-per-square (min-prominence ds) (map :square (filter :loaded? states)))
         bagged (bagged-per-square ds)
-        squares (for [k (keys requested)
-                      :let [loaded? (blocks-have (summits/square-block k))
-                            full? (= 16 (get done k 0))
-                            msg (get requested k)
-                            state (cond (and loaded? full?) "ready"
-                                        msg "failed"
-                                        loaded? "names"
-                                        :else "queued")]]
-                  {:square k :state state :requested true :message msg
-                   :peaks (if loaded? (long (:shown (get counts k) 0)) 0) :bagged (get bagged k 0)})]
+        squares (for [{:keys [square state message loaded?]} states]
+                  {:square square :state state :requested true :message message
+                   :peaks (if loaded? (long (get shown square 0)) 0) :bagged (get bagged square 0)})]
     {:status (if (or (working?) @world-running) "running" "idle") ; "running" makes the page ask again shortly
      :squares (vec squares)
      :downloaded (count (filter #(#{"names" "ready"} (:state %)) squares))
@@ -936,7 +954,7 @@
      :visits (reduce + 0 (map :visits bagged))
      :highest (some-> highest (select-keys [:id :name :ele]))
      :min_prominence (min-prominence ds)
-     :loading (:loading (squares-status ds))
+     :loading (count (remove #(= "ready" (:state %)) (square-states)))
      :peaks (vec (sort-by :last #(compare %2 %1) bagged))}))
 
 (defn activity-summits

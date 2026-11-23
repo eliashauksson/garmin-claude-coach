@@ -1548,6 +1548,7 @@
    "Not downloaded" "Non téléchargé"
    "Nothing found" "Rien trouvé"
    "Peaks loaded, adding names" "Sommets chargés, ajout des noms"
+   "Peaks, no names" "Sommets, sans noms"
    "Ready" "Prêt"
    "Search" "Chercher"
    "Searching…" "Recherche…"

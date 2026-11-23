@@ -211,6 +211,30 @@
       (peaks/cancel-square! "47,8")
       (is (nil? (state ds "47,8"))))))
 
+(deftest squares-count-only-their-own-peaks
+  (let [ds (temp-ds)
+        peak! (fn [id lat lon prom]
+                (jdbc/execute! (peaks/shared) ["INSERT INTO peaks (id, lat, lon, prominence) VALUES (?, ?, ?, ?)"
+                                               id lat lon prom]))
+        counts #(into {} (map (juxt :square :peaks)) (:squares (peaks/squares-status ds)))]
+    (peaks/add-squares! ["46,7" "-34,-71" "46,8"])
+    (doseq [k ["46,7" "-34,-71"]] (block! k))
+    (peak! 1 46.5 7.5 400) (peak! 2 46.9 7.1 100) (peak! 3 46.2 7.2 20) ; 20 m is below the minimum
+    (peak! 4 -33.5 -70.5 900)                                             ; negative latitude and longitude
+    (peak! 5 46.5 8.5 700)                                                ; its block is loaded, the square is
+    (peak! 6 10.5 10.5 700)                                               ; not requested at all
+    (testing "each loaded square counts its own peaks at or above the minimum"
+      (is (= {"46,7" 2 "-34,-71" 1 "46,8" 1} (counts))))
+    (testing "the world's loaded blocks and, while it is asked for, those to come"
+      (is (= [] (:pending_blocks (peaks/world-status))))
+      (peaks/request-world!)
+      (let [w (peaks/world-status)]
+        (is (= #{"40_0" "-40_-80"} (set (:loaded_blocks w))))
+        (is (not-any? (set (:loaded_blocks w)) (:pending_blocks w)))
+        (is (= (:blocks w) (+ (count (:loaded_blocks w)) (count (:pending_blocks w)))))))
+    (testing "the summary counts the squares still loading without reading peaks"
+      (is (= 3 (:loading (peaks/summary ds)))))))
+
 (deftest a-failed-block-is-noted-and-the-others-go-on
   (let [ds (temp-ds) asked (atom [])]
     (peaks/add-squares! ["10,10" "46,8"])
