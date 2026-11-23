@@ -3,12 +3,14 @@
   athlete.md and the athlete's recent data. The proposal is stored for review; nothing
   enters the plan until the athlete accepts it."
   (:require [clojure.data.json :as json]
+            [clojure.string :as str]
             [coach.adapt :as adapt]
             [coach.ai-settings :as ai]
             [coach.analysis :as analysis]
             [coach.athlete :as athlete]
             [coach.claude :as claude]
             [coach.costs :as costs]
+            [coach.cycle-data :as cycle-data]
             [coach.db :as db]
             [coach.plan :as plan]
             [coach.plan-rules :as rules]
@@ -63,13 +65,15 @@
   "Everything the planner needs for the week starting `monday`."
   [ds monday]
   (let [today   (str (LocalDate/now))
+        cycle   (cycle-data/planner-context ds today monday (season/add-days monday 6))
         from    (season/add-days monday -42)
         acts    (analysis/activities ds {:from from :to today})
         by-week (group-by #(season/monday (:date %)) acts)
         weeks   (for [i (range 6 0 -1) :let [m (season/add-days monday (* -7 i))]]
                   (week-summary m (by-week m)))
         pmc     (last (analysis/pmc ds today today))]
-    {:today            today
+    (cond->
+     {:today            today
      :target_week      (plan/week-info ds monday)
      :last_6_weeks     weeks
      :recent_activities (vec (for [a (filter #(>= (compare (:date %) (season/add-days today -14)) 0) acts)]
@@ -98,7 +102,9 @@
      :proposed_previous_week (proposed-week ds (season/add-days monday -7))
      :planned_previous_and_target_weeks
      (vec (for [w (plan/workouts ds (season/add-days monday -7) (season/add-days monday 6))]
-            (select-keys w [:date :slot :session_id :title :distance_km :duration_min :status])))}))
+            (select-keys w [:date :slot :session_id :title :distance_km :duration_min :status])))}
+      ;; only for a female athlete who turned cycle tracking on (coach.cycle-data)
+      cycle (assoc :menstrual_cycle cycle))))
 
 ;; ---------------------------------------------------------------------------
 ;; Prompt and response schema
@@ -259,11 +265,39 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
   (str "Propose the sessions for the target week. Here is the athlete's current data as JSON:\n\n"
        (json/write-str ctx)))
 
+(def cycle-rules
+  "Added to the instructions only when the data has a menstrual_cycle block (the athlete tracks her cycle).
+  Evidence: McNulty 2020, Colenso-Semple 2023, Kubica 2024 (no benefit from phase-based training), HRV/RHR by phase
+  (BMJ Open SEM 2021), IOC REDs consensus 2023."
+  "
+
+Menstrual cycle (heading \"Menstrual cycle\"): the data has `menstrual_cycle` because the athlete tracks her cycle.
+- Phases are counted from her last period start, so ovulation and the luteal phase are estimates (`estimated`).
+  `contraception` hormonal means no natural cycle: only bleeding days count, never infer ovulation or luteal effects.
+- There is no evidence that training should be periodized by cycle phase: do not move hard or long sessions to
+  a phase for its own sake, and plan the week as if she did not track. The phase is context.
+- Adjust for symptoms she logged (`symptoms_last_7_days`, severity 1 mild, 2 moderate, 3 severe) and for how
+  sessions felt, not for the phase alone: with moderate or severe symptoms around the period, soften or move
+  the hardest session by a day or two and keep easy volume if she feels fine.
+- In the luteal phase HRV tends to be a little lower and resting HR a little higher: do not read one of them
+  alone as fatigue or overreaching. In heat, a note on hydration and pacing in the late luteal phase is enough.
+- `flags`: missed_period, irregular, infrequent or short_cycles can be a sign of low energy availability
+  (REDs): say so in the summary, suggest talking to a doctor, never diagnose, and do not raise load. prolonged and
+  spotting: mention them to her doctor. heavy_bleeding: suggest a ferritin check with her doctor.
+  `variability_days` is how much her cycle length varies: a next period is only roughly where it says.
+- `personal_patterns` (when present) are her own numbers over `cycles` cycles: per phase her mean HRV and
+  resting-HR difference from her average, days with moderate or severe symptoms among the `logged_days`, and her
+  mean RPE. Trust them only with `cycles` >= 3 and a phase with at least 5 days. If they show a repeatable
+  dip or hard-feeling phase for her, plan around it for her (keep key sessions off those days, say so in
+  the reason); if not, ignore them and don't invent a pattern.
+- Mention the cycle in a session's reason only when it changed the plan.")
+
 (defn claude-opts
   "The planner's request options: the shared knowledge, then the planner's
-  instructions, then the data in one user turn."
+  instructions (plus `cycle-rules` when the data has a cycle block), then the data in one user turn."
   [user-text schema & [log-opts]]
-  (merge {:knowledge (claude/principles) :system system-intro
+  (merge {:knowledge (claude/principles)
+          :system (cond-> system-intro (str/includes? user-text "\"menstrual_cycle\"") (str cycle-rules))
           :messages [[:user user-text]] :schema schema}
          log-opts))
 
@@ -418,7 +452,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
      :workouts (plan/workouts ds monday (season/add-days monday 13))
      :tsb      (:tsb (last (analysis/pmc ds today today)))
      :phase    (:phase (plan/week-info ds today))
-     :settings (athlete/settings)}))
+     :settings (athlete/settings)
+     :cycle    (cycle-data/adapt-input ds today)}))
 
 (defn adjust-message [ctx today scope-end]
   (str "Adjust the planned sessions from " today " to " scope-end " in response to the signals"

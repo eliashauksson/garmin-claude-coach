@@ -4,6 +4,7 @@
   A triggering signal leads to an adjustment proposal; the athlete decides."
   (:require [clojure.string :as str]
             [coach.analysis :as analysis]
+            [coach.cycle :as cycle]
             [coach.i18n :refer [t]]
             [coach.metrics :as m]
             [coach.plan-rules :as rules]
@@ -13,6 +14,27 @@
 
 (defn- run? [a] (re-find #"running" (str (:sport a))))
 
+;; Menstrual cycle (planner/cycle-rules): symptoms soften a hard day; irregular cycles are a flag, not a diagnosis.
+(defn- cycle-signals [today monday {:keys [log flags]} workouts]
+  (let [recent (filter #(>= (compare (:date %) (season/add-days today -1)) 0) log)
+        worst  (reduce max 0 (map cycle/severity recent))
+        hard   (filter #(and (= "planned" (:status %)) (rules/key-session? %)
+                             (<= 0 (compare (:date %) today)) (<= (compare (:date %) (season/add-days today 2)) 0))
+                       workouts)]
+    (concat
+     (when (and (>= worst 2) (seq hard))
+       [{:key (str "cycle-symptoms:" today) :id :cycle-symptoms :severity :info :trigger? true
+         :principle "Menstrual cycle"
+         :message (t "Moderate or severe cycle symptoms logged: soften or move the hard session in the next 2 days if you don't feel up to it")}])
+     (when (some #{:missed-period :irregular :infrequent :short-cycles :prolonged} flags)
+       [{:key (str "cycle-irregular:" monday) :id :cycle-irregular :severity :warn :trigger? false
+         :principle "Menstrual cycle"
+         :message (t "Your periods have been missing or irregular: low energy availability can be a cause (REDs), worth talking to a doctor")}])
+     (when (some #{:heavy-bleeding} flags)
+       [{:key (str "cycle-heavy:" monday) :id :cycle-heavy :severity :info :trigger? false
+         :principle "Menstrual cycle"
+         :message (t "Heavy bleeding in your recent periods: iron deficiency is common then, consider a ferritin check with your doctor")}]))))
+
 (defn signals
   "All current signals. Each is {:key :id :severity (:info :warn :high)
   :trigger? :message :principle}. `key` is stable per occurrence, so the same
@@ -21,8 +43,9 @@
           :wellness (last 3 days, oldest first) :workouts (this + next week,
           with status) :tsb :phase (season plan, or nil)
           :settings (the athlete's thresholds: :steady_hr :rhr_high, athlete.md: Baselines; a
-          signal without its threshold is skipped)}"
-  [{:keys [today acts wellness workouts tsb settings]}]
+          signal without its threshold is skipped)
+          :cycle {:log (the last days' cycle log rows) :flags (coach.cycle/flags)}, only when cycle tracking is on}"
+  [{:keys [today acts wellness workouts tsb settings cycle]}]
   (let [monday    (season/monday today)
         week-acts (filter #(<= (compare monday (:date %)) 0) acts)
         planned-by-act (into {} (keep #(when (:activity_id %) [(:activity_id %) %])) workouts)
@@ -108,6 +131,7 @@
         [{:key (str "ef-up:" monday) :id :fitter :severity :info :trigger? false :principle "Zones"
           :message (t "Efficiency on easy runs is up {0}% vs the 3 weeks before: paces may need recalibrating"
                       (format "%.0f" (* 100 (- (/ ef-now ef-before) 1))))}])
+      (cycle-signals today monday cycle workouts)
       (when (and tsb (< tsb -30))
         [{:key (str "tsb:" today) :id :deep-fatigue :severity :info :trigger? false :principle "trend"
           :message (t "Form (TSB) is {0}: recorded load is high" (Math/round (double tsb)))}])))))

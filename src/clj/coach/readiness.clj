@@ -16,8 +16,12 @@
   :rhr :sleep_s :sleep_score :readiness :body_battery_high; :readiness_estimated when
   :readiness is the app's estimate). `workouts` are
   today's planned workouts. `settings` are the athlete's thresholds (:hrv_low :rhr_high, athlete.md: Baselines);
-  a check without its threshold is skipped."
-  [days workouts {:keys [hrv_low rhr_high]}]
+  a check without its threshold is skipped. `cycle` is the phase (keyword), or {:phase :cycles :hrv_delta :rhr_delta}
+  with her own usual shift in it, when the athlete tracks their cycle: in the luteal phase HRV falls and
+  resting HR rises a little (BMJ Open SEM 2021), so one of the two alone is noted as likely cycle-related and
+  changes nothing, unless three cycles show that her luteal phase usually doesn't shift her numbers."
+  ([days workouts settings] (check days workouts settings nil))
+  ([days workouts {:keys [hrv_low rhr_high]} cycle]
   (let [t        (last days)
         hrv      (:hrv_avg t)
         rhr      (:rhr t)
@@ -39,10 +43,19 @@
                                              (:readiness t))
                                      (i18n/t "Training readiness {0} is below 30" (:readiness t))))
                    bb-bad    (conj (i18n/t "Body battery {0} this morning is below 30" (:body_battery_high t))))
+        {:keys [phase cycles hrv_delta rhr_delta]} (if (map? cycle) cycle {:phase cycle})
+        no-shift? (and (>= (or cycles 0) 3) (some? hrv_delta) (> hrv_delta -1) (< (or rhr_delta 0) 1))
+        luteal?  (and (#{:luteal :late-luteal} phase) (not no-shift?))
+        ;; one vital low in the luteal phase, nothing else wrong: the usual shift, not fatigue
+        explained? (and luteal? (not= (boolean hrv-bad) (boolean rhr-bad))
+                        (not (or unbal sleep-bad ready-bad bb-bad)))
+        signals  (cond-> signals
+                   explained? (conj (i18n/t "Luteal phase: HRV tends to be lower and resting HR higher now, likely cycle-related")))
         rest?    (and hrv-bad rhr-bad)
-        no-key?  (or hrv-bad rhr-bad unbal ready-bad bb-bad)]
+        no-key?  (and (not explained?) (or hrv-bad rhr-bad unbal ready-bad bb-bad))
+        hrv-bad  (and hrv-bad (not explained?))]
     {:signals signals
-     :level   (cond rest? :rest (seq signals) :adjust :else :ok)
+     :level   (cond rest? :rest explained? :ok (seq signals) :adjust :else :ok)
      :changes (vec
                (for [w workouts
                      :let [key? (rules/key-session? w)
@@ -56,4 +69,4 @@
                      :when (or (and to (not= to (:session_id w))) move)]
                  (cond-> {:workout_id (:id w) :from (:session_id w)}
                    (and to (not= to (:session_id w))) (assoc :to to)
-                   move (assoc :slot "PM"))))}))
+                   move (assoc :slot "PM"))))})))
