@@ -1,10 +1,13 @@
 (ns coach.cycle-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [coach.adapt :as adapt]
+            [coach.claude :as claude]
             [coach.cycle :as cycle]
             [coach.cycle-data :as cd]
             [coach.db :as db]
             [coach.garmin-mcp :as gm]
+            [coach.planner :as planner]
             [coach.readiness :as readiness]
             [coach.season]))
 
@@ -292,3 +295,14 @@
     (is (= :ok (:level (readiness/check days [] s {:phase :luteal :cycles 4 :hrv_delta -5 :rhr_delta 2}))))
     (is (= :adjust (:level (readiness/check days [] s {:phase :luteal :cycles 4 :hrv_delta 0.2 :rhr_delta 0})))
         "three cycles show her luteal phase doesn't shift her HRV: not explained away")))
+
+(deftest planner-evidence-test
+  (with-redefs [claude/principles (constantly "principles")]
+    (let [evidence (claude/doc-text claude/cycle-file)
+          system   #(:system (planner/claude-opts % {}))]
+      (is (seq evidence) "cycle-science.md is there")
+      (is (str/includes? (system "{\"menstrual_cycle\":{}}") evidence)
+          "a woman who tracks her cycle: the planner reads the cycle rules and the evidence")
+      (is (str/includes? (system "{\"menstrual_cycle\":{}}") "Menstrual cycle evidence"))
+      (is (not (str/includes? (system "{\"week\":1}") "Menstrual cycle"))
+          "everyone else: neither, so their requests cost nothing extra"))))

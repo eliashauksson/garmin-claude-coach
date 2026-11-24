@@ -129,7 +129,9 @@ api starts garmin-mcp via `requiring-resolve` in `run-job!`; the frontend requir
 
 ## Don't read unless needed
 i18n_de.cljc, i18n_fr.cljc (~1000 lines each), resources/public/css/app.css, docs/style.md, package-lock.json.
-Specs by path: coach-dashboard-spec.md (dashboard), training-principles.md (coaching rules the planner/rules cite), garmin-coach-plan.md (original project plan).
+Specs by path: coach-dashboard-spec.md (dashboard), training-principles.md (coaching rules the planner/rules cite),
+cycle-science.md (menstrual cycle evidence, added to the planner's prompt with `cycle-rules` only for a woman who tracks; full
+report in reports/Menstrual cycle sport science.md, notes in research_notes/), garmin-coach-plan.md (original project plan).
 
 ## Conventions
 - `!` suffix for side effects (`start!`, `save!`, `daily!`, `incremental!`); pure namespaces say "Pure" in the ns docstring and are listed in the `pure` ns-group of .clj-kondo/config.edn (lint rejects db/files/network/Claude requires there)

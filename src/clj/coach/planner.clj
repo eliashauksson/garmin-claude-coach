@@ -271,7 +271,8 @@ distance_km 0 when distance doesn't apply. Keep the text short - the athlete rea
 
 (def cycle-rules
   "Added to the instructions only when the data has a menstrual_cycle block (the athlete tracks her cycle).
-  Evidence: McNulty 2020, Colenso-Semple 2023, Kubica 2024 (no benefit from phase-based training), HRV/RHR by phase
+  Evidence (cycle-science.md): McNulty 2020, Colenso-Semple 2023, Bangsbo 2025 (no benefit from phase-based
+  training), HRV/RHR by phase
   (BMJ Open SEM 2021), IOC REDs consensus 2023."
   "
 
@@ -296,12 +297,18 @@ Menstrual cycle (heading \"Menstrual cycle\"): the data has `menstrual_cycle` be
   the reason); if not, ignore them and don't invent a pattern.
 - Mention the cycle in a session's reason only when it changed the plan.")
 
+(defn- cycle-system
+  "`cycle-rules` plus the evidence in cycle-science.md (claude/cycle-file)."
+  []
+  (str cycle-rules "\n\n# Menstrual cycle evidence (read-only)\n\n"
+       (claude/doc-text claude/cycle-file)))
+
 (defn claude-opts
-  "The planner's request options: the shared knowledge, then the planner's
-  instructions (plus `cycle-rules` when the data has a cycle block), then the data in one user turn."
+  "The planner's request options: the shared knowledge, then the planner's instructions (plus `cycle-rules` and
+  cycle-science.md when the data has a cycle block: a woman who tracks her cycle), then the data in one user turn."
   [user-text schema & [log-opts]]
   (merge {:knowledge (claude/principles)
-          :system (cond-> system-intro (str/includes? user-text "\"menstrual_cycle\"") (str cycle-rules))
+          :system (cond-> system-intro (str/includes? user-text "\"menstrual_cycle\"") (str (cycle-system)))
           :messages [[:user user-text]] :schema schema}
          log-opts))
 

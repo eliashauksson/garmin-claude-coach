@@ -26,7 +26,8 @@
   (clean nil)
   (let [basis (b/create-basis {:project "deps.edn"})]
     (b/copy-dir {:src-dirs ["src/clj" "src/cljc" "resources"] :target-dir class-dir})
-    (b/copy-file {:src "training-principles.md" :target (str class-dir "/training-principles.md")})
+    (doseq [doc ["training-principles.md" "cycle-science.md"]]
+      (b/copy-file {:src doc :target (str class-dir "/" doc)}))
     (b/write-file {:path (str class-dir "/coach/version.txt") :string (version)})
     ;; compiled ahead of time, so the app starts in seconds
     (b/compile-clj {:basis basis :ns-compile '[coach.api coach.sync coach.backup coach.auth coach.garmin-mcp]

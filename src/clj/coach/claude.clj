@@ -30,13 +30,19 @@
 
 (def general-file "training-principles.md")
 
-(defn- general-text
-  "training-principles.md from the project folder, else the copy inside the
+(def cycle-file
+  "The menstrual cycle evidence the planner reads when the athlete tracks her cycle (planner/claude-opts)."
+  "cycle-science.md")
+
+(defn doc-text
+  "A read-only knowledge file (`general-file`, `cycle-file`) from the project folder, else the copy inside the
   installed app's jar."
-  []
-  (let [f (paths/app-file general-file)]
-    (slurp (if (.exists f) f (or (io/resource general-file)
-                                 (throw (ex-info "training-principles.md is missing" {})))))))
+  [file]
+  (let [f (paths/app-file file)]
+    (slurp (if (.exists f) f (or (io/resource file)
+                                 (throw (ex-info (str file " is missing") {:file file})))))))
+
+(defn- general-text [] (doc-text general-file))
 
 (defn knowledge
   "The first system block of every Claude request: the general principles and
