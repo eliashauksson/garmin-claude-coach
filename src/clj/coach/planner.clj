@@ -297,7 +297,7 @@ Menstrual cycle (heading \"Menstrual cycle\"): the data has `menstrual_cycle` be
   the reason); if not, ignore them and don't invent a pattern.
 - Mention the cycle in a session's reason only when it changed the plan.")
 
-(defn- cycle-system
+(defn cycle-system
   "`cycle-rules` plus the evidence in cycle-science.md (claude/cycle-file)."
   []
   (str cycle-rules "\n\n# Menstrual cycle evidence (read-only)\n\n"

@@ -1084,10 +1084,15 @@ details.peak > summary .sp { flex: 1; }
 .cal-cycle.logged::after { content: "•"; margin-left: 4px; }
 .cycle-log a.sub { display: block; margin-top: 8px; }
 
-/* The coach's note after a workout */
+/* Ask the coach and the coach's note after a workout */
+.ask-coach { gap: 8px; padding: 4px 12px 4px 4px; }
+.ask-coach .ic { width: 22px; height: 22px; }
+.ask-coach .ic svg { width: 13px; height: 13px; }
 .debrief-card { display: flex; flex-direction: column; gap: 8px; }
 .debrief-card p { margin: 0; }
 .debrief-take { font-weight: 700; font-size: 15px; }
 .debrief-text { line-height: 1.5; color: var(--text); }
 .debrief-card .typing { display: inline-flex; align-items: center; color: var(--text-2); }
 .debrief-card button.pill { align-self: flex-start; }
+.athlete-chat .pills { gap: 8px; }
+.athlete-chat .athlete-proposal .sub { white-space: pre-wrap; }

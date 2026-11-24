@@ -49,6 +49,8 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - plan-rules: pure checks of a week against training-principles.md (warnings only)
 - season: date helpers + week position in the season · season-plan: Claude drafts every week to race day
 - plan: storage for weeks, proposals and accepted workouts · planner: Claude week proposals, adjustments, session structure
+- coach-chat: Ask the coach (`#/coach`, `POST /api/coach/chat`): answers from the planner's context + signals + notes; it never changes the plan, it only
+  returns an `adjust_note` the athlete can send to the normal adjustment (review/accept on the Plan page)
 - debrief: the coach's short note per workout (`activity_debriefs`; half-price batch after each sync via `jobs/notes-soon!`, instant on a click or
   `POST /api/activities/:id/debrief`); shown on the activity page and Today, its takeaway goes into the planner context as `:coach_note`
 - claude: every Claude call (`request`, half-price batches), API key, shared system prompt (`knowledge`/`principles`)

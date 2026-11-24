@@ -53,12 +53,9 @@
            [:span.sub (if summary_error (t "The summary failed: {0}" summary_error) (t "No summary yet."))]
            [:button.pill {:on {:click [[:athlete-summary]]}} (t "Try again")]]))
 
-(defn- chat-block [{:keys [messages input busy? proposal error cost]}]
+(defn- chat-block [{:keys [proposal cost] :as chat}]
   [:div.athlete-chat
-   (for [[i {:keys [role text]}] (map-indexed vector messages)]
-     [:div.msg {:replicant/key i :class role} text])
-   (when busy? [:div.msg.assistant.typing [:span.spinner] (t "Claude is thinking…")])
-   (when error [:div.error error])
+   (ui/chat-thread chat)
    (when proposal
      [:div.athlete-proposal
       [:b (t "Proposed changes")]
@@ -74,11 +71,8 @@
         (t "Apply changes")]
        [:span.sub (t "Nothing changes until you apply. The current version is backed up.")]]])
    [:div.plan-footer
-    [:input.note {:type "text" :placeholder (t "e.g. My LTHR is now 176 bpm")
-                  :value (or input "") :disabled busy?
-                  :on {:input [[:set-in-ui :athlete :chat :input :event/target-value]]
-                       :keydown [[:athlete-chat-key]]}}]
-    [:button.btn-ink {:disabled (or busy? (str/blank? input)) :on {:click [[:athlete-chat-send]]}} (t "Send")]
+    (ui/chat-input chat {:ui-path [:athlete :chat] :placeholder (t "e.g. My LTHR is now 176 bpm")
+                         :send [:athlete-chat-send] :on-key [:athlete-chat-key]})
     [:button.pill {:on {:click [[:set-ui :athlete nil]]}} (t "Close")]]
    (when cost [:div.sub (t "This chat so far: about CHF {0}" (.toFixed cost 3))])])
 

@@ -132,6 +132,8 @@
       [:div.title
        [:div.eyebrow (eyebrow-date today)]
        [:h1 "Coach"]]
+      [:a.pill.ask-coach {:href "#/coach"}
+       (ui/icon-chip :chat "--blue" "--tint-blue" {:soft? true}) (t "Ask the coach")]
       (status/auth-pill (:auth sync))
       (status/sync-button sync)]
      (setup-card sync)

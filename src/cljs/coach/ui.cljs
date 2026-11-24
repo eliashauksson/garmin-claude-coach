@@ -266,6 +266,29 @@
    [:span.sp]
    right])
 
+(defn chat-thread
+  "A chat's messages ({:role \"user\"|\"assistant\" :text}), a note while Claude is answering and the
+  error, if any. The athlete chat and Ask the coach share it (CSS: .athlete-chat)."
+  [{:keys [messages busy? error]}]
+  (list
+   (for [[i {:keys [role text]}] (map-indexed vector messages)]
+     [:div.msg {:replicant/key i :class role} text])
+   (when busy? [:div.msg.assistant.typing {:replicant/key "typing"} [:span.spinner] (t "Claude is thinking…")])
+   (when error [:div.error {:replicant/key "error"} error])))
+
+(defn chat-input
+  "The message field and its Send button. `chat` is the chat's state ({:input :busy?}); `ui-path` where
+  it lives under the ui state (e.g. [:athlete :chat]); `send` and `on-key` are the actions that send it
+  (a click, an Enter keydown)."
+  [{:keys [input busy?]} {:keys [ui-path placeholder send on-key]}]
+  (list
+   [:input.note {:replicant/key "input" :type "text" :placeholder placeholder
+                 :value (or input "") :disabled busy?
+                 :on {:input [(into [:set-in-ui] (concat ui-path [:input :event/target-value]))]
+                      :keydown [on-key]}}]
+   [:button.btn-ink {:replicant/key "send" :disabled (or busy? (str/blank? input)) :on {:click [send]}}
+    (t "Send")]))
+
 (defn back-link
   "\"← More\": the way back from a page opened from the More tab."
   []

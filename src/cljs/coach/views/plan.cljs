@@ -278,6 +278,7 @@
   [route]
   [:div.page-head.plan-head
    [:div.title [:h1 (t "Plan")]]
+   [:a.pill.ask-coach {:href "#/coach"} (ui/icon-chip :chat "--blue" "--tint-blue" {:soft? true}) (t "Ask the coach")]
    (ui/seg (view-of route) views [:set-param :view] {:big? true})])
 
 (defn view

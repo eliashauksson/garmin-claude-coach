@@ -51,6 +51,9 @@
    {:id "adjust"          :label (tk "Plan adjustments") :model "claude-opus-5-5" :effort "high"
     :about (tk "Changes to the next two weeks after signals or a note.")
     :why   (tk "Reacts to pain, illness and fatigue - the riskiest calls. Short answers, so high costs little.")}
+   {:id "coach_chat"      :label (tk "Ask the coach")    :model "claude-sonnet-5-5" :effort "medium"
+    :about (tk "Your questions about your training, answered from your data.")
+    :why   (tk "Reads a lot of data and answers in a few sentences; Sonnet does this at half Opus's price, and plan changes still go through Plan adjustments.")}
    {:id "debrief"         :label (tk "Coach's notes")    :model "claude-sonnet-5-5" :effort "low"
     :about (tk "A short note after each workout: planned vs done and what it means for the week.")
     :why   (tk "Short, frequent and read at a glance; Sonnet at low effort is enough, and after a sync it goes through the half-price batch.")}

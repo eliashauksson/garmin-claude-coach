@@ -16,6 +16,7 @@
             [coach.auth :as auth]
             [coach.backup :as backup]
             [coach.claude :as claude]
+            [coach.coach-chat :as coach-chat]
             [coach.context :as context]
             [coach.coros-auth :as coros-auth]
             [coach.costs :as costs]
@@ -400,6 +401,14 @@
     ["/peak-bags/:id" {:delete (guarded (fn [{:keys [path-params]}]
                                            (peaks/unbag! ds (parse-long (:id path-params)))
                                            (ok (peaks/summary ds))))}]
+    ;; Ask the coach: answers from the athlete's data; a plan change is only offered (adjust_note)
+    ["/coach/chat"
+     {:post (guarded (fn [req]
+                       (claude/api-key)
+                       (try (ok (coach-chat/chat ds (:messages (body req))))
+                            (catch clojure.lang.ExceptionInfo e (throw e))
+                            (catch Exception e
+                              (json-response 502 {:error (str "Claude request failed: " (ex-message e))})))))}]
     ;; the newest coach's note from the last two days, for Today
     ["/debrief/latest"
      {:get (fn [_] (ok (debrief/latest ds (season/today) 2)))}]

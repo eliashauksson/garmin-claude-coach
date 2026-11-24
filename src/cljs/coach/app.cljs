@@ -6,6 +6,7 @@
             [coach.views.activity :as activity]
             [coach.views.athlete :as athlete]
             [coach.views.calendar :as calendar]
+            [coach.views.coach :as coach]
             [coach.views.costs :as costs]
             [coach.views.day :as day]
             [coach.views.heatmap :as heatmap]
@@ -48,6 +49,7 @@
       "trends"     {:page :trends :params params}
       "more"       {:page :more :params {}}
       "athlete"    {:page :athlete :params {}}
+      "coach"      {:page :coach :params {}}
       "day"        {:page :day :date (second segs)}
       "settings"   {:page :settings :params params}
       "metrics"    {:page :metrics :params params}
@@ -208,24 +210,58 @@
       (.then (fn [res] (.then (.json res) #(if (.-ok res) (js->clj % :keywordize-keys true)
                                                 (throw (js/Error. (.-error %)))))))))
 
-(defn send-athlete-chat! []
-  (let [path  [:ui :athlete :chat]
+(defn- send-chat!
+  "Sends the message typed in the chat at [:ui k :chat] to `url` with the conversation so far. `on-reply`
+  adds what else the reply carries ({:proposal} for the athlete chat, {:adjust_note} for Ask the coach)
+  to the chat's state: (on-reply chat reply) -> chat."
+  [k url on-reply]
+  (let [path  [:ui k :chat]
         {:keys [input messages busy?]} (get-in @state path)
         text  (str/trim (or input ""))]
     (when-not (or busy? (str/blank? text))
       (let [msgs (conj (vec messages) {:role "user" :text text})]
         (swap! state update-in path assoc :messages msgs :input "" :busy? true :error nil)
-        (-> (post-json (str athlete/url "/chat") {:messages msgs})
-            (.then (fn [{:keys [reply proposal usage]}]
+        (-> (post-json url {:messages msgs})
+            (.then (fn [{:keys [reply usage] :as r}]
                      (swap! state update-in path
-                            #(cond-> (-> % (assoc :busy? false)
-                                         (update :messages conj {:role "assistant" :text reply})
-                                         (update :cost (fnil + 0) (or (:cost_chf usage) 0)))
-                               proposal (assoc :proposal proposal)))))
+                            #(-> % (assoc :busy? false)
+                                 (update :messages conj {:role "assistant" :text reply})
+                                 (update :cost (fnil + 0) (or (:cost_chf usage) 0))
+                                 (on-reply r)))))
             (.catch (fn [e]
                       ;; give the message back so it can be sent again
                       (swap! state update-in path assoc :busy? false :messages messages :input text
                              :error (t "Error: {0}" (.-message e))))))))))
+
+(defn send-athlete-chat! []
+  (send-chat! :athlete (str athlete/url "/chat")
+              (fn [chat {:keys [proposal]}] (cond-> chat proposal (assoc :proposal proposal)))))
+
+(defn send-coach-chat! []
+  ;; a new question drops the previous offer of a plan change
+  (send-chat! :coach "/api/coach/chat" (fn [chat {:keys [adjust_note]}] (assoc chat :adjust adjust_note))))
+
+(defn- ask-coach!
+  "A starter question: typed into the chat and sent."
+  [[question]]
+  (swap! state assoc-in [:ui :coach :chat :input] question)
+  (send-coach-chat!))
+
+(defn- coach-adjust!
+  "The coach offered a plan change: asks for the usual adjustment with its note, then shows the Plan
+  page, where the proposal is reviewed. Nothing changes until it is accepted there."
+  [_]
+  (let [path [:ui :coach :chat]
+        note (get-in @state (conj path :adjust))]
+    (swap! state update-in path assoc :adjusting? true :error nil)
+    (-> (post-json "/api/plan/adjust" {:note note})
+        (.then (fn [_]
+                 (swap! state (fn [s] (-> s (update :data select-keys [status/backup-url])
+                                          (update-in path assoc :adjusting? false :adjust nil))))
+                 (set! (.-hash js/location) "#/plan")))
+        (.catch (fn [e]
+                  (swap! state update-in path assoc :adjusting? false
+                         :error (t "Error: {0}" (.-message e))))))))
 
 (def max-upload-chars "Same limit as the server (coach.athlete/max-chars)." 200000)
 
@@ -598,6 +634,10 @@
    :set-lang          (fn [[lang]] (set-lang! lang))
    :athlete-chat-send (fn [_] (send-athlete-chat!))
    :athlete-chat-key  (on-enter (fn [_] (send-athlete-chat!)))
+   :coach-chat-send   (fn [_] (send-coach-chat!))
+   :coach-chat-key    (on-enter (fn [_] (send-coach-chat!)))
+   :coach-ask         ask-coach!
+   :coach-adjust      coach-adjust!
    :athlete-summary   (fn [_] (summarise-athlete!))
    :athlete-upload    (fn [[ev]] (read-athlete-file! ev))})
 
@@ -625,6 +665,7 @@
         (handle (cond
                   (= :event/target-value (last action)) (conj (vec (butlast action)) (.. ev -target -value))
                   (= :athlete-chat-key (first action))  [:athlete-chat-key ev]
+                  (= :coach-chat-key (first action))    [:coach-chat-key ev]
                   (= :square-key (first action))        [:square-key ev]
                   (= :garmin-login-key (first action))  [:garmin-login-key (second action) ev]
                   (= :restore-file (first action))      [:restore-file ev]
@@ -645,7 +686,11 @@
 
 (defn view [{:keys [route loading] :as s}]
   (let [page (:page route)
-        active (case page (:activity :day :workout) :plan (:metrics :settings :athlete :peaks) :more page)]
+        active (case page
+                 (:activity :day :workout) :plan
+                 :coach :today
+                 (:metrics :settings :athlete :peaks) :more
+                 page)]
     [:div.shell
      [:nav.side {:aria-label (t "Main")}
       [:div.brand [:span.logo] "Coach"]
@@ -670,6 +715,7 @@
         :today      (today/view s)
         :trends     (trends/view s)
         :athlete    (athlete/view s)
+        :coach      (coach/view s)
         :more       (more/view s)
         :settings   (settings/view s (theme-choice))
         :metrics    (metrics/view s)
