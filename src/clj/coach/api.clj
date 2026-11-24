@@ -418,7 +418,6 @@
     ["/activities/:id/feedback"
      {:put (guarded (fn [{:keys [path-params] :as req}]
                       (analysis/save-feedback! ds (parse-long (:id path-params)) (body req))
-                      (debrief/after-feedback! ds (parse-long (:id path-params))) ; its coach's note, if due
                       (ok (analysis/activity ds (parse-long (:id path-params))))))}]
     ;; the coach's note on request (also the retry of a failed one); the page polls the activity
     ["/activities/:id/debrief"

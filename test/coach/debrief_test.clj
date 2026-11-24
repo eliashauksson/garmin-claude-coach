@@ -17,12 +17,11 @@
   (merge {:id id :date date :sport "running" :moving_s 2700 :start_time_local (str date "T07:00:00")} m))
 
 (deftest due-test
-  (let [acts [(act 1 "2027-01-14" :feedback_at "2027-01-14T09:00:00Z") ; today, rated
-              (act 2 "2027-01-14")                                      ; today, not rated yet: waits
-              (act 3 "2027-01-13")                                      ; yesterday, not rated: day is over
-              (act 4 "2027-01-13" :moving_s 120)                        ; too short
-              (act 5 "2027-01-12" :feedback_at "x")                     ; already has a row
-              (act 6 "2027-01-10" :feedback_at "x")]                    ; out of the window
+  (let [acts [(act 1 "2027-01-14")                      ; today, not rated: no waiting for the rating
+              (act 3 "2027-01-13")                      ; yesterday
+              (act 4 "2027-01-13" :moving_s 120)        ; too short
+              (act 5 "2027-01-12" :feedback_at "x")     ; already has a row
+              (act 6 "2027-01-10" :feedback_at "x")]    ; out of the window
         due  (debrief/due-from acts #{5} today)]
     (is (= [3 1] (map :id due)) "oldest first")
     (testing "a note exists for a failed one too: no retry on every sync"

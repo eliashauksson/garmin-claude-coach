@@ -23,18 +23,20 @@
 (def system-intro
   "You write the coach's note after one workout. The athlete's data for it is in the user turn: the
 activity, the planned session it fulfilled (goal and blocks, planned vs actual per step), how the athlete
-rated it, the week so far and the current load and readiness.
+rated it (often not yet: the note is written when the workout syncs), the week so
+far and the current load and readiness.
 
 How to write:
-- `text`: 2-4 short sentences, plain words, to the athlete (\"you\"). Say what went well or off against the
-  plan or, with no plan, against the training principles, then what it means for the next days.
+- `text`: at most 2 short sentences (under 40 words), plain words, to the athlete (\"you\"). Say what
+  mattered most against the plan or, with no plan, against the training principles, and what it means for
+  the next days. Skip anything that went as planned.
   Use only numbers that are in the data. Never praise by habit and never invent a cause.
 - Pain or an RPE far above what the session called for comes first: say what to watch and, if it
   is more than a passing ache, to see a doctor or physio. Don't diagnose.
 - No planned session: just describe the effort and its place in the week.
 - You change nothing in the plan. If the plan should change, say so in one sentence (the athlete
   can ask for an adjustment).
-- `takeaway`: at most 10 words, the one thing to remember (shown on the dashboard).")
+- `takeaway`: at most 8 words, the one thing to remember (shown on the dashboard).")
 
 (def schema
   {"type" "object"
@@ -161,15 +163,13 @@ How to write:
 
 (defn due-from
   "The activities that should get a note now: from the last `window-days` days, long enough, with no note
-  row yet (a failed one is retried by the athlete, not on every sync), and either rated by the athlete
-  (rating or skipping) or from an earlier day, so a note waits for the rating only until the day is over.
+  row yet (a failed one is retried by the athlete, not on every sync). It doesn't wait for the rating.
   `acts` as from coach.analysis/activities, `have` the ids with a row."
   [acts have today]
   (->> acts
        (remove #(have (:id %)))
        (filter #(>= (compare (:date %) (season/add-days today (- (dec window-days)))) 0))
        (filter #(>= (analysis/active-secs %) min-active-s))
-       (filter #(or (:feedback_at %) (neg? (compare (:date %) today))))
        (sort-by :start_time_local)
        vec))
 
@@ -246,11 +246,6 @@ How to write:
   "Notes for the activities that are due, started in the background (a sync doesn't wait for Claude)."
   [ds]
   (queue-soon! ds (due ds (season/today))))
-
-(defn after-feedback!
-  "The athlete just rated activity `id`: its note is due now if it has none yet."
-  [ds id]
-  (queue-soon! ds (filter #(= id (:id %)) (due ds (season/today)))))
 
 (defn write-soon!
   "A note on request, for any activity (the \"Write a coach's note\" button and its retry): instant, in
