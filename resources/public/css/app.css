@@ -1083,3 +1083,11 @@ details.peak > summary .sp { flex: 1; }
 .log-group .pill.pain-on { border-color: var(--red); }
 .cal-cycle.logged::after { content: "•"; margin-left: 4px; }
 .cycle-log a.sub { display: block; margin-top: 8px; }
+
+/* The coach's note after a workout */
+.debrief-card { display: flex; flex-direction: column; gap: 8px; }
+.debrief-card p { margin: 0; }
+.debrief-take { font-weight: 700; font-size: 15px; }
+.debrief-text { line-height: 1.5; color: var(--text); }
+.debrief-card .typing { display: inline-flex; align-items: center; color: var(--text-2); }
+.debrief-card button.pill { align-self: flex-start; }

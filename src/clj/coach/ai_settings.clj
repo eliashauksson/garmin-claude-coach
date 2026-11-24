@@ -35,7 +35,7 @@
 (def batchable
   "Tasks that can go through the batch. Chat and the summary are always
   instant: someone is waiting for them."
-  #{"season_plan" "week_plan" "adjust"})
+  #{"season_plan" "week_plan" "adjust" "debrief"})
 
 (def tasks
   "Every task that calls Claude, with the recommended model and effort (the
@@ -51,6 +51,9 @@
    {:id "adjust"          :label (tk "Plan adjustments") :model "claude-opus-5-5" :effort "high"
     :about (tk "Changes to the next two weeks after signals or a note.")
     :why   (tk "Reacts to pain, illness and fatigue - the riskiest calls. Short answers, so high costs little.")}
+   {:id "debrief"         :label (tk "Coach's notes")    :model "claude-sonnet-5-5" :effort "low"
+    :about (tk "A short note after each workout: planned vs done and what it means for the week.")
+    :why   (tk "Short, frequent and read at a glance; Sonnet at low effort is enough, and after a sync it goes through the half-price batch.")}
    {:id "athlete_chat"    :label (tk "Athlete chat")     :model "claude-sonnet-5-5" :effort "low"
     :about (tk "Editing the athlete document by chat.")
     :why   (tk "Careful text edits you review before saving; Sonnet does this well at half Opus's price.")}

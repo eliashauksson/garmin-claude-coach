@@ -3,6 +3,7 @@
             [coach.charts :as c]
             [coach.i18n :refer [t tk]]
             [coach.ui :as ui]
+            [coach.views.debrief :as debrief]
             [coach.views.feedback :as feedback]
             [coach.views.structure :as st]
             [coach.workout :as w]))
@@ -256,6 +257,7 @@
          [:div.sub (str (ui/sport-label (:sport a)) " · " (ui/date-long (:date a))
                               (some->> (ui/time-of (:start_time_local a)) (str " · ")))]]
         [:div {:replicant/key "tiles"} (tile-row a run?)]
+        (debrief/activity-card a)
         (feedback/activity-card ui-state a)
         (when-let [p (:planned a)] (planned-section p s))
         (when (seq pts)

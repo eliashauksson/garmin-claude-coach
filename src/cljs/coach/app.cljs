@@ -98,8 +98,10 @@
                        before (get-in @state [:data url])]
                    (swap! state #(-> % (assoc-in [:data url] data)
                                      (update :loading disj url) (update :errors dissoc url)))
-                   ;; a proposal or the athlete summary is being generated: check again shortly
-                   (if (or (= "running" (:status data)) (:summarising data))
+                   ;; a proposal, the athlete summary or an activity's coach's note is being generated:
+                   ;; check again shortly
+                   (if (or (= "running" (:status data)) (:summarising data)
+                           (= "pending" (get-in data [:debrief :status])))
                      (js/setTimeout #(fetch! url {:force true}) 4000)
                      ;; it just finished: it may have started more work (a finished season
                      ;; plan starts the week proposals), so reload the page's data

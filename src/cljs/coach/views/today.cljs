@@ -12,6 +12,7 @@
             [coach.views.dashboard.detail :as detail]
             [coach.views.dashboard.morning :as morning]
             [coach.views.dashboard.week :as week]
+            [coach.views.debrief :as debrief]
             [coach.views.feedback :as feedback]
             [coach.views.load :as load]
             [coach.views.status :as status]))
@@ -21,11 +22,12 @@
 (defn urls
   "The overview, the training load's (the week card needs its daily TSS), the
   activities waiting for \"How did it go?\", today's readiness check, this
-  week's plan, then the open card's history."
+  week's plan, the coach's newest note, then the open card's history."
   [route]
   (let [vital (get-in route [:params :vital])
         trend (detail/url vital (detail/range-of route))]
-    (cond-> [url (first (load/urls route)) feedback/due-url week/readiness-url (week/plan-url)]
+    (cond-> [url (first (load/urls route)) feedback/due-url week/readiness-url (week/plan-url)
+             debrief/latest-url]
       trend (conj trend))))
 
 ;; Garmin's enums as shown (ui/enum); listed so each has a translation.
@@ -121,7 +123,7 @@
     [:div.skel {:style {:flex "1 1 360px" :height "300px"}}]]])
 
 (defn view [{:keys [data errors sync route] ui-state :ui :as s}]
-  (let [[ov-url load-url due-url check-url plan-url] (urls route)
+  (let [[ov-url load-url due-url check-url plan-url note-url] (urls route)
         d     (get data ov-url)
         plan  (get data plan-url)
         today (or (:date d) (ui/iso-today))]
@@ -143,6 +145,7 @@
         [:div.morning {:replicant/key "morning"}
          (morning/readiness-card (:readiness d))
          (morning/vitals-grid d)]
+        (debrief/today-card (get data note-url))
         (feedback/due-card ui-state (get data due-url))
         (when plan (week/week-card plan d (get data load-url) today))
         (week/last-activity-card d)))

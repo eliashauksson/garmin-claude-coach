@@ -21,6 +21,7 @@
             [coach.costs :as costs]
             [coach.cycle-data :as cycle-data]
             [coach.db :as db]
+            [coach.debrief :as debrief]
             [coach.i18n :as i18n]
             [coach.overview :as overview]
             [coach.paths :as paths]
@@ -399,13 +400,26 @@
     ["/peak-bags/:id" {:delete (guarded (fn [{:keys [path-params]}]
                                            (peaks/unbag! ds (parse-long (:id path-params)))
                                            (ok (peaks/summary ds))))}]
+    ;; the newest coach's note from the last two days, for Today
+    ["/debrief/latest"
+     {:get (fn [_] (ok (debrief/latest ds (season/today) 2)))}]
     ;; recent activities waiting for "How did it go?"
     ["/feedback/due"
      {:get (fn [{:keys [query-params]}] (ok (analysis/feedback-due ds (get query-params "date" (season/today)))))}]
     ["/activities/:id/feedback"
      {:put (guarded (fn [{:keys [path-params] :as req}]
                       (analysis/save-feedback! ds (parse-long (:id path-params)) (body req))
+                      (debrief/after-feedback! ds (parse-long (:id path-params))) ; its coach's note, if due
                       (ok (analysis/activity ds (parse-long (:id path-params))))))}]
+    ;; the coach's note on request (also the retry of a failed one); the page polls the activity
+    ["/activities/:id/debrief"
+     {:post (guarded (fn [{:keys [path-params]}]
+                       (claude/api-key)
+                       (let [id (parse-long (:id path-params))]
+                         (if-let [a (analysis/activity ds id)]
+                           (do (debrief/write-soon! ds a)
+                               (ok {:debrief (debrief/shown ds id)}))
+                           (json-response 404 {:error "not found"})))))}]
     ["/activities/:id"
      {:get (fn [{:keys [path-params query-params]}]
              (let [id (parse-long (:id path-params))]
@@ -415,6 +429,8 @@
                        (= "true" (get query-params "streams")) (assoc :streams (first (analysis/stream-with-hr ds a)))
                        ;; the peaks its track passed
                        true (assoc :summits (peaks/activity-summits ds id))
+                       ;; the coach's note after it (coach.debrief)
+                       true (assoc :debrief (debrief/shown ds id))
                        ;; the planned session it fulfilled, in the current language
                        true (assoc :planned (some->> (plan/planned-for-activity ds a)
                                                      (translate/localize ds @i18n/lang)))))

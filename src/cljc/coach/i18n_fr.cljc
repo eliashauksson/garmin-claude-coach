@@ -1758,4 +1758,12 @@
    "Forgot a day? Open it in the calendar" "Un jour oublié ? Ouvre-le dans le calendrier"
    "Has your period stopped? Mark the last day in Log today." "Tes règles sont terminées ? Note le dernier jour dans « Noter aujourd'hui »."
    "You can't log a day in the future." "Tu ne peux pas noter un jour dans le futur."
+   "A few sentences on how this workout went against the plan and what it means for the week." "Quelques phrases sur le déroulement de cette séance par rapport au plan et ce que cela signifie pour la semaine."
+   "A short note after each workout: planned vs done and what it means for the week." "Une courte note après chaque séance : prévu et réalisé, et ce que cela signifie pour la semaine."
+   "Coach's note" "Note du coach"
+   "Coach's notes" "Notes du coach"
+   "Short, frequent and read at a glance; Sonnet at low effort is enough, and after a sync it goes through the half-price batch." "Court, fréquent et lu d'un coup d'œil ; Sonnet à faible effort suffit, et après une synchronisation il passe par le lot à moitié prix."
+   "The coach is writing a note…" "Le coach écrit une note…"
+   "The note could not be written: {0}" "La note n'a pas pu être écrite : {0}"
+   "Write a coach's note" "Écrire une note du coach"
 })

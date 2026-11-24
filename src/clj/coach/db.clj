@@ -174,6 +174,15 @@
       pain_location TEXT,
       note          TEXT,
       updated_at    TEXT NOT NULL)"
+   ;; the coach's short note after a workout (coach.debrief); status pending | done | failed
+   "CREATE TABLE IF NOT EXISTS activity_debriefs (
+      activity_id INTEGER PRIMARY KEY,
+      status      TEXT NOT NULL,
+      text        TEXT,
+      takeaway    TEXT,
+      model       TEXT,
+      error       TEXT,
+      updated_at  TEXT NOT NULL)"
    "CREATE TABLE IF NOT EXISTS adapt_signals (
       key         TEXT PRIMARY KEY,
       proposal_id INTEGER,

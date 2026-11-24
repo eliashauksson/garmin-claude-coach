@@ -64,7 +64,11 @@
                  (mapcat #(concat (response-texts (:response %)) (mapcat workout-texts (:items %))) props)
                  (mapcat workout-texts (db/query ds ["SELECT * FROM planned_workouts WHERE date >= ?"
                                                      (season/add-days today -14)]))
-                 (overview-texts (athlete/summary)))
+                 (overview-texts (athlete/summary))
+                 ;; the coach's notes after workouts (coach.debrief)
+                 (mapcat (juxt :text :takeaway)
+                         (db/query ds ["SELECT text, takeaway FROM activity_debriefs WHERE status = 'done'
+                                        ORDER BY updated_at DESC LIMIT 20"])))
          (filter translatable?)
          distinct
          vec)))

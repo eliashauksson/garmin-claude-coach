@@ -12,6 +12,7 @@
             [coach.costs :as costs]
             [coach.cycle-data :as cycle-data]
             [coach.db :as db]
+            [coach.debrief :as debrief]
             [coach.plan :as plan]
             [coach.plan-rules :as rules]
             [coach.season :as season]
@@ -71,7 +72,8 @@
         by-week (group-by #(season/monday (:date %)) acts)
         weeks   (for [i (range 6 0 -1) :let [m (season/add-days monday (* -7 i))]]
                   (week-summary m (by-week m)))
-        pmc     (last (analysis/pmc ds today today))]
+        pmc     (last (analysis/pmc ds today today))
+        notes   (debrief/takeaways ds (season/add-days today -14))]
     (cond->
      {:today            today
      :target_week      (plan/week-info ds monday)
@@ -85,7 +87,9 @@
                                 ;; how it went, in the athlete's words (coach.analysis/save-feedback!)
                                 (when-let [r (analysis/effective-rpe a)] {:rpe (Math/round (double r))})
                                 (when (pos? (or (:pain a) 0)) {:pain true :pain_location (:pain_location a)})
-                                (when (:note a) {:note (:note a)}))))
+                                (when (:note a) {:note (:note a)})
+                                ;; the coach's own short note on it (coach.debrief)
+                                (when-let [n (notes (:id a))] {:coach_note n}))))
      :readiness_last_7_days (vec (for [w (analysis/wellness ds (season/add-days today -6) today)]
                                    (select-keys w [:date :hrv_avg :hrv_status :rhr :sleep_s :sleep_score
                                                    :readiness :body_battery_high])))

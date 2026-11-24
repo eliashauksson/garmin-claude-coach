@@ -9,6 +9,7 @@
             [coach.coros-auth :as coros-auth]
             [coach.costs :as costs]
             [coach.db :as db]
+            [coach.debrief :as debrief]
             [coach.load-model :as load-model]
             [coach.paths :as paths]
             [coach.peaks :as peaks]
@@ -82,6 +83,13 @@
          ;; a sync is the app's peak: hand that memory back to the others on the server now, not eventually
          (finally (System/gc)))))
 
+(defn notes-soon!
+  "The coach's short note on new workouts (coach.debrief): started in the background, half price after a
+  sync; a failure here isn't a sync failure."
+  [ds]
+  (try (debrief/after-sync! ds)
+       (catch Throwable e (println "Coach's notes failed:" (ex-message e)))))
+
 (defn peaks-soon!
   "Peak bagging for the new activities (the dataset's peaks and their names, GPS matching) in the
   background: it can take minutes, and the sync is done without it."
@@ -148,7 +156,8 @@
                         (catch Throwable e {:ok false :message (ex-message e)}))]
              (swap! sync-state assoc :running false :job nil
                     :finished_at (or (:finished_at r) (str (java.time.Instant/now))))
-             (peaks-soon! ds)))))
+             (peaks-soon! ds)
+             (notes-soon! ds)))))
       @sync-state)))
 
 (defn run-sync!
@@ -168,6 +177,7 @@
                 (try (load-model/update! ds)
                      (catch Throwable e (println "Training load refit failed:" (ex-message e))))
                 (peaks-soon! ds)
+                (notes-soon! ds)
                 (cond
                   (costs/credits-out ds) (assoc result :plan_check_skipped "no Claude credits")
                   (costs/limit-reached ds) (assoc result :plan_check_skipped "Claude spending limit reached")
