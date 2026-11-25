@@ -6,7 +6,7 @@
 
 (def tile-size "Pixels along a tile's side." 512)
 
-(def snap-radius-m "A summit moves at most this far (m)." 100.0)
+(def snap-radius-m "A summit moves at most this far (m)." 150.0)
 (def snap-min-gain-m "…and only to a point at least this much higher than its own position on the same terrain (m)." 3.0)
 (def snap-max-dip-m
   "…reached in a straight line that never drops this far below that height (m): beyond a saddle it is another top."
@@ -144,7 +144,7 @@
     (Math/hypot (* 6371000.0 k (- (double lon2) lon1) (Math/cos (* k (/ (+ (double lat1) lat2) 2.0))))
                 (* 6371000.0 k (- (double lat2) lat1)))))
 
-(def ^:private row-deg 0.002) ; more than `snap-radius-m` of latitude
+(def ^:private row-deg 0.002) ; more than `snap-radius-m` of latitude (222 m)
 
 (defn own-snaps
   "`snaps` ({id snap}) without those that ended up nearer to another summit's original position than to their
