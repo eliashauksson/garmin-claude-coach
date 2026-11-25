@@ -24,6 +24,7 @@
             [coach.paths :as paths]
             [coach.peak-density :as density]
             [coach.summits :as summits]
+            [coach.terrain :as terrain]
             [coach.track :as track]
             [next.jdbc :as jdbc])
   (:import (java.io ByteArrayInputStream)
@@ -32,7 +33,8 @@
            (java.nio.charset StandardCharsets)
            (java.nio.file Files)
            (java.time Duration LocalDate)
-           (java.util.zip GZIPInputStream)))
+           (java.util.zip GZIPInputStream)
+           (javax.imageio ImageIO ImageReader)))
 
 (def overpass-urls
   "The public Overpass servers, tried in turn when one is busy."
@@ -697,6 +699,131 @@
               r (mapv summits/search-result (filter :boundingbox rows))]
           (swap! search-cache #(let [m (assoc % k r)] (if (> (count m) 50) (dissoc m (first (keys m))) m)))
           r))))
+
+;; ---------------------------------------------------------------------------
+;; Elevation tiles (Mapterhorn), to move each summit to the top of the terrain the 3D map draws (coach.terrain).
+;; Nothing is kept on disk. All of a square's summits are looked at, so the requests say nothing about tracks.
+
+(def terrain-url "https://tiles.mapterhorn.com/%d/%d/%d.webp")
+(def coverage-url
+  "Mapterhorn's list of its archives: which zoom-6 tiles have finer data than the global 30 m."
+  "https://download.mapterhorn.com/download_urls.json")
+(def tile-rate "The most elevation tiles asked for in a second, by the whole install." 5)
+(def tile-cache-size "Decoded tiles kept in memory (1 MB each)." 48)
+
+(defn parse-coverage
+  "{[x y] max-zoom} of the regional archives (\"6-x-y.pmtiles\") in the answer of `coverage-url`."
+  [{:keys [items]}]
+  (into {}
+        (keep (fn [{:keys [name max_zoom]}]
+                (when-let [[_ x y] (re-matches #"6-(\d+)-(\d+)\.pmtiles" (str name))]
+                  [[(parse-long x) (parse-long y)] max_zoom])))
+        items))
+
+(defn- http-bytes
+  "The body of a GET, nil for a 404."
+  ^bytes [url]
+  (let [resp (.send http (-> (HttpRequest/newBuilder (URI/create url))
+                             (.timeout (Duration/ofSeconds 60))
+                             (.header "User-Agent" user-agent) (.GET) (.build))
+                    (HttpResponse$BodyHandlers/ofByteArray))
+        status (.statusCode resp)]
+    (case status
+      200 (.body resp)
+      404 nil
+      (throw (ex-info (i18n/t "The terrain server answered HTTP {0}." status) {:status status})))))
+
+(defn fetch-coverage []
+  (let [data (or (http-bytes coverage-url) (throw (ex-info (i18n/t "The terrain server answered HTTP {0}." 404) {})))]
+    (parse-coverage (json/read-str (String. data StandardCharsets/UTF_8) :key-fn keyword))))
+
+(defn decode-tile
+  "The heights (m, row by row) of a 512 px Terrarium tile in WebP. The reader is made directly, so it is found
+  in the installed app's single jar too."
+  ^floats [^bytes data]
+  (let [^ImageReader reader (.createReaderInstance (com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi.))
+        size (long terrain/tile-size)]
+    (try
+      (with-open [in (ImageIO/createImageInputStream (ByteArrayInputStream. data))]
+        (.setInput reader in)
+        (let [img (.read reader 0)
+              ^ints px (.getRGB img 0 0 size size nil 0 size)
+              out (float-array (alength px))]
+          (dotimes [i (alength px)]
+            (let [rgb (aget px i)]
+              (aset out i (float (terrain/terrarium (bit-and (bit-shift-right rgb 16) 255)
+                                                    (bit-and (bit-shift-right rgb 8) 255)
+                                                    (bit-and rgb 255))))))
+          out))
+      (finally (.dispose reader)))))
+
+(defonce ^:private last-tile-at (atom 0))
+
+(defn- fetch-tile
+  "A tile's bytes, nil where there is none. One request at a time for the install, at most `tile-rate` a second."
+  [z x y]
+  (paths/with-lock "peaks-fetch"
+    (fn []
+      (let [wait (- (+ @last-tile-at (quot 1000 tile-rate)) (System/currentTimeMillis))]
+        (when (pos? wait) (Thread/sleep (long wait))))
+      (reset! last-tile-at (System/currentTimeMillis))
+      (http-bytes (format terrain-url z x y)))))
+
+(defn- tile-cache
+  "An LRU of decoded tiles; a tile there is none of is remembered too."
+  []
+  (proxy [java.util.LinkedHashMap] [64 (float 0.75) true]
+    (removeEldestEntry [_] (> (.size ^java.util.Map this) tile-cache-size))))
+
+(defn- tile!
+  "A decoded tile, from `cache` or downloaded; nil where there is none."
+  [^java.util.Map cache [z x y :as k]]
+  (if (.containsKey cache k)
+    (.get cache k)
+    (let [t (some-> (fetch-tile z x y) decode-tile)]
+      (.put cache k t)
+      t)))
+
+(defn- tiles-at
+  "{[x y] heights} of the tiles a summit's search circle touches at zoom `z`, nil when one is missing."
+  [cache z {:keys [lat lon]}]
+  (reduce (fn [m [x y]]
+            (if-let [t (tile! cache [z x y])]
+              (assoc m [x y] t)
+              (reduced nil)))
+          {}
+          (terrain/tiles-for-circle z lat lon terrain/snap-radius-m)))
+
+(defn- snap-one
+  "{:zoom z :snap …} for one summit: at the finest zoom the coverage promises, else the coarse one; no :snap
+  when it stays where it is, no :zoom when there is no terrain at all."
+  [cache fine {:keys [lat lon] :as summit}]
+  (let [z (terrain/zoom-for fine lat lon)
+        [z tiles] (if-let [tiles (tiles-at cache z summit)]
+                    [z tiles]
+                    (when (not= z terrain/coarse-zoom)
+                      (when-let [tiles (tiles-at cache terrain/coarse-zoom summit)]
+                        [terrain/coarse-zoom tiles])))]
+    (if tiles
+      {:zoom z :snap (terrain/snap (terrain/stitched z tiles) z lat lon)}
+      {})))
+
+(defn- sweep-key
+  "Summits sorted by this share tiles with those just before them: blocks of 4 × 4 fine tiles, row by row."
+  [{:keys [lat lon]}]
+  (let [[x y] (terrain/tile-at terrain/fine-zoom lat lon)]
+    [(quot y 4) (quot x 4) y x]))
+
+(defn snap-summits
+  "{id {:zoom :snap}} for `summits` ([{:id :lat :lon}]), tile by tile, waiting while the machine is busy.
+  `others`: the summits around them too, so none is moved onto a neighbour's top."
+  [fine summits others]
+  (let [cache (tile-cache)
+        found (into {}
+                    (map (fn [s] (breathe!) [(:id s) (snap-one cache fine s)]))
+                    (sort-by sweep-key summits))
+        own (terrain/own-snaps others (into {} (keep (fn [[id r]] (when (:snap r) [id (:snap r)]))) found))]
+    (into {} (map (fn [[id r]] [id (assoc r :snap (get own id))])) found)))
 
 ;; ---------------------------------------------------------------------------
 ;; Detection (the athlete's activities against the shared peaks; the result is the athlete's)

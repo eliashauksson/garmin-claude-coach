@@ -1527,6 +1527,7 @@
    "The number of different summits you have reached. A summit counts as bagged when the GPS track of a hike, run or ride passes within 75 m of its top, at about its height. Virtual and indoor rides never count." "Le nombre de sommets différents que tu as atteints. Un sommet compte comme gravi quand la trace GPS d'une randonnée, d'une course ou d'une sortie passe à moins de 75 m de son sommet, à peu près à sa hauteur. Les sorties virtuelles et en salle ne comptent jamais."
    "The summits you have reached" "Les sommets que tu as atteints"
    "This wasn't a summit visit" "Ce n'était pas une visite de sommet"
+   "The terrain server answered HTTP {0}." "Le serveur de terrain a répondu HTTP {0}."
    "The peak data server answered HTTP {0} for {1}." "Le serveur des données de sommets a répondu HTTP {0} pour {1}."
    "Unnamed peak" "Sommet sans nom"
    "Near {0}" "Près de {0}"
