@@ -12,7 +12,7 @@
   0.006)
 (def tile-deg "Peaks are fetched per tile of this many degrees." 0.25)
 (def gap-m "A jump longer than this between two fixes is not a line the athlete followed." 500.0)
-(def version "Bump when detection changes: activities checked with an older one are checked again." 1)
+(def version "Bump when detection changes: activities checked with an older one are checked again." 2)
 
 (def ^:private skipped-sports #"(?i)virtual|indoor|treadmill|trainer")
 
@@ -155,7 +155,7 @@
                       ti (some-> t (nth j nil))
                       best (if (and best (<= (:dist_m best) d))
                              best
-                             {:dist_m d :time_s ti})
+                             (assoc best :dist_m d :time_s ti))
                       best (cond-> best z (update :alt #(if % (max % z) z)))]
                   (recur (next is) best))
                 (recur (next is) best)))

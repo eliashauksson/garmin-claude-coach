@@ -25,6 +25,11 @@
   (testing "a road 400 m below the summit (or a tunnel) does not, a track just below it does"
     (is (empty? (summits/detect (walk 10 2600.0) [peak])))
     (is (= 1 (count (summits/detect (walk 10 2940.0) [peak])))))
+  (testing "the highest altitude near the top counts, also when a closer pass comes later and lower"
+    (let [there-and-back {:lat [46.4999 46.5001 46.5002 46.5]
+                          :lon [8.0004 8.0004 8.0001 8.00001]
+                          :alt [2990.0 2990.0 2900.0 2900.0]}]
+      (is (= 1 (count (summits/detect there-and-back [peak]))))))
   (testing "without altitude only the distance counts"
     (is (= 1 (count (summits/detect (dissoc (walk 10 0) :alt) [peak])))))
   (testing "a gap in the fixes is not a line that was walked"
