@@ -30,6 +30,16 @@
                           :lon [8.0004 8.0004 8.0001 8.00001]
                           :alt [2990.0 2990.0 2900.0 2900.0]}]
       (is (= 1 (count (summits/detect there-and-back [peak]))))))
+  (testing "a very close pass may lie further below: watches drift"
+    (is (= 1 (count (summits/detect (walk 20 2890.0) [peak]))) "110 m below, 20 m away")
+    (is (empty? (summits/detect (walk 40 2890.0) [peak])) "110 m below, 40 m away")
+    (is (empty? (summits/detect (walk 20 2870.0) [peak])) "130 m below"))
+  (testing "a moved summit is reached at either position"
+    (let [moved (assoc peak :lat_snap 46.5 :lon_snap 8.0016)] ; ~122 m east
+      (is (= 1 (count (summits/detect (walk 10 2995.0) [moved]))) "at the dataset's")
+      (is (= 1 (count (summits/detect (walk 130 2995.0) [moved]))) "at the top of the terrain")
+      (is (empty? (summits/detect (walk 130 2995.0) [peak])))
+      (is (< (:dist_m (first (summits/detect (walk 118 2995.0) [moved]))) 6) "the nearer one is reported")))
   (testing "without altitude only the distance counts"
     (is (= 1 (count (summits/detect (dissoc (walk 10 0) :alt) [peak])))))
   (testing "a gap in the fixes is not a line that was walked"
@@ -164,7 +174,7 @@
                              (let [j (if (and nxt (> u 0.5)) (inc i) i)
                                    z (some-> alt (nth j nil))
                                    ti (some-> t (nth j nil))
-                                   best (if (and best (<= (:dist_m best) d)) best {:dist_m d :time_s ti})
+                                   best (if (and best (<= (:dist_m best) d)) best (assoc best :dist_m d :time_s ti))
                                    best (cond-> best z (update :alt #(if % (max % z) z)))]
                                (recur (inc i) best))
                              (recur (inc i) best)))
@@ -174,7 +184,10 @@
                :when (and (<= (- (apply min pts) pad) (:lat p) (+ (apply max pts) pad))
                           (<= (- (apply min lons) pad) (:lon p) (+ (apply max lons) pad)))
                :let [hit (near p)]
-               :when (and hit (or (nil? ele) (nil? (:alt hit)) (>= (:alt hit) (- ele summits/below-m))))]
+               :when (and hit (or (nil? ele) (nil? (:alt hit))
+                                 (>= (:alt hit) (- ele (if (<= (:dist_m hit) summits/close-m)
+                                                         summits/close-below-m
+                                                         summits/below-m)))))]
            {:id id :dist_m (:dist_m hit) :time_s (:time_s hit)}))))
 
 (deftest detect-matches-brute-force

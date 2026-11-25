@@ -7,12 +7,16 @@
 (def below-m
   "…and, when the stream has altitude, got within this far below the summit (not a tunnel or road beneath it)."
   80.0)
+(def close-m "A pass this close to the top (m) …" 25.0)
+(def close-below-m
+  "… may have got this far below it: most watches measure altitude by air pressure, which drifts over a day (m)."
+  120.0)
 (def ^:private pad
   "Degrees around a peak where a fix can belong to a line passing it: a segment is at most `gap-m` long."
   0.006)
 (def tile-deg "Peaks are fetched per tile of this many degrees." 0.25)
 (def gap-m "A jump longer than this between two fixes is not a line the athlete followed." 500.0)
-(def version "Bump when detection changes: activities checked with an older one are checked again." 2)
+(def version "Bump when detection changes: activities checked with an older one are checked again." 3)
 
 (def ^:private skipped-sports #"(?i)virtual|indoor|treadmill|trainer")
 
@@ -169,10 +173,24 @@
                      (long (Math/floor (/ (double (nth lon i)) col-deg)))])
             (filter #(and (number? (nth lat %)) (number? (nth lon % nil))) (range (count lat)))))
 
+(defn- high-enough?
+  "Whether a pass got high enough for a summit of height `ele`; either height unknown counts."
+  [ele {:keys [dist_m alt]}]
+  (or (nil? ele) (nil? alt) (>= alt (- ele (if (<= dist_m close-m) close-below-m below-m)))))
+
+(defn- positions
+  "Where a peak can be reached: the dataset's position and, when it was moved to the top of the terrain
+  (coach.terrain), that one too. Either counts, so moving a summit never takes a bag away."
+  [{:keys [lat_snap lon_snap] :as peak}]
+  (if (and lat_snap lon_snap)
+    [peak (assoc peak :lat lat_snap :lon lon_snap)]
+    [peak]))
+
 (defn detect
-  "Peaks a stream bagged. `stream`: {:lat :lon :alt :t} columns; `peaks`: [{:id :lat :lon :ele}].
-  A peak counts when the track passes within `radius-m` and, if both altitudes are known, was within
-  `below-m` of its height there. Returns [{:id :dist_m :time_s}], nearest first for each peak once."
+  "Peaks a stream bagged. `stream`: {:lat :lon :alt :t} columns; `peaks`: [{:id :lat :lon :ele}], with
+  :lat_snap and :lon_snap for a moved one. A peak counts when the track passes within `radius-m` of one of its
+  positions and, if both altitudes are known, was within `below-m` of its height there (`close-below-m` for a
+  pass within `close-m`). Returns [{:id :dist_m :time_s}], each peak once, with the nearest such pass."
   [{:keys [lat lon] :as stream} peaks]
   (let [pts (filter number? lat)
         lons (filter number? lon)]
@@ -184,15 +202,18 @@
             min-cos (min (Math/cos (Math/toRadians (double (- la0 pad))))
                          (Math/cos (Math/toRadians (double (+ la1 pad)))))
             col-deg (/ pad (max 0.2 min-cos))
-            index (grid-index lat lon col-deg)]
-        (vec (for [{:keys [id ele] :as p} peaks
-                   :when (and (<= (- la0 pad) (:lat p) (+ la1 pad)) (<= (- lo0 pad) (:lon p) (+ lo1 pad)))
-                   :let [r (long (Math/floor (/ (double (:lat p)) pad)))
-                         c (long (Math/floor (/ (double (:lon p)) col-deg)))
-                         idxs (sort (mapcat #(get index [(+ r (long (first %))) (+ c (long (second %)))])
-                                            [[-1 -1] [-1 0] [-1 1] [0 -1] [0 0] [0 1] [1 -1] [1 0] [1 1]]))
-                         hit (when (seq idxs) (near-peak stream idxs p))]
-                   :when (and hit (or (nil? ele) (nil? (:alt hit)) (>= (:alt hit) (- ele below-m))))]
+            index (grid-index lat lon col-deg)
+            pass (fn [{:keys [ele] :as p}]
+                   (when (and (<= (- la0 pad) (:lat p) (+ la1 pad)) (<= (- lo0 pad) (:lon p) (+ lo1 pad)))
+                     (let [r (long (Math/floor (/ (double (:lat p)) pad)))
+                           c (long (Math/floor (/ (double (:lon p)) col-deg)))
+                           idxs (sort (mapcat #(get index [(+ r (long (first %))) (+ c (long (second %)))])
+                                              [[-1 -1] [-1 0] [-1 1] [0 -1] [0 0] [0 1] [1 -1] [1 0] [1 1]]))
+                           hit (when (seq idxs) (near-peak stream idxs p))]
+                       (when (and hit (high-enough? ele hit)) hit))))]
+        (vec (for [{:keys [id] :as p} peaks
+                   :let [hit (first (sort-by :dist_m (keep pass (positions p))))]
+                   :when hit]
                {:id id :dist_m (:dist_m hit) :time_s (:time_s hit)}))))))
 
 ;; ---------------------------------------------------------------------------
