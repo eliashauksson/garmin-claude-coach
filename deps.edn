@@ -10,6 +10,8 @@
         com.anthropic/anthropic-java {:mvn/version "3.3.0"}
         ;; reads the FIT files of rides from a Coros bike computer (coach.fit)
         com.garmin/fit {:mvn/version "21.176.0"}
+        ;; ImageIO reader for WebP: Mapterhorn's elevation tiles (coach.peaks)
+        com.twelvemonkeys.imageio/imageio-webp {:mvn/version "3.15.3"}
         ;; silences the "No SLF4J providers" warning (Jetty logs through SLF4J)
         org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}
  :aliases
