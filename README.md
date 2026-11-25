@@ -96,7 +96,7 @@ and every summit you've ever stood on. It runs on your own machine.
 - **11.9 million summits**: every peak on Earth with at least 30 m prominence, from the
   Kirmse / de Ferranti world prominence dataset.
 - Your GPS tracks are checked automatically: pass within 75 m of a top and it's **bagged**,
-  shown in crimson on the map.
+  shown in crimson on the map. In downloaded areas the summits are moved to the top of the 3D terrain.
 - Names from swisstopo and OpenStreetMap. Choose how prominent a summit has to be to count.
 
 ### And also
@@ -155,6 +155,7 @@ Full guide, including more athletes: [docs/server.md](docs/server.md).
 | Claude API | the coach: training summaries, your athlete document and plans |
 | Map tile servers | the map area you look at |
 | GitHub, Overpass, Nominatim | the peak dataset blocks, summit names and place search |
+| Mapterhorn | the elevation tiles of downloaded peak squares, to put summits on the top of the terrain |
 
 Your GPS tracks, health data and plans **never leave your machine** except as summaries sent to
 Claude. The app listens only on `127.0.0.1`.

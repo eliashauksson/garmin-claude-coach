@@ -59,13 +59,23 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - athlete: athlete.md read/save/backup · athlete-chat: editing athlete.md as a chat with Claude
 - auth: Garmin login expiry countdown · backup: zip snapshots of DB + athlete docs
 - peaks: peak bagging, komoot-style. **The peaks are the summits of the Kirmse/de Ferranti world prominence dataset (2023, every
-  summit ≥ 30 m prominence); we calculate no heights ourselves.** The dataset is cut into 10° blocks (`make prominence-data`,
+  summit ≥ 30 m prominence); we calculate no heights or prominences ourselves (only positions are refined, see Snapping).** The dataset is cut into 10° blocks (`make prominence-data`,
   dev/prominence_data.clj) and, with `official-ch.csv.gz` (swisstopo's swissNAMES3D summits, `make official-names`), uploaded as
   assets of the GitHub release `peaks-data-2023` of this repo (`peaks/data-url`; `$COACH_PEAKS_DATA_URL` may be a URL or a
   folder, for dev/tests). resources/peaks/blocks.edn lists the blocks that exist (rest of the world is sea).
   Flow per requested 1° square (`run-once!`): `load-datasets!` (the square's block into `peaks`, Switzerland's official names
   once, then `rematch-square!`) → detection for activities whose blocks are loaded → `load-names!` (OSM `natural=peak|volcano|hill` nodes with a `name` or `name:xx` per tile through Overpass, then rematch; `peak_tiles.query_version` vs
   `peaks/osm-query-version`: bump it when the query asks for more and tiles of an older version are fetched again, still shown as ready) → `relink-summits!`. Rematching is from scratch and idempotent.
+  **Snapping** (between loading and names): the dataset's positions are often tens of metres off, so every summit of a
+  requested square is moved to the top of Mapterhorn's terrain (`terrain/snap`: highest local top within 150 m, ≥ 3 m
+  higher, no saddle > 10 m on the way, not nearer another summit's position than its own) into `peaks.lat_snap lon_snap
+  ele_snap snap_zoom`. `lat`/`lon` and the id stay the dataset's (squares, names, SQL `WHERE`); the map and queries show
+  `coalesce(lat_snap, lat)`; names are matched on the original positions; the height shown stays. Order: squares under
+  tracks (`peak_squares.track`) → detection → the other requested squares; world-loaded summits are not moved until their
+  square is requested. `peaks/snap-version` (bump = move again), `snapped_version`/`snap_message` per square, stops after
+  3 failures in a row and retries. Tiles: z13 where Mapterhorn's `download_urls.json` lists finer data, else z11,
+  ≤ 5/s, an in-memory LRU, nothing on disk. `clojure -M:dev -m snap-check <coach.db> <square> [radius …]` shows what
+  snapping does to an athlete's bags and the names, writing nothing.
   A dataset summit's id comes from its position (`summits/dataset-peak-id`, ≥ 10^13). Names: swisstopo (Switzerland only) > OSM, one donor per summit
   (`summits/match-donors`, ≤ 250 m, donor height −60…+250 m over the dataset's, which runs low on sharp summits); a last pass (`summits/loose-pairs`) lets a leftover named donor within 600 m and ±20 m of a summit name it if mutual nearest; a donor's
   height replaces the dataset's `ele` (`ele_dem` keeps it). OSM/official points with no summit nearby are not shown; a summit nobody named shows "Near X" (`peaks.near_name`/`near_m`: the nearest named summit, OSM or official point within 3 km,
@@ -90,9 +100,14 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
   athlete loads is there for everybody; downloads take turns (`paths/with-lock "peaks-fetch"`). Per athlete: `summits`
   (gps | manual | dismissed), `summits_checked`. No SQL joins across the two databases (merged in Clojure).
   `activity_metrics.peaks` is something else (best HR/power), hence "summits"
-  - summits: pure, detection (track within 75 m of the top and, with altitude, within 80 m below it), tiles/squares,
+  - summits: pure, detection (track within 75 m of either position, original or snapped, and, with altitude, within
+    80 m below the summit's height, 120 m for a pass within 25 m, since barometric altitude drifts; activities in
+    squares still to be snapped are bagged but stay pending, so they are checked again), tiles/squares,
     dataset ids and `match-donors`
-  - privacy: GitHub sees which 10° blocks are loaded, Overpass the tile/square boxes, Nominatim the search text; no elevation server any more; tracks never leave the machine
+  - terrain: pure, Terrarium decoding, Web Mercator (512 px tiles), the search for a summit's top
+  - privacy: GitHub sees which 10° blocks are loaded, Overpass the tile/square boxes, Nominatim the search text,
+    Mapterhorn the elevation tiles around all summits of the requested squares (never chosen by tracks within a square);
+    tracks never leave the machine
 
 ## Namespaces (src/cljs, src/cljc)
 - app: state, routing, `fetch!` of /api URLs · ui: formatters + shared components · charts: ECharts/Leaflet mount
