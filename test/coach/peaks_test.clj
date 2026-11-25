@@ -1,13 +1,27 @@
 (ns coach.peaks-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [coach.db :as db]
             [coach.paths :as paths]
             [coach.peaks :as peaks]
             [coach.summits :as summits]
+            [coach.terrain :as terrain]
             [coach.track :as track]
             [next.jdbc :as jdbc])
   (:import (java.io ByteArrayOutputStream)
            (java.util.zip GZIPOutputStream)))
+
+;; no test asks Mapterhorn: tiles are flat ground unless a test gives its own
+(def ^:private flat (float-array (* 512 512) (float 1000)))
+
+(defn- with-terrain
+  "Runs `f` with `tile` ((fn [z x y]) giving 512² heights, nil for none) as Mapterhorn."
+  [tile f]
+  (with-redefs-fn {#'peaks/fetch-tile tile
+                   #'peaks/decode-tile identity
+                   #'peaks/fetch-coverage (fn [] {})}
+    f))
+
+(use-fixtures :each (fn [f] (with-terrain (fn [_ _ _] flat) f)))
 
 (defn- temp-db [migrate!]
   (let [f (java.io.File/createTempFile "coach-peaks" ".db")]
@@ -487,3 +501,101 @@
       (is (pos? (:chunks (#'peaks/load-names!))))
       (is (seq @asked))
       (is (zero? (:chunks (#'peaks/load-names!))) "and once they are current, no more"))))
+
+(defn- hill
+  "Terrain with one top at lat/lon: 1000 m ground rising to 1100 m."
+  [top-lat top-lon]
+  (fn [z x y]
+    (let [[tx ty] (terrain/world-px z top-lat top-lon)
+          cx (+ (Math/floor tx) 0.5) cy (+ (Math/floor ty) 0.5)
+          a (float-array (* 512 512))]
+      (dotimes [row 512]
+        (dotimes [col 512]
+          (aset a (+ col (* 512 row))
+                (float (max 1000.0 (- 1100.0 (* 10.0 (Math/hypot (- (+ (* 512 x) col 0.5) cx)
+                                                                 (- (+ (* 512 y) row 0.5) cy)))))))))
+      a)))
+
+(defn- stored [id]
+  (first (db/query (peaks/shared) ["SELECT id, lat, lon, lat_snap, lon_snap, ele_snap, snap_zoom, ele
+                                    FROM peaks WHERE id = ?" id])))
+
+(defn- snap! [] (#'peaks/snap-squares! (delay {}) (constantly true)))
+
+(deftest summits-move-to-the-top-of-the-terrain
+  (let [[ds _] (set-up!)]
+    ;; the top is 77 m east of where the dataset has the big summit
+    (with-terrain (hill 46.5 8.001) #(is (= {:snapped 1 :failed? false} (snap!))))
+    (let [p (stored id-big)]
+      (is (= [46.5 8.0] [(:lat p) (:lon p)]) "the dataset's position and id stay")
+      (is (< (terrain/distance-m 46.5 8.001 (:lat_snap p) (:lon_snap p)) 20))
+      (is (< 1090 (:ele_snap p) 1101))
+      (is (= terrain/coarse-zoom (:snap_zoom p)))
+      (is (= 3000.0 (:ele p)) "the height shown stays"))
+    (is (nil? (:lat_snap (stored id-bump))) "flat ground: it stays")
+    (testing "the map and the athlete's list show the moved position"
+      (is (< 7.9 (:lon (peak-named ds "Gross Horn")) 8.0012))
+      (is (< 8.0008 (:lon (peak-named ds "Gross Horn")))))
+    (testing "a square is moved once"
+      (is (= {:snapped 0 :failed? false} (snap!))))
+    (is (= {:done 1 :squares 1 :message nil} (:terrain (peaks/squares-status ds))))))
+
+(deftest a-track-over-the-moved-top-bags-it
+  (let [[ds _] (set-up!)
+        ;; 130 m east of the dataset's position, over the top of the terrain
+        walk! (fn [] (db/save-stream! ds 10 {:lat (mapv #(+ 46.49 (* % 0.0001)) (range 200))
+                                             :lon (vec (repeat 200 8.0017))
+                                             :alt (vec (repeat 200 2990.0))
+                                             :t (vec (range 200))}
+                                      nil))
+        a {:id 10 :date "2026-07-14" :sport "hiking"}]
+    (activity! ds 10 "hiking")
+    (walk!)
+    (is (zero? (peaks/detect-activity! ds a)))
+    (with-terrain (hill 46.5 8.0017) snap!)
+    (is (= 1 (peaks/detect-activity! ds a)))
+    (is (< 8.0014 (:lon (first (peaks/activity-summits ds 10)))))))
+
+(deftest a-failed-snap-is-noted-and-tried-again
+  (let [[ds _] (set-up!)]
+    (with-terrain (fn [_ _ _] (throw (ex-info "terrain offline" {})))
+      #(is (= {:snapped 0 :failed? true} (snap!))))
+    (is (= {:done 0 :squares 1 :message "terrain offline"} (:terrain (peaks/squares-status ds))))
+    (testing "no terrain anywhere is a failure too, not a square done"
+      (with-terrain (fn [_ _ _] nil) #(is (:failed? (snap!)))))
+    (is (= {:snapped 1 :failed? false} (snap!)))
+    (is (nil? (:message (:terrain (peaks/squares-status ds)))))))
+
+(deftest several-failures-in-a-row-wait-for-the-retry
+  (temp-ds)
+  (peaks/add-squares! ["46,5" "46,6" "46,7" "46,8" "46,9"])
+  (block! "46,8")
+  (let [asked (atom [])]
+    (with-redefs-fn {#'peaks/snap-square! (fn [_ k] (swap! asked conj k) (throw (ex-info "down" {})))}
+      snap!)
+    (is (= ["46,5" "46,6" "46,7"] @asked))))
+
+(deftest squares-under-tracks-are-moved-first
+  (let [a (temp-ds)]
+    (peaks/add-squares! ["46,5" "46,8"])
+    (track-activity! a 1 "hiking" 46.5 8.1)
+    (#'peaks/queue-track-squares! a [])
+    (is (= ["46,8" "46,5"] (map :square (#'peaks/waiting-for-snap))))))
+
+(deftest an-activity-is-checked-again-until-its-summits-are-where-they-stay
+  (let [ds (temp-ds) asked (atom [])
+        checked #(:summits_checked (first (db/query ds ["SELECT summits_checked FROM activity_metrics"])))]
+    (activity! ds 12 "hiking")
+    (db/upsert-metrics! ds [{:activity_id 12 :track [(track/encode [[46.49 8.0] [46.51 8.0]])]}])
+    (with-redefs-fn {#'peaks/load-names! (fn [] {:chunks 0 :failed? false})}
+      (fn []
+        (with-release (fake-release asked)
+          (fn []
+            (with-terrain (fn [_ _ _] (throw (ex-info "terrain offline" {})))
+              #(let [r (#'peaks/run-once! ds)]
+                 (is (:failed? r))
+                 (is (= 1 (:summits r)) "bagged at the dataset's position all the same")))
+            (is (nil? (checked)))
+            (is (pos? (:snapped (#'peaks/run-once! ds))))
+            (is (= summits/version (checked)))
+            (is (= 1 (count (peaks/activity-summits ds 12))) "once")))))))

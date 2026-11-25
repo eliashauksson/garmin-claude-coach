@@ -373,8 +373,8 @@
     :intro (tk "The Peaks page and the peaks on the Map tab: summits your GPS tracks passed.")
     :items
     [{:id "peaks-bagged" :name (tk "Peaks bagged") :src :app
-      :what (tk "The number of different summits you have reached. A summit counts as bagged when the GPS track of a hike, run or ride passes within 75 m of its top, at about its height. Virtual and indoor rides never count.")
-      :how (tk "After each sync the app loads the peaks of the map areas your tracks touch (the world prominence dataset of Andrew Kirmse and Jonathan de Ferranti, from GitHub; names from swisstopo in Switzerland and from OpenStreetMap elsewhere), once per area, and checks every new track against them. Only coarse map blocks and squares are asked for, never your tracks. A peak you reached without recording (or one that was wrongly counted) can be added or removed by hand.")
+      :what (tk "The number of different summits you have reached. A summit counts as bagged when the GPS track of a hike, run or ride passes within 75 m of its top, at about its height. Because watches measure altitude by air pressure, which drifts, a track within 25 m of the top may be up to 120 m lower, otherwise up to 80 m. Virtual and indoor rides never count.")
+      :how (tk "After each sync the app loads the peaks of the map areas your tracks touch (the world prominence dataset of Andrew Kirmse and Jonathan de Ferranti, from GitHub; names from swisstopo in Switzerland and from OpenStreetMap elsewhere), once per area, and checks every new track against them. Only coarse map blocks and squares are asked for, never your tracks. The dataset's positions can be tens of metres off, so in each downloaded square the app also moves every summit to the highest nearby point of Mapterhorn's terrain model, which the 3D map shows; passing either position counts. A peak you reached without recording (or one that was wrongly counted) can be added or removed by hand.")
       :read (tk "A peak reached again counts as another visit, not as another peak.")
       :see ["prominence"]}
      {:id "prominence" :name (tk "Prominence") :src :app

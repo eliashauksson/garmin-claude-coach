@@ -438,7 +438,18 @@
    ["peaks" "near_name" "TEXT"]
    ["peaks" "near_m" "REAL"]
    ;; which Overpass query (coach.peaks/osm-query-version) fetched the tile; older ones are fetched again
-   ["peak_tiles" "query_version" "INTEGER NOT NULL DEFAULT 1"]])
+   ["peak_tiles" "query_version" "INTEGER NOT NULL DEFAULT 1"]
+   ;; the summit moved to the top of Mapterhorn's terrain (coach.terrain): nil where it stays; lat/lon stay
+   ;; the dataset's (the id is made from them), snap_zoom is the zoom it was looked at
+   ["peaks" "lat_snap" "REAL"]
+   ["peaks" "lon_snap" "REAL"]
+   ["peaks" "ele_snap" "REAL"]
+   ["peaks" "snap_zoom" "INTEGER"]
+   ;; track: some athlete's tracks cross the square (moved first); snapped_version: the coach.peaks/snap-version
+   ;; its summits were moved with; snap_message: why that failed
+   ["peak_squares" "track" "INTEGER NOT NULL DEFAULT 0"]
+   ["peak_squares" "snapped_version" "INTEGER"]
+   ["peak_squares" "snap_message" "TEXT"]])
 
 (defn migrate-peaks! [ds]
   (jdbc/execute! ds ["PRAGMA journal_mode=WAL"])

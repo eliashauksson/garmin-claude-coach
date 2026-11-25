@@ -62,8 +62,16 @@
    [:span.sp]
    [:span.sub (if too_big (t "too big") (t "{0} squares" (count squares)))]])
 
+(defn- terrain-line
+  "How far moving the summits to the top of the terrain is, while it isn't done."
+  [{:keys [done squares message]}]
+  (when (< done squares)
+    (list [:div.sub {:replicant/key "terrain"}
+           (t "Placing summits on the terrain: {0} of {1} squares done." done squares)]
+          (when message [:div.error {:replicant/key "terrain-error"} message]))))
+
 (defn- download-card
-  [{:keys [squares downloaded loading peaks world]} {:keys [q results selected busy error outline fly fly-id]}]
+  [{:keys [squares downloaded loading peaks world terrain]} {:keys [q results selected busy error outline fly fly-id]}]
   (let [n (count selected)]
     [:div {:replicant/key "download"}
      (ui/card {}
@@ -80,6 +88,7 @@
               (square-map/view {:squares squares :selected (or selected #{}) :outline outline :fly fly :fly-id fly-id
                                  :world world})
               (legend)
+              (terrain-line terrain)
               [:div.square-bar
                [:span (cond (pos? n) (t "{0} squares selected" n)
                             :else (t "{0} squares downloaded · {1} peaks · {2} loading" downloaded peaks loading))]

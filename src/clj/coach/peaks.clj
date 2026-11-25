@@ -7,6 +7,10 @@
   (coach.summits/match-donors). The athlete's tracks never leave the machine: GitHub sees which blocks are
   loaded, Overpass the tile and square boxes.
 
+  The dataset found its summits on a coarse elevation model, so each requested square's summits are then
+  moved to the top of Mapterhorn's terrain (coach.terrain), which the 3D map draws; that position is stored
+  beside the dataset's. Mapterhorn sees which squares are being moved: the tiles around all their summits.
+
   The peaks, the loaded blocks and the downloaded squares are the same for everybody, so they live once per
   install in a shared database (shared/peaks.db, `shared`); what an athlete bagged (`summits`) and their
   minimum prominence are in their own database. Functions without a `ds` argument work on the shared
@@ -46,6 +50,7 @@
 (def min-prominence
   "The smallest summit that counts (m of prominence): the dataset's floor, the usual rule for a summit of its own."
   30)
+(def snap-version "Bump when snapping changes: the squares moved with an older one are moved again." 1)
 (def retry-ms "When a server was busy, the update tries the failed chunks again after this long …" 300000)
 (def max-attempts "… up to this many times." 6)
 
@@ -440,7 +445,8 @@
 (defn- requested-squares
   "[{:square :message}] in the order they were asked for."
   []
-  (db/query (shared) ["SELECT square, message FROM peak_squares ORDER BY added_at, rowid"]))
+  (db/query (shared) ["SELECT square, message, snapped_version, snap_message FROM peak_squares
+                       ORDER BY added_at, rowid"]))
 
 (defn- square-tiles-done [k have]
   (count (filter have (summits/tiles-of-square k))))
@@ -565,10 +571,11 @@
   (let [have (fetched-tiles)
         blocks-have (loaded-blocks)
         done (frequencies (map tile-square have))]
-    (for [{:keys [square message]} (requested-squares)
+    (for [{:keys [square message snapped_version snap_message]} (requested-squares)
           :let [loaded? (boolean (blocks-have (summits/square-block square)))
                 full? (= 16 (get done square 0))]]
       {:square square :message message :loaded? loaded?
+       :snapped? (= snap-version snapped_version) :snap-message snap_message
        :state (cond (and loaded? full?) "ready"
                     message "failed"
                     loaded? "names"
@@ -604,6 +611,10 @@
      :downloaded (count (filter #(#{"names" "ready"} (:state %)) squares))
      :loading (count (remove #(= "ready" (:state %)) squares))
      :peaks (reduce + 0 (map :peaks squares))
+     ;; moving the summits to the top of the terrain: of the loaded squares, how many are done
+     :terrain {:done (count (filter #(and (:loaded? %) (:snapped? %)) states))
+               :squares (count (filter :loaded? states))
+               :message (some :snap-message states)}
      :world (world-status)}))
 
 (defn world-requested? [] (boolean (meta-get :world)))
@@ -710,6 +721,7 @@
   "https://download.mapterhorn.com/download_urls.json")
 (def tile-rate "The most elevation tiles asked for in a second, by the whole install." 5)
 (def tile-cache-size "Decoded tiles kept in memory (1 MB each)." 48)
+(def ^:private max-snap-failures "After this many squares failing in a row the others wait for the retry." 3)
 
 (defn parse-coverage
   "{[x y] max-zoom} of the regional archives (\"6-x-y.pmtiles\") in the answer of `coverage-url`."
@@ -825,6 +837,64 @@
         own (terrain/own-snaps others (into {} (keep (fn [[id r]] (when (:snap r) [id (:snap r)]))) found))]
     (into {} (map (fn [[id r]] [id (assoc r :snap (get own id))])) found)))
 
+(defn- square-summits
+  "The dataset summits of a square, by their original position, `margin` degrees of latitude around it
+  included (and as many metres of longitude)."
+  [k margin]
+  (let [[s w n e] (summits/square-bbox k)
+        lon-margin (/ margin (max 0.1 (Math/cos (Math/toRadians (+ s 0.5)))))]
+    (db/query (shared) ["SELECT id, lat, lon FROM peaks
+                         WHERE id >= ? AND lat >= ? AND lat < ? AND lon >= ? AND lon < ?"
+                        summits/dataset-id-min (- s margin) (+ n margin) (- w lon-margin) (+ e lon-margin)])))
+
+(def ^:private neighbour-margin "Degrees: twice as far as a summit moves." 0.003)
+
+(defn- snap-square!
+  "Moves the summits of a square to the top of the terrain and records the square as done. From scratch."
+  [fine k]
+  (let [sums (square-summits k 0)
+        snaps (snap-summits fine sums (square-summits k neighbour-margin))]
+    ;; every summit without terrain is a broken server or address, not a square without data
+    (when (and (seq sums) (not-any? :zoom (vals snaps)))
+      (throw (ex-info (i18n/t "The terrain server has no data for this square.") {:square k})))
+    (jdbc/with-transaction [tx (shared)]
+      (insert-batched! tx "UPDATE peaks SET lat_snap = ?, lon_snap = ?, ele_snap = ?, snap_zoom = ? WHERE id = ?"
+                       (for [{:keys [id]} sums
+                             :let [{:keys [zoom] top :snap} (snaps id)]]
+                         [(:lat top) (:lon top) (:ele top) zoom id]))
+      (jdbc/execute! tx ["UPDATE peak_squares SET snapped_version = ?, snap_message = NULL WHERE square = ?"
+                         snap-version k]))))
+
+(defn- waiting-for-snap
+  "The requested squares whose summits are still to move, those under tracks first, then oldest first:
+  [{:square :track}]."
+  []
+  (db/query (shared) ["SELECT square, track FROM peak_squares WHERE coalesce(snapped_version, 0) < ?
+                       ORDER BY track DESC, added_at, rowid" snap-version]))
+
+(defn- snap-squares!
+  "Moves the summits of the waiting squares `wanted?` picks, once their peaks are loaded; a failure is noted
+  on the square and the others go on, unless several fail in a row. `fine`: a delay of the terrain coverage.
+  Returns {:snapped n :failed? bool}."
+  [fine wanted?]
+  (let [blocks-have (loaded-blocks)]
+    (loop [[{:keys [square]} & more :as todo]
+           (filter #(and (wanted? %) (blocks-have (summits/square-block (:square %)))) (waiting-for-snap))
+           r {:snapped 0 :failed? false}
+           in-a-row 0]
+      (if (or (empty? todo) (>= in-a-row max-snap-failures))
+        r
+        (let [ok? (try (snap-square! @fine square)
+                       true
+                       (catch Throwable e
+                         (println "Peaks: moving the summits of square" square "failed:" (ex-message e))
+                         (jdbc/execute! (shared) ["UPDATE peak_squares SET snap_message = ? WHERE square = ?"
+                                                  (ex-message e) square])
+                         false))]
+          (recur more
+                 (if ok? (update r :snapped inc) (assoc r :failed? true))
+                 (if ok? 0 (inc in-a-row))))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Detection (the athlete's activities against the shared peaks; the result is the athlete's)
 
@@ -841,7 +911,7 @@
 (defn- candidates [{:keys [lat lon]}]
   (let [la (filter number? lat) lo (filter number? lon)]
     (when (seq la)
-      (db/query (shared) ["SELECT id, lat, lon, coalesce(ele, ele_dem) AS ele FROM peaks
+      (db/query (shared) ["SELECT id, lat, lon, lat_snap, lon_snap, coalesce(ele, ele_dem) AS ele FROM peaks
                            WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"
                           (- (apply min la) 0.01) (+ (apply max la) 0.01)
                           (- (apply min lo) 0.01) (+ (apply max lo) 0.01)]))))
@@ -856,13 +926,15 @@
                          peak id date time_s dist_m (str (java.time.Instant/now))]))))
 
 (defn detect-activity!
-  "Looks for the peaks one activity passed and stores them. Returns how many."
-  [ds {:keys [id sport] :as activity}]
-  (let [stream (when (summits/eligible? sport) (db/load-stream ds id))
-        hits (when stream (summits/detect stream (candidates stream)))]
-    (save-detected! ds activity (or hits []))
-    (mark-checked! ds id)
-    (count hits)))
+  "Looks for the peaks one activity passed and stores them. Returns how many. Unless `settled?` is false (the
+  summits there are still to be moved) the activity counts as checked and isn't looked at again."
+  ([ds activity] (detect-activity! ds activity true))
+  ([ds {:keys [id sport] :as activity} settled?]
+   (let [stream (when (summits/eligible? sport) (db/load-stream ds id))
+         hits (when stream (summits/detect stream (candidates stream)))]
+     (save-detected! ds activity (or hits []))
+     (when settled? (mark-checked! ds id))
+     (count hits))))
 
 (defn- activity-tiles [{:keys [track]}]
   (summits/tiles-for-track (map track/decode (json/read-str track))))
@@ -889,7 +961,12 @@
               (db/query ds ["SELECT a.id, a.sport, m.track FROM activities a
                              JOIN activity_metrics m ON m.activity_id = a.id
                              WHERE m.track IS NOT NULL AND m.track <> '[]'"]))
-        n (queue-squares! (sort (track-squares (or all pending))))]
+        squares (sort (track-squares (or all pending)))
+        n (queue-squares! squares)]
+    ;; their summits are moved first (a new `summits/version` makes every activity pending, so all are marked)
+    (jdbc/with-transaction [tx (shared)]
+      (doseq [k squares]
+        (jdbc/execute! tx ["UPDATE peak_squares SET track = 1 WHERE square = ? AND track = 0" k])))
     (when first-time? (db/set-state! ds track-squares-flag "1"))
     n))
 
@@ -901,14 +978,22 @@
   [blocks-have activity]
   (every? #(blocks-have (summits/square-block (tile-square %))) (activity-tiles activity)))
 
+(defn- settled?
+  "Whether the summits an activity can reach are where they will stay: none of its squares is in `waiting`."
+  [waiting {:keys [sport] :as activity}]
+  (or (not (summits/eligible? sport))
+      (not-any? #(waiting (tile-square %)) (activity-tiles activity))))
+
 (defn- detect-ready!
-  "Detects the peaks of the pending activities whose blocks are loaded. Returns [activities found]."
+  "Detects the peaks of the pending activities whose blocks are loaded; those where summits are still to be
+  moved stay pending and are looked at again. Returns [activities found]."
   [ds pending]
   (let [blocks-have (loaded-blocks)
+        waiting (into #{} (map :square) (waiting-for-snap))
         ready (filter #(blocks-loaded? blocks-have %) pending)]
     [(count ready)
      (reduce + 0 (map #(try (breathe!)
-                            (detect-activity! ds %)
+                            (detect-activity! ds % (settled? waiting %))
                             (catch Throwable e
                               (println "Peaks: activity" (:id %) "failed:" (ex-message e)) 0))
                       ready))]))
@@ -931,12 +1016,17 @@
         queued (queue-track-squares! ds pending)
         {:keys [blocks] failed-data? :failed?} (load-datasets!)
         _ (backfill-near-names!)
+        fine (delay (fetch-coverage))
+        ;; the summits under tracks are moved before bagging; the other requested squares can wait for it
+        under-tracks (snap-squares! fine #(= 1 (:track %)))
         [activities found] (detect-ready! ds pending)
+        others (snap-squares! fine #(not= 1 (:track %)))
         {:keys [chunks] failed-names? :failed?} (load-names!)
         relinked (relink-summits! ds)
-        r {:queued queued :blocks blocks :chunks chunks :activities activities :summits found :relinked relinked}]
+        r {:queued queued :blocks blocks :snapped (+ (:snapped under-tracks) (:snapped others)) :chunks chunks
+           :activities activities :summits found :relinked relinked}]
     (when (some pos? (vals r)) (println "Peaks:" r))
-    (assoc r :failed? (boolean (or failed-data? failed-names?)))))
+    (assoc r :failed? (boolean (or failed-data? (:failed? under-tracks) (:failed? others) failed-names?)))))
 
 (defn request!
   "Asks for an update. True when the caller should run `work!` (none is running for this athlete); a
@@ -974,7 +1064,11 @@
    FROM summits s LEFT JOIN activities a ON a.id = s.activity_id
    WHERE s.source <> 'dismissed'")
 
-(def ^:private peak-columns "id, name, near_name, coalesce(ele, ele_dem) AS ele, lat, lon, prominence")
+(def ^:private peak-columns
+  "A peak as shown, at the top of the terrain where it was moved. A WHERE on lat/lon still means the
+  dataset's position (and uses its index): a move is far smaller than any view's or track's margin."
+  (str "id, name, near_name, coalesce(ele, ele_dem) AS ele, "
+       "coalesce(lat_snap, lat) AS lat, coalesce(lon_snap, lon) AS lon, prominence"))
 (def ^:private max-view-peaks "The most unbagged peaks one view gets (there are about a million in the dataset)." 5000)
 
 (defn- peaks-by-ids
@@ -1082,9 +1176,7 @@
                               WHERE activity_id = ? AND source <> 'dismissed' ORDER BY time_s" activity-id])
         peaks (when (seq visits)
                 (into {} (map (juxt :id identity))
-                      (db/query (shared) (into [(str "SELECT id, name, near_name, coalesce(ele, ele_dem) AS ele,
-                                                             lat, lon, prominence
-                                                      FROM peaks WHERE id IN ("
+                      (db/query (shared) (into [(str "SELECT " peak-columns " FROM peaks WHERE id IN ("
                                                      (str/join "," (repeat (count visits) "?")) ")")]
                                                (map :peak_id visits)))))]
     (vec (for [v visits
