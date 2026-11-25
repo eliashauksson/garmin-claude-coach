@@ -46,10 +46,16 @@
   [[:sleep (tk "Sleep")] [:recovery_time (tk "Recovery time")] [:acwr (tk "Load balance")]
    [:stress_history (tk "Stress history")] [:hrv (tk "HRV status")] [:sleep_history (tk "Sleep history")]])
 
-(defn- factors [fs]
+(def ^:private factor-needs
+  "The health data a factor is made from; the others come from the activities."
+  {:sleep :sleep :sleep_history :sleep :hrv :hrv :stress_history :stress})
+
+(defn- factors [fs data]
   [:div.factors
    (for [[i [k label]] (map-indexed vector factor-rows)
-         :let [p (get fs k)]]
+         :let [p (get fs k)]
+         ;; a factor the watch never reports is left out
+         :when (or p (nil? (factor-needs k)) (ui/has? data (factor-needs k)))]
      [:div.factor {:replicant/key k}
       [:span.factor-lab (t label)]
       [:span.factor-track
@@ -58,7 +64,7 @@
                                                   :animation-delay (str (* i 60) "ms")}}])]
       [:span.factor-val (if p (str p "%") "—")]])])
 
-(defn readiness-card [{:keys [feedback estimate] :as r}]
+(defn readiness-card [{:keys [feedback estimate] :as r} data]
   [:section.card.readiness.clickable {:replicant/key "readiness" :role "button" :tabindex 0
                                       :on {:click [[:open-vital "readiness"]] :keydown [[:open-vital "readiness"]]}}
    (ui/label-row {:icon :bolt :accent (tone-var (tone (:level r)) "--text-3")
@@ -69,7 +75,7 @@
                                feedback (ui/pill (ui/enum feedback)))})
    [:div.readiness-body
     (ring r)
-    (factors (:factors r))]
+    (factors (:factors r) data)]
    (note (if estimate
            (t "Garmin has no score this morning, so this is the app's estimate, built like Garmin's from the same six factors. It is usually within about 8 points of Garmin's.")
            (t "Garmin's score from 0 to 100, built from last night's sleep, recovery time, load balance, stress and HRV. The bars show how much each one helps today.")))])
@@ -99,32 +105,36 @@
         [:div.bb-bar {:style {:bottom (str bb_min "%") :height (str (max 2 (- bb_max bb_min)) "%")
                               :opacity (if (= i (dec n)) 1 0.55)}}]])]))
 
-(defn vitals-grid [{:keys [vitals nights days]}]
+(defn vitals-grid [{:keys [vitals nights days] :as data}]
   (let [{:keys [sleep_score sleep_s sleep_quality hrv_night hrv_weekly hrv_status rhr rhr_7d rhr_delta
                 bb_now bb_low bb_high]} vitals
         n14 (take-last 14 nights)
         d14 (take-last 14 days)]
     [:div.vitals
-     (vital {:key "sleep" :info "sleep" :tint "purple" :tint-var "--tint-purple" :icon :moon :accent "--purple"
-             :label (t "Sleep score") :value sleep_score
-             :sub (str/join " · " (remove nil? [(ui/hm sleep_s) (ui/enum sleep_quality)]))
-             :visual (stage-bar vitals)})
-     (vital {:key "hrv" :info "hrv" :tint "teal" :tint-var "--chip-swim-bg" :icon :pulse :accent "--fam-swim"
-             :label (t "Overnight HRV") :value hrv_night :unit "ms"
-             :sub (str/join " · " (remove nil? [(ui/enum hrv_status) (some->> hrv_weekly (t "7-day {0} ms"))]))
-             :visual (when (some :hrv_night n14)
-                       (c/spark "spark-hrv" "h44" {:color "--fam-swim" :values (mapv :hrv_night n14)
-                                                   :band (mapv (juxt :hrv_balanced_low :hrv_balanced_up) n14)}))})
-     (vital {:key "rhr" :info "rhr" :tint "red" :tint-var "--tint-red" :icon :heart :accent "--red"
-             :label (t "Resting heart rate") :value rhr :unit "bpm"
-             :sub (when rhr_delta
-                    [:span
-                     [:b {:style {:color (cond (pos? rhr_delta) "var(--red)" (neg? rhr_delta) "var(--green-ink)")}}
-                      (ui/signed rhr_delta)]
-                     " " (t "vs the 7 days before ({0})" rhr_7d)])
-             :visual (when (some :rhr d14)
-                       (c/spark "spark-rhr" "h44" {:color "--red" :values (mapv :rhr d14)}))})
-     (vital {:key "bb" :info "body-battery" :tint "blue" :tint-var "--tint-blue" :icon :battery :accent "--blue"
-             :label (t "Body Battery now") :value bb_now
-             :sub (when (and bb_low bb_high) (t "today {0} to {1}" bb_low bb_high))
-             :visual (bb-bars days)})]))
+     (when (ui/has? data :sleep)
+       (vital {:key "sleep" :info "sleep" :tint "purple" :tint-var "--tint-purple" :icon :moon :accent "--purple"
+               :label (t "Sleep score") :value sleep_score
+               :sub (str/join " · " (remove nil? [(ui/hm sleep_s) (ui/enum sleep_quality)]))
+               :visual (stage-bar vitals)}))
+     (when (ui/has? data :hrv)
+       (vital {:key "hrv" :info "hrv" :tint "teal" :tint-var "--chip-swim-bg" :icon :pulse :accent "--fam-swim"
+               :label (t "Overnight HRV") :value hrv_night :unit "ms"
+               :sub (str/join " · " (remove nil? [(ui/enum hrv_status) (some->> hrv_weekly (t "7-day {0} ms"))]))
+               :visual (when (some :hrv_night n14)
+                         (c/spark "spark-hrv" "h44" {:color "--fam-swim" :values (mapv :hrv_night n14)
+                                                     :band (mapv (juxt :hrv_balanced_low :hrv_balanced_up) n14)}))}))
+     (when (ui/has? data :rhr)
+       (vital {:key "rhr" :info "rhr" :tint "red" :tint-var "--tint-red" :icon :heart :accent "--red"
+               :label (t "Resting heart rate") :value rhr :unit "bpm"
+               :sub (when rhr_delta
+                      [:span
+                       [:b {:style {:color (cond (pos? rhr_delta) "var(--red)" (neg? rhr_delta) "var(--green-ink)")}}
+                        (ui/signed rhr_delta)]
+                       " " (t "vs the 7 days before ({0})" rhr_7d)])
+               :visual (when (some :rhr d14)
+                         (c/spark "spark-rhr" "h44" {:color "--red" :values (mapv :rhr d14)}))}))
+     (when (ui/has? data :body_battery)
+       (vital {:key "bb" :info "body-battery" :tint "blue" :tint-var "--tint-blue" :icon :battery :accent "--blue"
+               :label (t "Body Battery now") :value bb_now
+               :sub (when (and bb_low bb_high) (t "today {0} to {1}" bb_low bb_high))
+               :visual (bb-bars days)}))]))

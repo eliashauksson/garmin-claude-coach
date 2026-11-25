@@ -73,7 +73,10 @@
         weeks   (for [i (range 6 0 -1) :let [m (season/add-days monday (* -7 i))]]
                   (week-summary m (by-week m)))
         pmc     (last (analysis/pmc ds today today))
-        notes   (debrief/takeaways ds (season/add-days today -14))]
+        notes   (debrief/takeaways ds (season/add-days today -14))
+        strength (analysis/exercises ds (map :id (filter gym? acts)))
+        body    (analysis/body ds today)
+        acclim  (analysis/acclimation ds today)]
     (cond->
      {:today            today
      :target_week      (plan/week-info ds monday)
@@ -88,11 +91,19 @@
                                 (when-let [r (analysis/effective-rpe a)] {:rpe (Math/round (double r))})
                                 (when (pos? (or (:pain a) 0)) {:pain true :pain_location (:pain_location a)})
                                 (when (:note a) {:note (:note a)})
+                                ;; Garmin's training effect, only where the watch measured it
+                                (into {} (remove (comp nil? val))
+                                      {:aerobic_te (r1 (:aerobic_te a)) :anaerobic_te (r1 (:anaerobic_te a))
+                                       :te_label (when-not (= "UNKNOWN" (:te_label a)) (:te_label a))})
+                                (when-let [x (strength (:id a))] {:strength x})
                                 ;; the coach's own short note on it (coach.debrief)
                                 (when-let [n (notes (:id a))] {:coach_note n}))))
      :readiness_last_7_days (vec (for [w (analysis/wellness ds (season/add-days today -6) today)]
-                                   (select-keys w [:date :hrv_avg :hrv_status :rhr :sleep_s :sleep_score
-                                                   :readiness :body_battery_high])))
+                                   (merge (select-keys w [:date :hrv_avg :hrv_status :rhr :sleep_s :sleep_score
+                                                          :readiness :body_battery_high])
+                                          ;; not every watch measures these
+                                          (into {} (remove (comp nil? val))
+                                                (select-keys w [:resp_sleep :spo2_avg])))))
      :load_today       (select-keys pmc [:ctl :atl :tsb])
      :cycling_power    (when-let [p (analysis/cycling-power ds today)]
                          (not-empty (into {} (remove (comp nil? val))
@@ -108,7 +119,10 @@
      (vec (for [w (plan/workouts ds (season/add-days monday -7) (season/add-days monday 6))]
             (select-keys w [:date :slot :session_id :title :distance_km :duration_min :status])))}
       ;; only for a female athlete who turned cycle tracking on (coach.cycle-data)
-      cycle (assoc :menstrual_cycle cycle))))
+      cycle (assoc :menstrual_cycle cycle)
+      ;; only where there is data: weigh-ins, heat or altitude acclimation
+      body   (assoc :body body)
+      acclim (assoc :acclimation acclim))))
 
 ;; ---------------------------------------------------------------------------
 ;; Prompt and response schema
@@ -459,7 +473,7 @@ Menstrual cycle (heading \"Menstrual cycle\"): the data has `menstrual_cycle` be
   (let [monday (season/monday today)]
     {:today    today
      :acts     (reverse (analysis/activities ds {:from (season/add-days today -42) :to today}))
-     :wellness (analysis/wellness ds (season/add-days today -2) today)
+     :wellness (analysis/wellness-with-limits ds (season/add-days today -2) today)
      :workouts (plan/workouts ds monday (season/add-days monday 13))
      :tsb      (:tsb (last (analysis/pmc ds today today)))
      :phase    (:phase (plan/week-info ds today))

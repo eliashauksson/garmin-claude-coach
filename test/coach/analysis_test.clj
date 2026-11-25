@@ -171,3 +171,33 @@
              (set (keys (analysis/vital-trend ds [:rhr :sleep_score] "2026-10-01" "2026-10-03"))))))
     (testing "only the allowlisted metrics"
       (is (thrown? clojure.lang.ExceptionInfo (analysis/vital-trend ds [:raw] "2026-10-01" "2026-10-03"))))))
+
+(deftest availability-test
+  (let [ds (temp-ds)]
+    (testing "no health data at all: everything is shown"
+      (is (nil? (analysis/available ds "2030-05-10"))))
+    (db/upsert-wellness! ds [{:date "2030-05-01" :rhr 50 :avg_stress 20 :raw {}}
+                             {:date "2030-05-02" :rhr 51 :raw {}}
+                             {:date "2029-01-01" :hrv_avg 60.0 :raw {}}])
+    (db/upsert-endurance! ds [{:date "2030-05-02" :score 5000 :raw {}}])
+    (is (= ["endurance" "rhr" "stress"] (analysis/available ds "2030-05-10")))))
+
+(deftest vital-limits-test
+  (let [ds    (temp-ds)
+        nights (for [i (range 1 21)] {:date (format "2030-05-%02d" i) :resp_sleep 12.0 :spo2_avg 96.0 :raw {}})]
+    (db/upsert-wellness! ds nights)
+    (db/upsert-wellness! ds [{:date "2030-05-24" :resp_sleep 14.0 :spo2_avg 92.0 :raw {}}])
+    (let [[row] (analysis/wellness-with-limits ds "2030-05-24" "2030-05-24")]
+      (is (= [13.0 93.0] [(:resp_limit row) (:spo2_floor row)])))
+    (testing "too few earlier nights: no limit"
+      (is (nil? (:resp_limit (first (analysis/wellness-with-limits ds "2030-05-08" "2030-05-08"))))))))
+
+(deftest activity-extras-test
+  (let [ds (temp-ds)]
+    (db/upsert-activities! ds [{:id 1 :date "2030-05-01" :sport "strength_training"
+                                :raw {:detail {:anaerobic_training_effect 1.5 :training_effect_label "TEMPO"
+                                               :recovery_hr_bpm 30}}}])
+    (db/upsert-exercise-sets! ds [{:activity_id 1 :summary "[{\"exercise\":\"PLANK\",\"sets\":2}]" :raw {}}])
+    (let [x (analysis/activity ds 1)]
+      (is (= [1.5 "TEMPO" 30 nil] ((juxt :anaerobic_te :te_label :recovery_hr :gct_ms) x)))
+      (is (= [{:exercise "PLANK" :sets 2}] (:exercises x))))))

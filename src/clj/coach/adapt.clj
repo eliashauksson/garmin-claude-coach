@@ -72,6 +72,11 @@
                         (every? #(#{"UNBALANCED" "LOW"} (some-> (:hrv_status %) str/upper-case)) last2))
         rhr-high   (:rhr_high settings)
         rhr-bad    (and rhr-high (= 2 (count last2)) (every? #(some-> (:rhr %) (>= rhr-high)) last2))
+        nights-over  (fn [value limit over?]
+                       (and (= 2 (count last2))
+                            (every? #(and (value %) (limit %) (over? (value %) (limit %))) last2)))
+        resp-high    (nights-over :resp_sleep :resp_limit >=)
+        spo2-low     (nights-over :spo2_avg :spo2_floor <=)
         this-week  (filter #(<= (compare monday (:date %)) 0 (compare (season/add-days monday 6) (:date %))) workouts)
         missed     (filter #(= "missed" (:status %)) this-week)
         run-min    (fn [ws] (reduce + 0 (keep #(when (rules/run? %) (:duration_min %)) ws)))
@@ -119,6 +124,14 @@
       (when rhr-bad
         [{:key (str "rhr:" (:date (last last2))) :id :rhr-high :severity :warn :trigger? true :principle "Monitoring"
           :message (t "Resting HR {0} or higher for 2 days: swap hard sessions for easy ones or rest" rhr-high)}])
+      (when resp-high
+        [{:key (str "resp:" (:date (last last2))) :id :resp-high :severity :warn :trigger? true
+          :principle "Monitoring"
+          :message (t "Breathing rate in your sleep has been above your normal for 2 nights: keep it easy and watch for illness")}])
+      (when spo2-low
+        [{:key (str "spo2:" (:date (last last2))) :id :spo2-low :severity :info :trigger? false
+          :principle "Monitoring"
+          :message (t "Blood oxygen in your sleep has been below your normal for 2 nights (altitude, illness or a loose watch can do this)")}])
       (for [w missed :when (rules/key-session? w)]
         {:key (str "missed:" (:id w)) :id :missed-key :severity :warn :trigger? true :principle "Monitoring"
          :message (t "Missed {0} ({1}) on {2}: move it only if the hard/easy spacing holds, or drop it - never make it up"

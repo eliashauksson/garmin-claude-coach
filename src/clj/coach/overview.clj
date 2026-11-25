@@ -92,15 +92,18 @@
   "One day's health summary from a daily_wellness row and its raw map."
   [date row raw]
   (let [st (or (m (:stats raw)) {})]
-    {:date       date
-     :rhr        (:rhr row)
-     :stress_avg (:avg_stress row)
-     :steps      (:steps row)
-     :bb_min     (:body_battery_low row)
-     :bb_max     (:body_battery_high row)
-     :bb_latest  (n? (:body_battery_current st))
-     :bb_charged (n? (:body_battery_charged st))
-     :bb_drained (n? (:body_battery_drained st))}))
+    (merge
+     {:date       date
+      :rhr        (:rhr row)
+      :stress_avg (:avg_stress row)
+      :steps      (:steps row)
+      :bb_min     (:body_battery_low row)
+      :bb_max     (:body_battery_high row)
+      :bb_latest  (n? (:body_battery_current st))
+      :bb_charged (n? (:body_battery_charged st))
+      :bb_drained (n? (:body_battery_drained st))}
+     ;; only where the watch measures them
+     (into {} (remove (comp nil? val)) (select-keys row [:resp_sleep :spo2_avg :spo2_low])))))
 
 (defn vitals
   "The four tiles: sleep and HRV from the latest night, resting HR and Body
@@ -304,6 +307,9 @@
         vo2      (db/query ds ["SELECT date, value AS vo2, carried_forward FROM vo2max
                                 WHERE sport = 'running' AND date BETWEEN ? AND ? ORDER BY date" from today])]
     {:date      today
+     :has       (analysis/available ds today)
+     :acclimation (analysis/acclimation ds today)
+     :weigh_ins (analysis/weigh-ins ds (season/add-days today (- (dec history-days))) today)
      ;; Garmin's score, or the app's estimate on a morning Garmin has none
      :readiness (or (readiness (:raw (last wellness)))
                     (when (= today (:date (last wellness))) (readiness-estimate/for-date ds today)))

@@ -487,6 +487,27 @@
        (sort-by (juxt :week :sport))))
 
 ;; ---------------------------------------------------------------------------
+;; Breathing and blood oxygen during sleep, against the athlete's own normal
+
+(def vital-min-nights "Fewer nights than this don't say what is normal." 14)
+
+(defn breathing-limit
+  "Breaths per minute during sleep that count as above the athlete's normal, from earlier nights `values`: their
+  mean plus the larger of one breath and one standard deviation. nil with too few nights."
+  [values]
+  (let [vs (filter number? values)]
+    (when (>= (count vs) vital-min-nights)
+      (round (+ (mean vs) (max 1.0 (or (sd vs) 0.0))) 1))))
+
+(defn spo2-floor
+  "Blood oxygen during sleep (%) at or below which a night is clearly under the athlete's normal: 3 points below
+  the mean of earlier nights `values`. nil with too few nights."
+  [values]
+  (let [vs (filter number? values)]
+    (when (>= (count vs) vital-min-nights)
+      (round (- (mean vs) 3.0) 1))))
+
+;; ---------------------------------------------------------------------------
 ;; Wellness trends
 
 (def baseline-days 60)

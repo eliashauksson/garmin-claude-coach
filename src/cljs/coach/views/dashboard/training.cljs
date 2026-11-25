@@ -251,7 +251,7 @@
    [:div.chart-grid {:replicant/key "tr"}
     (heatmap-card d)
     (weekly-card d)
-    (focus-card d)
-    (acwr-card d)
+    (when (ui/has? d :training_status) (focus-card d))
+    (when (ui/has? d :training_status) (acwr-card d))
     (zones-card d)
     (recent-card d)]))

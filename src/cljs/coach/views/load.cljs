@@ -223,22 +223,27 @@
   Nothing until there is one."
   [{:keys [data errors]} url]
   (when-let [p (:power (get data url))]
-    (let [{:keys [ftp ftp_source wkg vo2max_est weight_kg]} p]
+    (let [{:keys [ftp ftp_source wkg vo2max_est weight_kg weight_date]} p]
       [:div {:style {:display "contents"}}
        [:div.section-head {:replicant/key "power-head"}
         [:h2.section-title (t "Cycling power")]]
        (when-let [e (get errors url)] [:div.error (t "Could not load: {0}" e)])
        [:div.row {:replicant/key "power-kpi"}
-        (ui/tile {:info "ftp" :label (t "FTP") :tint "amber" :size "md" :value (some-> ftp js/Math.round) :unit "W"
-                  :sub (case ftp_source
-                         "estimate" (t "estimated from your best 20–60 min, last 90 days")
-                         "garmin"   (t "from Garmin")
-                         nil)})
-        (ui/tile {:info "wkg" :label (t "Watts per kg") :tint "blue" :size "md" :value (some-> wkg (ui/fixed 2))
-                  :unit "W/kg"
-                  :sub (if weight_kg (t "at {0} kg" weight_kg) (t "no weight in your Garmin profile"))})
-        (ui/tile {:info "vo2max-cycling" :label (t "VO2 max · cycling") :tint "green" :size "md" :value vo2max_est
-                  :sub (t "estimate from your best 5 minutes, last 90 days")})]
+        (when ftp
+          (ui/tile {:info "ftp" :label (t "FTP") :tint "amber" :size "md" :value (js/Math.round ftp) :unit "W"
+                    :sub (case ftp_source
+                           "estimate" (t "estimated from your best 20–60 min, last 90 days")
+                           "garmin"   (t "from Garmin")
+                           nil)}))
+        (when wkg
+          (ui/tile {:info "wkg" :label (t "Watts per kg") :tint "blue" :size "md" :value (ui/fixed wkg 2)
+                    :unit "W/kg"
+                    :sub (if weight_date
+                           (t "at {0} kg, weighed {1}" (ui/fixed weight_kg 1) (ui/date-short weight_date))
+                           (t "at {0} kg" weight_kg))}))
+        (when vo2max_est
+          (ui/tile {:info "vo2max-cycling" :label (t "VO2 max · cycling") :tint "green" :size "md"
+                    :value vo2max_est :sub (t "estimate from your best 5 minutes, last 90 days")}))]
        [:div {:replicant/key "power-curve"}
         (ui/chart-card
          {:title (t "Power curve") :info "power-curve" :tint "amber"

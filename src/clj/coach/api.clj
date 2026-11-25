@@ -116,7 +116,7 @@
   "Readiness check (principles: Monitoring) for today's planned workouts."
   [ds]
   (let [t    (season/today)
-        days (analysis/wellness ds (season/add-days t -1) t)
+        days (analysis/wellness-with-limits ds (season/add-days t -1) t)
         ;; no score from Garmin this morning: the app's estimate stands in
         est  (when (and (seq days) (nil? (:readiness (last days)))) (readiness-estimate/for-date ds t))
         days (cond-> (vec days)

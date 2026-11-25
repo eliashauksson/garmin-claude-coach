@@ -5,6 +5,7 @@
   jumps between the sections. Everything is worked out on the server
   (/api/overview); each section is its own namespace under coach.views.dashboard."
   (:require [coach.i18n :refer [t tk]]
+            [coach.ui :as ui]
             [coach.views.dashboard.cycle-trends :as cycle-trends]
             [coach.views.dashboard.fitness :as fitness]
             [coach.views.dashboard.race :as race]
@@ -22,9 +23,9 @@
 (def jumps [["tr-load" (tk "Load")] ["tr-race" (tk "Race")] ["tr-recovery" (tk "Recovery")]
             ["tr-fitness" (tk "Fitness")]])
 
-(defn- jump-bar [cycle?]
+(defn- jump-bar [cycle? hidden]
   [:nav.jump-bar {:aria-label (t "Sections")}
-   (for [[id label] (cond-> jumps cycle? (conj ["tr-cycle" (tk "Cycle")]))]
+   (for [[id label] (remove (comp hidden first) (cond-> jumps cycle? (conj ["tr-cycle" (tk "Cycle")])))]
      [:button.pill {:replicant/key id :on {:click [[:scroll-to id]]}} (t label)])])
 
 (defn view [{:keys [data errors route] :as s}]
@@ -34,7 +35,9 @@
         cyc-days (when (:enabled cyc) (:days (get data cycle-days-url)))]
     [:div {:style {:display "contents"}}
      [:div.page-head [:div.title [:h1 (t "Trends")]]]
-     (jump-bar (:enabled cyc))
+     (jump-bar (:enabled cyc) (cond-> #{}
+                                (and d (not (recovery/shown? d))) (conj "tr-recovery")
+                                (and d (not (fitness/shown? d))) (conj "tr-fitness")))
      (when-let [e (get errors ov-url)] [:div.error (t "Could not load: {0}" e)])
      [:div {:replicant/key "load" :style {:display "contents"}}
       (load/section s [load-url volume-url forecast-url])]
@@ -43,10 +46,10 @@
         [:div.section-head {:replicant/key "race-head" :id "tr-race"} [:h2.section-title (t "Goal race")]]
         [:div.race {:replicant/key "race"}
          (race/race-hero (:race d))
-         (race/prediction-cards (:race d))]
-        (recovery/recovery d cyc-days)
+         (when (ui/has? d :race_predictions) (race/prediction-cards (:race d)))]
+        (when (recovery/shown? d) (recovery/recovery d cyc-days))
         (training/training d)))
      [:div {:replicant/key "power" :style {:display "contents"}}
       (load/power-section s power-url)]
-     (when d (fitness/fitness d))
+     (when (and d (fitness/shown? d)) (fitness/fitness d))
      (when (:enabled cyc) (cycle-trends/section cyc))]))

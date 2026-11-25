@@ -182,15 +182,43 @@
 (defn- tile [label value unit sub & [info]]
   {:label label :value value :unit unit :sub sub :info info})
 
-(defn- tile-row [a run?]
+(def ^:private te-labels
+  "Garmin's training effect labels; unknown ones are left out."
+  {"RECOVERY" (tk "Recovery") "AEROBIC_BASE" (tk "Base") "TEMPO" (tk "Tempo")
+   "LACTATE_THRESHOLD" (tk "Threshold") "VO2MAX" (tk "VO2 max") "ANAEROBIC_CAPACITY" (tk "Anaerobic capacity")
+   "SPEED" (tk "Speed") "SPRINT" (tk "Sprint")})
+
+(defn- effect-line
+  "Aerobic and anaerobic training effect and what Garmin says the activity mainly trained."
+  [a]
+  (not-empty (str/join " · " (remove nil? [(some->> (ui/fixed (:aerobic_te a) 1) (t "aerobic TE {0}"))
+                                           (some->> (ui/fixed (:anaerobic_te a) 1) (t "anaerobic TE {0}"))
+                                           (some-> (te-labels (:te_label a)) t)]))))
+
+(defn- dynamics-tile
+  "One tile for the running dynamics the device measured: the first is the big number, the others sit below it."
+  [a]
+  (let [[[label v unit] & more]
+        (filter second [[(t "Ground contact time") (some-> (:gct_ms a) js/Math.round) "ms"]
+                        [(t "Vertical oscillation") (ui/fixed (:vert_osc_cm a) 1) "cm"]
+                        [(t "Stride length") (some-> (:stride_cm a) (/ 100) (ui/fixed 2)) "m"]])]
+    (tile label v unit
+          (not-empty (str/join " · " (for [[l v u] more] (str l " " v " " u))))
+          "running-dynamics")))
+
+(defn- tile-row
+  "The activity's numbers. A tile without its main value (no heart rate strap, no power meter, a watch that
+  doesn't measure it) is left out."
+  [a run?]
   (let [secs (or (:moving_s a) (:duration_s a))
-        mps  (when (and (:distance_m a) secs (pos? secs)) (/ (:distance_m a) secs))
-        tiles (remove nil?
-     [(tile (t "Distance") (ui/km (:distance_m a)) "km" nil)
+        dist (when (some-> (:distance_m a) pos?) (:distance_m a))   ; none indoors: no distance, pace or speed
+        mps  (when (and dist secs (pos? secs)) (/ dist secs))
+        tiles (remove (comp nil? :value)
+     [(tile (t "Distance") (some-> dist ui/km) "km" nil)
      (tile (t "Moving time") (ui/hms secs) nil (t "elapsed {0}" (ui/hms (:duration_s a))) "moving-time")
      (if run?
        (tile (t "Avg pace") (ui/pace mps) "/km" (some->> (:ngp_mps a) ui/pace (str "NGP ")) (when (:ngp_mps a) "ngp"))
-       (tile (t "Avg speed") (ui/kmh mps) "km/h" nil))
+       (tile (t "Avg speed") (some-> mps ui/kmh) "km/h" nil))
      (tile (t "Elevation gain") (some-> (:elev_gain_m a) js/Math.round) "m" nil)
      (tile (t "Heart rate") (some-> (:avg_hr a) js/Math.round) "bpm"
            (not-empty (str/join " · " (remove nil? [(some->> (:max_hr a) js/Math.round (t "max {0}"))
@@ -207,7 +235,7 @@
               (some->> (:decoupling a) (t "decoupling {0}%")) "ef")
      (if (or (:garmin_load a) (not (:load_est a)))
        (tile (t "Garmin load") (some-> (:garmin_load a) js/Math.round) nil
-             (some->> (ui/fixed (:aerobic_te a) 1) (t "aerobic TE {0}")) "garmin-load")
+             (effect-line a) "garmin-load")
        ;; a ride Garmin never saw: the app's own estimate (coach.epoc)
        (tile (t "Training load (estimate)") (js/Math.round (:load_est a)) nil
              (case (:load_method a)
@@ -215,9 +243,31 @@
                "power"    (t "from power")
                "hr-watch" (t "from the watch's all-day heart rate")
                (t "from heart rate"))
-             "load-estimate"))])]
+             "load-estimate"))
+     (tile (t "Heart rate recovery") (some-> (:recovery_hr a) js/Math.round) "bpm" (t "drop after stopping")
+           "recovery-hr")
+     (tile (t "Body Battery change") (some-> (:bb_impact a) ui/signed) nil nil "body-battery")
+     (dynamics-tile a)])]
     (into [:div.row]
           (map (fn [tl tint] (ui/tile (assoc tl :tint tint :size "sm" :flex "1 1 140px"))) tiles tints))))
+
+(defn- exercise-name
+  "Garmin's exercise key, BARBELL_BENCH_PRESS, as words."
+  [k]
+  (str/capitalize (str/lower-case (str/replace k "_" " "))))
+
+(defn- sets-card
+  "A strength activity's exercises, as the watch recorded them."
+  [exercises]
+  [:div {:replicant/key "sets"}
+   (ui/card {}
+            [:div.lab (t "Sets") (ui/info "strength-sets")]
+            (ui/table [{:label (t "Exercise") :class "name-wrap" :value #(exercise-name (:exercise %))}
+                       {:label (t "Sets") :align :r :value :sets}
+                       {:label (t "Reps") :align :r :value :reps}
+                       {:label (t "Heaviest") :align :r :value #(some-> (:max_kg %) (str " kg"))}]
+                      exercises
+                      {:key-fn :exercise}))])
 
 (defn- summits-card
   "The peaks this activity's track passed (komoot-style peak bagging)."
@@ -265,6 +315,7 @@
            (ui/card {} (c/route-map {:key (str "map-" (:id a) "-" (count (:summits a))) :latlngs pts
                                      :family (:id (ui/family (:sport a)))
                                      :markers (:summits a)}))])
+        (when (seq (:exercises a)) (sets-card (:exercises a)))
         (when (seq (:summits a)) (summits-card (:summits a)))
         (when (seq ts)
           [:div.row {:replicant/key "streams"}

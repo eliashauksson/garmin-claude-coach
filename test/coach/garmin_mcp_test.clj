@@ -55,7 +55,8 @@
       (is (= {:date "2026-10-29" :rhr 52 :hrv_avg 53 :hrv_weekly_avg 52 :hrv_status "BALANCED"
               :sleep_score 75 :sleep_s 18960 :deep_sleep_s 4000 :rem_sleep_s 3000
               :readiness 73 :readiness_level "MODERATE" :avg_stress 29
-              :body_battery_high 71 :body_battery_low 24 :steps 10952}
+              :body_battery_high 71 :body_battery_low 24 :steps 10952
+              :resp_sleep nil :spo2_avg nil :spo2_low nil}
              (dissoc row :raw)))
       (is (not (contains? (:raw row) :date)))))
   (testing "negative stress means not enough data"
@@ -152,3 +153,45 @@
         "days without an acute load are left out; 0 is kept (load-model skips it)")
     (is (= 0.6 (get-in rows [0 :raw :acwr]))))
   (is (= [] (gm/load-trend-rows "Error: nothing"))))
+
+(deftest respiration-and-spo2-test
+  (let [resp (gm/respiration-by-date {:trend [{:date "2030-05-13" :avg_sleep_breaths_per_min 12.5}]})
+        row  (gm/wellness-row {:date "2030-05-13" :respiration (resp "2030-05-13")
+                               :sleep {:avg_spo2_percent 96.0 :lowest_spo2_percent 88}})]
+    (is (= [12.5 96.0 88] ((juxt :resp_sleep :spo2_avg :spo2_low) row))))
+  (is (= {} (gm/respiration-by-date "No respiration data found between 2030-05-13 and 2030-05-14."))))
+
+(deftest weigh-in-rows-test
+  (is (= [{:date "2030-05-01" :weight_kg 70.5 :body_fat 15.0 :muscle_kg 33.0 :water_pct nil :bone_kg nil :bmi nil}]
+         (map #(dissoc % :raw)
+              (gm/weigh-in-rows
+               {:measurements [{:date "2030-05-01" :weight_kg 71.0 :timestamp_gmt 1}
+                               {:date "2030-05-01" :weight_kg 70.5 :body_fat_percent 15.0
+                                :muscle_mass_grams 33000.0 :timestamp_gmt 2}
+                               {:date "2030-05-02"}]}))))
+  (is (= [] (gm/weigh-in-rows "No weight measurements found between 2030-05-01 and 2030-05-02."))))
+
+(deftest acclimation-row-test
+  (is (= {:date "2030-07-01" :heat_pct 40 :altitude_m nil}
+         (dissoc (gm/acclimation-row "2030-07-02" {:date "2030-07-01" :heat_acclimation_percent 40}) :raw)))
+  (is (nil? (gm/acclimation-row "2030-07-02" "No acclimation data found for 2030-07-02."))))
+
+(deftest exercise-summary-test
+  (let [active (fn [ex reps weight]
+                 {:setType "ACTIVE" :repetitionCount reps :weight weight
+                  :exercises [{:category "UNKNOWN" :name nil :probability 1.0} (assoc ex :probability 90.0)]})]
+    (is (= [{:exercise "BARBELL_SQUAT" :sets 2 :reps 16 :max_kg 62.5} {:exercise "PLANK" :sets 1 :reps nil :max_kg nil}]
+           (gm/exercise-summary
+            {:exerciseSets [(active {:category "SQUAT" :name "BARBELL_SQUAT"} 8 60000.0)
+                            {:setType "REST" :duration 60}
+                            (active {:category "SQUAT" :name "BARBELL_SQUAT"} 8 62500.0)
+                            (active {:category "PLANK" :name nil} nil -1.0)
+                            (active {:category "UNKNOWN" :name nil} 8 nil)]}))))
+  (is (= [] (gm/exercise-summary "No exercise sets found for activity with ID 1"))))
+
+(deftest no-data-answers-never-stop-a-sync-test
+  (doseq [msg ["Error retrieving acclimation data: boom"
+               "Error retrieving respiration data for 2030-05-13: boom"
+               "Error retrieving weight measurements: boom"
+               "Error retrieving activity exercise sets: boom"]]
+    (is (= :other (gm/error-kind msg)) msg)))

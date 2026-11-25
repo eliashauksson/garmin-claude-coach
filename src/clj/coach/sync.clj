@@ -258,10 +258,51 @@
        (catch Exception e
          (if (fatal? e) (throw e) (println " " label "skipped:" (ex-message e))))))
 
-(defn sync-overview!
-  "Training status, race predictions and endurance score for `today`, and
-  the sleep need of recent nights."
+(defn sync-weigh-ins!
+  "Weigh-ins in [start, end], for sources that have them."
+  [src ds start end]
+  (when (satisfies? source/HealthSource src)
+    (overview-step! "weight"
+                    #(doseq [[s e] (chunks start end vo2max-chunk-days)]
+                       (db/upsert-weigh-ins! ds (source/fetch-weigh-ins src s e))))))
+
+(def respiration-catch-up-days
+  "Nights fetched once for days synced before breathing was: the normal range needs 60 days, the charts 30."
+  90)
+
+(defn catch-up-respiration!
+  "One time: the sleep breathing rate of stored days from before it was synced (the backfill doesn't revisit them)."
   [src ds today]
+  (when (and (satisfies? source/HealthSource src) (not (db/get-state ds :respiration_caught_up)))
+    (overview-step! "breathing history"
+                    #(do (doseq [[date v] (source/fetch-sleep-respiration
+                                           src (str (.minusDays (d today) respiration-catch-up-days)) today)]
+                           (next.jdbc/execute! ds ["UPDATE daily_wellness SET resp_sleep = ? WHERE date = ?" v date]))
+                         (db/set-state! ds :respiration_caught_up "true")))))
+
+(def exercise-sets-per-sync "How many strength activities without sets one sync asks about." 20)
+
+(defn sync-exercise-sets!
+  "The exercises of strength activities not asked about yet, newest first; an activity without any is
+  remembered as such."
+  [src ds]
+  (when (satisfies? source/HealthSource src)
+    (doseq [{:keys [id]} (db/query ds ["SELECT a.id FROM activities a
+                                        LEFT JOIN exercise_sets x ON x.activity_id = a.id
+                                        WHERE a.sport LIKE '%strength%' AND x.activity_id IS NULL
+                                        ORDER BY a.start_time_local DESC LIMIT ?" exercise-sets-per-sync])]
+      (overview-step! (str "exercise sets " id)
+                      #(let [{:keys [summary raw]} (source/fetch-exercise-sets src id)]
+                         (db/upsert-exercise-sets! ds [{:activity_id id :summary (json/write-str summary)
+                                                        :raw raw}]))))))
+
+(defn sync-overview!
+  "Training status, race predictions and endurance score for `today`,
+  acclimation where the source has it, and the sleep need of recent nights."
+  [src ds today]
+  (when (satisfies? source/HealthSource src)
+    (overview-step! "acclimation"
+                    #(some->> (source/fetch-acclimation src today) vector (db/upsert-acclimation! ds))))
   (overview-step! "training status"
                   #(some->> (source/fetch-training-status src today) vector (db/upsert-training-status! ds)))
   (overview-step! "race predictions"
@@ -298,6 +339,11 @@
       (sync-intraday-dates! src ds dates))
     (sync-vo2max! src ds from t)
     (sync-load-trend! src ds from t)
+    ;; the first sync looks a year back for weigh-ins: people don't weigh themselves every week
+    (sync-weigh-ins! src ds (if (db/get-state ds :weigh_ins_synced) from (str (.minusDays (d t) 365))) t)
+    (db/set-state! ds :weigh_ins_synced "true")
+    (catch-up-respiration! src ds t)
+    (sync-exercise-sets! src ds)
     (sync-overview! src ds t)
     (let [changed? (sync-thresholds! src ds)
           new-ids  (sync-streams! src ds)
@@ -374,7 +420,8 @@
   (backfill! src ds)
   (when-let [from (earliest-date ds)]
     (sync-vo2max! src ds from (season/today))
-    (sync-load-trend! src ds from (season/today)))
+    (sync-load-trend! src ds from (season/today))
+    (sync-weigh-ins! src ds from (season/today)))
   (sync-streams! src ds)
   (analysis/compute-metrics! ds)
   (analysis/update-eftp! ds)

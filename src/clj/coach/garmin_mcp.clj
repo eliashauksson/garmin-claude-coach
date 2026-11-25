@@ -27,6 +27,8 @@
     "get_heart_rates" "get_steps_data"
     ;; the dashboard's coach overview (coach.overview)
     "get_training_load_balance" "get_race_predictions" "get_endurance_score"
+    ;; metrics not every watch or athlete has: hidden where there is nothing
+    "get_respiration_trend" "get_weigh_ins" "get_acclimation" "get_activity_exercise_sets"
     ;; cycle tracking, only called when the athlete turned it on (coach.cycle)
     "get_menstrual_calendar_data"})
 
@@ -182,9 +184,14 @@
     (or (first (filter #(= "AFTER_WAKEUP_RESET" (:context %)) snaps))
         (first (sort-by :timestamp snaps)))))
 
+(defn respiration-by-date
+  "From get_respiration_trend: date -> that night's entry. A message (no data) gives nothing."
+  [res]
+  (into {} (for [e (:trend (m res)) :when (string? (:date e))] [(:date e) e])))
+
 (defn wellness-row
   "Normalised wellness for one day from the raw tool responses."
-  [{:keys [date stats hrv readiness sleep] :as raw}]
+  [{:keys [date stats hrv readiness sleep respiration] :as raw}]
   (let [st (or (m stats) {})
         hv (or (m hrv) {})
         sl (or (m sleep) {})
@@ -204,6 +211,9 @@
      :body_battery_high (:body_battery_highest st)
      :body_battery_low  (:body_battery_lowest st)
      :steps             (:total_steps st)
+     :resp_sleep        (:avg_sleep_breaths_per_min (m respiration))
+     :spo2_avg          (:avg_spo2_percent sl)
+     :spo2_low          (:lowest_spo2_percent sl)
      :raw               (dissoc raw :date)}))
 
 (defn dates
@@ -338,6 +348,73 @@
     (when (number? (:actual need))
       {:date date :need_min (:actual need) :raw need})))
 
+;; Weight, acclimation and strength sets: only some athletes and watches have them.
+
+(defn weigh-in-rows
+  "From get_weigh_ins: one row per day that has a weight, the day's last measurement."
+  [res]
+  (let [kg (fn [grams] (when (and (number? grams) (pos? grams)) (/ grams 1000.0)))]
+    (->> (:measurements (m res))
+         (filter #(and (string? (:date %)) (number? (:weight_kg %)) (pos? (:weight_kg %))))
+         (group-by :date)
+         (map (fn [[date ms]]
+                (let [w (last (sort-by #(or (:timestamp_gmt %) 0) ms))]
+                  {:date date :weight_kg (:weight_kg w) :body_fat (:body_fat_percent w)
+                   :muscle_kg (kg (:muscle_mass_grams w)) :water_pct (:body_water_percent w)
+                   :bone_kg (kg (:bone_mass_grams w)) :bmi (:bmi w) :raw w})))
+         (sort-by :date)
+         vec)))
+
+(defn acclimation-row
+  "From get_acclimation for `date`; nil without a heat or altitude value."
+  [date res]
+  (let [r (m res)]
+    (when (some number? [(:heat_acclimation_percent r) (:altitude_acclimation_meters r)])
+      {:date (or (:date r) date) :heat_pct (:heat_acclimation_percent r)
+       :altitude_m (:altitude_acclimation_meters r) :raw r})))
+
+(defn exercise-summary
+  "From get_activity_exercise_sets: the working sets per exercise, in the order first done: [{:exercise
+  \"BARBELL_BENCH_PRESS\" :sets 3 :reps 24 :max_kg 60.0}]. Rests and exercises the watch couldn't name are
+  left out; :reps and :max_kg are nil when not recorded (weights come in grams, -1 for none)."
+  [res]
+  (let [named (for [s (:exerciseSets (m res))
+                    :when (= "ACTIVE" (:setType s))
+                    :let [{:keys [category] :as ex} (first (sort-by #(- (or (:probability %) 0)) (:exercises s)))
+                          nm (or (:name ex) category)]
+                    :when (and nm (not= "UNKNOWN" nm))]
+                [nm s])]
+    (vec (for [nm (distinct (map first named))
+               :let [sets (for [[n s] named :when (= n nm)] s)
+                     reps (keep :repetitionCount sets)
+                     kgs  (for [{:keys [weight]} sets :when (and (number? weight) (pos? weight))]
+                            (/ weight 1000.0))]]
+           {:exercise nm :sets (count sets)
+            :reps (when (seq reps) (reduce + reps))
+            :max_kg (when (seq kgs) (apply max kgs))}))))
+
+(def ^:private stop-kinds
+  "Errors that make every further call pointless (coach.sync/fatal-kinds)."
+  #{:auth :rate-limit :unreachable :server})
+
+(def respiration-chunk-days "get_respiration_trend accepts at most 30 days." 30)
+
+(defn- fetch-respiration
+  "Sleep breathing rates for `days` (ISO dates). Not every watch measures them, and a failure must not take the
+  day's other health data with it, so anything but a stopping error only prints."
+  [client delay-ms days]
+  (into {}
+        (for [chunk (partition-all respiration-chunk-days days)
+              :let [res (try (Thread/sleep (long delay-ms))
+                             (call client "get_respiration_trend" {"start_date" (first chunk)
+                                                                   "end_date" (last chunk)})
+                             (catch clojure.lang.ExceptionInfo e
+                               (if (stop-kinds (:kind (ex-data e)))
+                                 (throw e)
+                                 (println "  respiration skipped:" (ex-message e)))))]
+              entry (respiration-by-date res)]
+          entry)))
+
 ;; ---------------------------------------------------------------------------
 
 (defn- activity-page
@@ -391,6 +468,25 @@
     (vec (sort-by :date (vals @found)))))
 
 (defrecord GarminMcpSource [client delay-ms]
+  source/HealthSource
+  (fetch-sleep-respiration [_ start-date end-date]
+    (into {} (for [[date e] (fetch-respiration client delay-ms (dates start-date end-date))
+                   :when (:avg_sleep_breaths_per_min e)]
+               [date (:avg_sleep_breaths_per_min e)])))
+
+  (fetch-weigh-ins [_ start-date end-date]
+    (Thread/sleep (long delay-ms))
+    (weigh-in-rows (call client "get_weigh_ins" {"start_date" start-date "end_date" end-date})))
+
+  (fetch-acclimation [_ date]
+    (Thread/sleep (long delay-ms))
+    (acclimation-row date (call client "get_acclimation" {"date" date})))
+
+  (fetch-exercise-sets [_ activity-id]
+    (Thread/sleep (long delay-ms))
+    (let [res (call client "get_activity_exercise_sets" {"activity_id" activity-id})]
+      {:summary (exercise-summary res) :raw res}))
+
   source/CycleSource
   (fetch-cycle [_ start-date end-date]
     (Thread/sleep (long delay-ms))
@@ -424,14 +520,17 @@
                       (into {} (map (juxt :date identity))))
           day    (fn [tool date]
                    (Thread/sleep (long delay-ms))
-                   (call client tool {"date" date}))]
+                   (call client tool {"date" date}))
+          days    (vec (dates start-date end-date))
+          resp    (fetch-respiration client delay-ms days)]
       (mapv (fn [date]
               (wellness-row {:date      date
+                             :respiration (resp date)
                              :stats     (day "get_stats" date)
                              :hrv       (day "get_hrv_data" date)
                              :readiness (day "get_training_readiness" date)
                              :sleep     (get nights date)}))
-            (dates start-date end-date))))
+            days)))
 
   (fetch-streams [_ activity-id]
     (let [limit 2000]

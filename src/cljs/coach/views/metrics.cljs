@@ -95,6 +95,10 @@
       :how (tk "It charges while you rest and sleep and drains with activity and stress. Garmin works it out from your HRV and heart rate.")
       :read (tk "The chart shows each day's lowest to highest value. Waking up with a low value means a poor night of recovery. As a rough guide, waking up above 75 is well rested, and below 50 means you started the day tired.")
       :see ["vital-history"]}
+     {:id "respiration" :name (tk "Breathing rate and blood oxygen asleep") :src :garmin
+      :what (tk "How many breaths a minute you take while asleep, and how much oxygen your blood carries then. Only newer watches measure them, and blood oxygen usually has to be switched on. Without data, the app leaves them out.")
+      :how (tk "From the sensor on your wrist, averaged over the night. The app compares each night with your own 60 days before it.")
+      :read (tk "Breathing rate hardly moves from night to night, so a rise of a breath or more over your normal can be an early sign of illness or heavy fatigue. After two such nights the coach suggests keeping it easy. Blood oxygen falls at altitude and also reads low with a loose watch. Neither is a medical measurement.")}
      {:id "vital-history" :name (tk "History, 7-day average and normal range") :src :app
       :what (tk "Tap a card under the readiness ring to see how that value has moved over 30 days, 90 days, a year or all time.")
       :how (tk "The line is the value of each day. The 7-day average smooths out the ups and downs. The shaded band is your normal range: the average of your last 60 days, give or take one typical swing (one standard deviation). It is worked out here from your own data, and is not Garmin's balanced range for HRV.")
@@ -276,12 +280,32 @@
      {:id "endurance-score" :name (tk "Endurance score") :src :garmin
       :what (tk "How well you can keep up long efforts, as a single number placed on a scale from Recreational to Elite.")
       :how (tk "Garmin combines your VO₂ max with the load of all your activities over recent weeks and months. The limits between the levels are Garmin's, for your age and sex.")
-      :read (tk "It rises with consistent training of any kind and falls during long breaks. The line under the gauge tells you how many points are left to the next level.")}]}
+      :read (tk "It rises with consistent training of any kind and falls during long breaks. The line under the gauge tells you how many points are left to the next level.")}
+     {:id "acclimation" :name (tk "Heat and altitude acclimation") :src :garmin
+      :what (tk "How used your body is to training in heat and living or training at altitude.")
+      :how (tk "Garmin builds it up from outdoor activities in warm weather or high up. It fades within a few weeks without them. It is shown only when there is something to show, and only a reading from the last 14 days.")
+      :read (tk "Heat runs from 0 to 100 percent. Altitude is the height in metres you are currently used to. Useful before a hot race or one high in the mountains.")}
+     {:id "weight" :name (tk "Weight and body fat") :src :garmin
+      :what (tk "Your weigh-ins, from a Garmin scale or what you entered in Garmin Connect.")
+      :how (tk "Shown as they come from Garmin, the last one of each day. Body fat appears only if your scale measures it. Watts per kg uses your last weigh-in of the past 30 days, otherwise the weight in your Garmin profile.")
+      :read (tk "Weight swings by a kilo or two from day to day with water and food. Look at weeks, not days.")}]}
 
    {:id "activity" :title (tk "One activity")
     :intro (tk "The values on an activity's page, calculated from its second-by-second data.")
     :items
-    [{:id "moving-time" :name (tk "Moving time") :src :app
+    [{:id "recovery-hr" :name (tk "Heart rate recovery") :src :garmin
+      :what (tk "How far your heart rate fell in the first minutes after you stopped.")
+      :how (tk "Measured by the watch if you leave it running briefly after stopping. Many activities don't have it.")
+      :read (tk "A bigger drop is generally better, but it depends on how hard the end of the activity was. Compare similar workouts with each other.")}
+     {:id "running-dynamics" :name (tk "Running dynamics") :src :garmin
+      :what (tk "How you move: ground contact time (how long a foot stays on the ground), vertical oscillation (how much you bounce) and stride length.")
+      :how (tk "From a compatible watch or chest strap. Values your device doesn't measure are left out.")
+      :read (tk "They change with speed, slope and tiredness, so compare runs at a similar pace. There is no single ideal value.")}
+     {:id "strength-sets" :name (tk "Strength sets") :src :garmin
+      :what (tk "The exercises of a strength workout with their sets, repetitions and heaviest weight.")
+      :how (tk "Your watch counts repetitions and guesses the exercise; you can correct them in Garmin Connect. Rests and exercises it couldn't name are left out. Weight appears only if it was entered.")
+      :read (tk "Use it to see what you did and how the weights progress. The coach sees it too.")}
+     {:id "moving-time" :name (tk "Moving time") :src :app
       :what (tk "The time you actually spent moving. The elapsed time next to it includes stops, such as waiting at a traffic light.")
       :how (tk "From the activity's data. Gaps longer than 10 seconds count as pauses.")
       :read (tk "Pace, speed and TSS use moving time, so a coffee stop doesn't make you look slow.")}

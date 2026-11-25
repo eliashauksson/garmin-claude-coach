@@ -46,6 +46,18 @@
     (let [m (js/Math.round (/ s 60))]
       (str (quot m 60) ":" (pad2 (mod m 60))))))
 
+(defn has?
+  "Whether a page shows `k` (coach.analysis/available, sent as :has in `data`): the athlete's devices have
+  measured it lately, or there is no health data yet at all."
+  [data k]
+  (let [h (:has data)]
+    (or (nil? h) (boolean (some #{(name k)} h)))))
+
+(defn measured?
+  "has? for parts that only appear once there is data: false while there is no health data at all."
+  [data k]
+  (boolean (some #{(name k)} (:has data))))
+
 (defn signed
   "+1.2 / -3 / 0: the sign always shown."
   [x]

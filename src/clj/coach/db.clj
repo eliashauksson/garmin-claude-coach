@@ -250,6 +250,29 @@
       need_min   REAL,
       raw        TEXT NOT NULL,
       fetched_at TEXT NOT NULL)"
+   ;; only for athletes and watches that have them
+   "CREATE TABLE IF NOT EXISTS weigh_ins (
+      date       TEXT PRIMARY KEY,
+      weight_kg  REAL NOT NULL,
+      body_fat   REAL,
+      muscle_kg  REAL,
+      water_pct  REAL,
+      bone_kg    REAL,
+      bmi        REAL,
+      raw        TEXT NOT NULL,
+      fetched_at TEXT NOT NULL)"
+   "CREATE TABLE IF NOT EXISTS acclimation (
+      date       TEXT PRIMARY KEY,
+      heat_pct   REAL,
+      altitude_m REAL,
+      raw        TEXT NOT NULL,
+      fetched_at TEXT NOT NULL)"
+   ;; summary: JSON list of exercises, \"[]\" for an activity checked and without any
+   "CREATE TABLE IF NOT EXISTS exercise_sets (
+      activity_id INTEGER PRIMARY KEY,
+      summary     TEXT NOT NULL,
+      raw         TEXT NOT NULL,
+      fetched_at  TEXT NOT NULL)"
    ;; cycle tracking, only filled when the athlete turns it on (coach.cycle): days synced from the watch's app ...
    "CREATE TABLE IF NOT EXISTS cycle_days (
       date       TEXT PRIMARY KEY,
@@ -369,7 +392,11 @@
   ["UPDATE daily_wellness SET avg_stress = NULL WHERE avg_stress < 0"
    ;; one current season plan: older finished drafts (made before backups existed) become backups
    "UPDATE season_plans SET status = 'archived', archived_at = updated_at, archived_reason = 'redraft'
-    WHERE status = 'ready' AND id < (SELECT max(id) FROM season_plans WHERE status = 'ready')"])
+    WHERE status = 'ready' AND id < (SELECT max(id) FROM season_plans WHERE status = 'ready')"
+   ;; nights stored before blood oxygen had its own columns
+   "UPDATE daily_wellness SET spo2_avg = json_extract(raw, '$.sleep.avg_spo2_percent'),
+           spo2_low = json_extract(raw, '$.sleep.lowest_spo2_percent')
+    WHERE spo2_avg IS NULL AND json_extract(raw, '$.sleep.avg_spo2_percent') IS NOT NULL"])
 
 (def ^:private added-columns
   "Columns added after a table was first created: [table column type]."
@@ -409,7 +436,11 @@
    ;; the cycle log's yes/no tags (mood, sex, discharge, other) as a JSON list
    ["cycle_log" "tags" "TEXT"]
    ;; the day she marked as the last bleeding day of a period
-   ["cycle_log" "period_end" "INTEGER NOT NULL DEFAULT 0"]])
+   ["cycle_log" "period_end" "INTEGER NOT NULL DEFAULT 0"]
+   ;; breaths per minute and blood oxygen during sleep; watches without the sensors leave them empty
+   ["daily_wellness" "resp_sleep" "REAL"]
+   ["daily_wellness" "spo2_avg" "REAL"]
+   ["daily_wellness" "spo2_low" "REAL"]])
 
 (defn- ensure-column! [ds [table column type]]
   (let [cols (set (map :name (jdbc/execute! ds [(str "PRAGMA table_info(" table ")")]
@@ -458,12 +489,19 @@
 
 (defn- now [] (str (java.time.Instant/now)))
 
+(def ^:private keep-when-missing
+  "Columns fetched on their own that may fail while the rest of the row arrives: a nil keeps what is stored."
+  #{"resp_sleep"})
+
 (defn- upsert-sql [table pk cols]
   (let [cs (map name cols)]
     (str "INSERT INTO " table " (" (str/join ", " cs) ") VALUES ("
          (str/join ", " (repeat (count cs) "?")) ") "
          "ON CONFLICT(" pk ") DO UPDATE SET "
-         (str/join ", " (for [c cs :when (not= c pk)] (str c " = excluded." c))))))
+         (str/join ", " (for [c cs :when (not= c pk)]
+                          (if (keep-when-missing c)
+                            (str c " = coalesce(excluded." c ", " table "." c ")")
+                            (str c " = excluded." c)))))))
 
 (defn- upsert! [ds table pk cols rows]
   (when (seq rows)
@@ -487,7 +525,7 @@
 (def wellness-cols
   [:date :rhr :hrv_avg :hrv_weekly_avg :hrv_status :sleep_score :sleep_s :deep_sleep_s
    :rem_sleep_s :readiness :readiness_level :avg_stress :body_battery_high
-   :body_battery_low :steps :raw :fetched_at])
+   :body_battery_low :steps :resp_sleep :spo2_avg :spo2_low :raw :fetched_at])
 
 (defn upsert-activities! [ds rows] (upsert! ds "activities" "id" activity-cols rows))
 (defn upsert-wellness!   [ds rows] (upsert! ds "daily_wellness" "date" wellness-cols rows))
@@ -498,6 +536,14 @@
 (defn upsert-load-trend! [ds rows] (upsert! ds "load_trend" "date" [:date :acute :chronic :raw :fetched_at] rows))
 (defn upsert-endurance! [ds rows] (upsert! ds "endurance_score" "date" [:date :score :raw :fetched_at] rows))
 (defn upsert-sleep-need! [ds rows] (upsert! ds "sleep_need" "date" [:date :need_min :raw :fetched_at] rows))
+
+(defn upsert-weigh-ins! [ds rows]
+  (upsert! ds "weigh_ins" "date"
+           [:date :weight_kg :body_fat :muscle_kg :water_pct :bone_kg :bmi :raw :fetched_at] rows))
+(defn upsert-acclimation! [ds rows]
+  (upsert! ds "acclimation" "date" [:date :heat_pct :altitude_m :raw :fetched_at] rows))
+(defn upsert-exercise-sets! [ds rows]
+  (upsert! ds "exercise_sets" "activity_id" [:activity_id :summary :raw :fetched_at] rows))
 
 (defn upsert-cycle-days! [ds rows]
   (upsert! ds "cycle_days" "date" [:date :cycle_day :phase :period :predicted :raw :fetched_at] rows))

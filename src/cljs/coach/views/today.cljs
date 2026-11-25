@@ -62,12 +62,19 @@
 (defn- takeaway [{:keys [readiness vitals]}]
   (let [{:keys [score level estimate]} readiness
         lvl (lower (ui/enum level))
-        hrv (or (lower (ui/enum (:hrv_status vitals))) "—")]
+        hrv (lower (ui/enum (:hrv_status vitals)))]
     [:p.takeaway {:replicant/key "take"}
      (when estimate (str (t "Garmin has no readiness this morning; this is the app's estimate.") " "))
      (cond
        (nil? score)
        (t "Your watch hasn't worked out today's readiness yet. It appears after you wake up and sync.")
+       ;; no HRV (the watch doesn't measure it, or not last night)
+       (and (nil? hrv) (= :bad (tone level)))
+       (ui/rich (t "Readiness is {0} at {1}. Your body is asking for a rest day, or something very easy.") lvl score)
+       (and (nil? hrv) (= :warn (tone level)))
+       (ui/rich (t "Readiness is {0} at {1}. Keep today aerobic and easy, and save the hard session for a better morning.") lvl score)
+       (nil? hrv)
+       (ui/rich (t "Readiness is {0} at {1}. You are ready for quality work today.") lvl score)
        (= :bad (tone level))
        (ui/rich (t "Readiness is {0} at {1} and HRV is {2}. Your body is asking for a rest day, or something very easy.") lvl score hrv)
        (= :warn (tone level))
@@ -141,11 +148,12 @@
      (when-not (or d (get errors ov-url)) (skeleton))
      (when d
        (list
-        (takeaway d)
+        (when (or (:score (:readiness d)) (ui/has? d :readiness)) (takeaway d))
         (week/today-card (get data check-url) plan today)
         (when-let [c (:cycle d)] (cycle/card c today))
         [:div.morning {:replicant/key "morning"}
-         (morning/readiness-card (:readiness d))
+         (when (or (:score (:readiness d)) (ui/has? d :readiness))
+           (morning/readiness-card (:readiness d) d))
          (morning/vitals-grid d)]
         (debrief/today-card (get data note-url))
         (feedback/due-card ui-state (get data due-url))

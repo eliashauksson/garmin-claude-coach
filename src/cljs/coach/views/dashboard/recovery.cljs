@@ -215,25 +215,67 @@
                                               :lineStyle {:color (c/css-var "--text-3") :type "dashed" :width 1}
                                               :data [{:yAxis 25}]})]}))}))))
 
-(defn recovery [{:keys [nights days]} cyc]
+(defn- night-vital-chart
+  "One value measured during sleep, a point per night."
+  [days k {:keys [key color label fmt]}]
+  (let [vs (keep k days)]
+    (if (empty? vs)
+      (empty-line)
+      (let [[lo hi] (padded-range vs)]
+        (c/echart
+         {:key key :class "h180"
+          :option-fn
+          (fn []
+            (merge (off-grid-ends
+                    (cat-base (mapv :date days)
+                              {:y-min lo :y-max hi
+                               :tooltip-fmt (rows-tip days (fn [d] [(day-label (:date d))
+                                                                    [{:label label :value (some-> (k d) fmt)
+                                                                      :color (c/css-var color)}]]))}))
+                   {:series [(c/line label color (mapv k days) :lineStyle {:width 2.2} :connectNulls true
+                                     :sampling nil :showSymbol true :symbolSize 5)]}))})))))
+
+(defn shown?
+  "Whether the Recovery section has any chart for this athlete."
+  [d]
+  (boolean (some #(ui/has? d %) [:hrv :sleep :body_battery :rhr :stress])))
+
+(defn recovery [{:keys [nights days] :as d} cyc]
   (list
    [:div.section-head {:replicant/key "rec-head" :id "tr-recovery"}
     [:h2.section-title (t "Recovery") [:span.section-note (t "Last 30 days")]]]
    [:div.chart-grid {:replicant/key "rec"}
-    (chart-card {:key "hrv" :info "hrv" :wide? true :title (t "Overnight HRV against your baseline")
-                 :text (str (t "Nightly average in ms. The shaded band is Garmin's balanced range for you; the dashed line is the 7-day average.")
-                            (when (seq cyc) (str " " (t "The background colour is your cycle phase."))))
-                 :body (hrv-chart nights cyc)})
-    (chart-card {:key "sleep" :info "sleep" :title (t "Sleep stages per night")
-                 :text (t "Hours asleep in each stage; the dark tick is the sleep Garmin says you needed.")
-                 :body (sleep-chart nights)})
-    (chart-card {:key "bb" :info "body-battery" :title (t "Body Battery range per day")
-                 :text (t "From the day's low to its high; the ring is where the day ended.")
-                 :body (bb-chart days)})
-    (chart-card {:key "rhr" :info "rhr" :title (t "Resting heart rate")
-                 :text (str (t "Beats per minute at rest, each day.")
-                            (when (seq cyc) (str " " (t "The background colour is your cycle phase."))))
-                 :body (rhr-chart days cyc)})
-    (chart-card {:key "stress" :info "stress" :title (t "Average stress per day")
-                 :text (t "Garmin's stress score from 0 to 100; below the dashed line at 25 is rest.")
-                 :body (stress-chart days)})]))
+    (when (ui/has? d :hrv)
+      (chart-card {:key "hrv" :info "hrv" :wide? true :title (t "Overnight HRV against your baseline")
+                   :text (str (t "Nightly average in ms. The shaded band is Garmin's balanced range for you; the dashed line is the 7-day average.")
+                              (when (seq cyc) (str " " (t "The background colour is your cycle phase."))))
+                   :body (hrv-chart nights cyc)}))
+    (when (ui/has? d :sleep)
+      (chart-card {:key "sleep" :info "sleep" :title (t "Sleep stages per night")
+                   :text (t "Hours asleep in each stage; the dark tick is the sleep Garmin says you needed.")
+                   :body (sleep-chart nights)}))
+    (when (ui/has? d :body_battery)
+      (chart-card {:key "bb" :info "body-battery" :title (t "Body Battery range per day")
+                   :text (t "From the day's low to its high; the ring is where the day ended.")
+                   :body (bb-chart days)}))
+    (when (ui/has? d :rhr)
+      (chart-card {:key "rhr" :info "rhr" :title (t "Resting heart rate")
+                   :text (str (t "Beats per minute at rest, each day.")
+                              (when (seq cyc) (str " " (t "The background colour is your cycle phase."))))
+                   :body (rhr-chart days cyc)}))
+    (when (ui/has? d :stress)
+      (chart-card {:key "stress" :info "stress" :title (t "Average stress per day")
+                   :text (t "Garmin's stress score from 0 to 100; below the dashed line at 25 is rest.")
+                   :body (stress-chart days)}))
+    ;; only for watches that measure them
+    (when (and (ui/measured? d :respiration) (some :resp_sleep days))
+      (chart-card {:key "resp" :info "respiration" :title (t "Breathing rate asleep")
+                   :text (t "Breaths per minute during the night. A clear rise can come before an illness shows.")
+                   :body (night-vital-chart days :resp_sleep
+                                            {:key "resp" :color "--blue" :label (t "Breaths per minute")
+                                             :fmt #(.toFixed % 1)})}))
+    (when (and (ui/measured? d :spo2) (some :spo2_avg days))
+      (chart-card {:key "spo2" :info "respiration" :title (t "Blood oxygen asleep")
+                   :text (t "Average during the night. It drops at altitude, and a loose watch reads low.")
+                   :body (night-vital-chart days :spo2_avg {:key "spo2" :color "--fam-swim" :label (t "Blood oxygen")
+                                                            :fmt #(str (js/Math.round %) "%")})}))]))

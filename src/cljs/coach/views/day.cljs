@@ -273,6 +273,22 @@
                                                       :data [[{:yAxis low} {:yAxis high}]]})})})
                (no-data))})))
 
+(defn- breathing-card
+  "Breathing rate and blood oxygen during the night; only for watches that measure them."
+  [w nights]
+  (let [row (fn [label k fmt]
+              (when (some k nights)
+                [:div {:replicant/key label}
+                 [:div.lab label]
+                 [:div.baseline [:span.big.sm (if-let [v (k w)] (fmt v) "—")]]
+                 (into [:div.pills] (for [n nights :when (k n)]
+                                      (ui/pill (str (weekday (:date n)) " " (fmt (k n))))))]))]
+    (ui/card {:tint "blue" :flex "1 1 300px"}
+             (ui/label-row {:icon :moon :accent "--blue" :label (t "Breathing and blood oxygen") :info "respiration"})
+             (row (t "Breaths per minute asleep") :resp_sleep #(ui/fixed % 1))
+             (row (t "Blood oxygen asleep") :spo2_avg #(str (js/Math.round %) "%"))
+             (when (:spo2_low w) [:div.sub (t "lowest {0}%" (:spo2_low w))]))))
+
 (defn- planned-day
   "The day's planned sessions, without today's readiness suggestions."
   [planned]
@@ -331,10 +347,18 @@
          (list
           (when-let [c (:cycle d)] (cycle/day-card c date today))
           [:div.row {:replicant/key "r1"}
-           (readiness-card w (:readiness_estimate d)) (body-battery-card w day i) (sleep-card w day)]
-          [:div {:replicant/key "r2"} (heart-rate-card w day i)]
+           (when (or (:readiness w) (:readiness_estimate d) (ui/has? d :readiness))
+             (readiness-card w (:readiness_estimate d)))
+           (when (or (seq (:body_battery i)) (ui/has? d :body_battery)) (body-battery-card w day i))
+           (when (ui/has? d :sleep) (sleep-card w day))]
+          [:div {:replicant/key "r2"} (when (or (seq (:hr i)) (ui/has? d :rhr)) (heart-rate-card w day i))]
           [:div.row {:replicant/key "r3"}
-           (stress-card w day i) (steps-card w day i)]
+           (when (or (seq (:stress i)) (ui/has? d :stress)) (stress-card w day i))
+           (when (ui/has? d :steps) (steps-card w day i))
+           (when (and (or (ui/measured? d :respiration) (ui/measured? d :spo2))
+                      (some #(or (:resp_sleep %) (:spo2_avg %)) (:nights d)))
+             (breathing-card w (:nights d)))]
           [:div.row {:replicant/key "r4"}
-           (sleep-nights-card (:nights d)) (hrv-nights-card w (:nights d))
+           (when (ui/has? d :sleep) (sleep-nights-card (:nights d)))
+           (when (ui/has? d :hrv) (hrv-nights-card w (:nights d)))
            (activities-card (:activities d) (:planned d) (:readiness_check d))]))])))

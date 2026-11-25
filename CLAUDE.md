@@ -29,13 +29,20 @@ Stack: Clojure 1.12 backend (reitit/ring/jetty, next.jdbc + SQLite, malli, anthr
 - push: sends one planned workout to Garmin Connect (upload + schedule) or the COROS schedule, on the athlete's button press only; Garmin on its own
   write-only server (`garmin-mcp/write-tools`, refused while a sync runs), COROS via `coros-mcp/call-write`; remembers what was sent so resending replaces it
 - device-workout: pure, a planned session's blocks as a Garmin workout / COROS course, and `sendable`
-- source: `DataSource` protocol (read-only), `ActivitySource` for activity-only sources · garmin-mcp: DataSource over a local garmin_mcp server · mcp: minimal MCP client (stdio, Streamable HTTP)
+- source: `DataSource` protocol (read-only), `HealthSource` (sleep breathing history, weigh-ins, acclimation, strength sets),
+  `ActivitySource` for activity-only sources · garmin-mcp: DataSource over a local garmin_mcp server · mcp: minimal MCP client (stdio, Streamable HTTP)
 - coros-mcp: ActivitySource over COROS's official remote MCP server (rides from FIT files) · coros-auth: Coros OAuth (PKCE, token in ~/.config/coach/coros.json) · fit: FIT file decoding (Garmin FIT SDK)
-- sync: incremental + backfill from a DataSource into the DB (upserts) · sync.sources: rides from activity-only sources (`activities-only!`, `coros!`), merged with the same ride on Garmin
+- sync: incremental + backfill from a DataSource into the DB (upserts; tables `weigh_ins`, `acclimation`, `exercise_sets`: 20
+  strength activities a round, "[]" = checked, none) · sync.sources: rides from activity-only sources (`activities-only!`, `coros!`), merged with the same ride on Garmin
 - db: SQLite schema/queries; raw source JSON kept on every row
 - metrics: pure TSS/NP/IF/CTL/ATL/TSB, power curve/eFTP/cycling VO2 max etc. · analysis: glue between db and metrics, API queries, eFTP stored as bike FTP (source "estimate")
 - overview: everything behind the dashboard start page (/api/overview)
-- readiness: pure morning readiness check · adapt: signals that the plan should adapt
+- readiness: pure morning readiness check · adapt: signals that the plan should adapt. Sleep breathing rate and SpO2 are judged
+  against the athlete's own 60 days (`analysis/wellness-with-limits`, limits in metrics.clj)
+- **Data the device never measured is hidden**: `analysis/available` (any value in the last 180 days) is sent as `:has` with
+  /api/overview and /api/day; a metric not in it has no card, chart or tile (`ui/has?`; `ui/measured?` for cards that appear only
+  with data), while one missed day stays visible as a gap ("—"). A value the app estimates counts. Activity tiles without a
+  value are left out. New UI for optional data follows the same rule
 - readiness-score: pure, Garmin's training readiness rebuilt from raw data (six factors + combination, `fit`) · readiness-estimate: its DB glue, shown when Garmin has no score, refit after each sync, CLI `compare`
 - epoc: pure, Garmin-style training load (peak EPOC) from HR or power, acute load · load-model: its DB glue, fitted to Garmin's loads (refit every 20 new ones), power calibration, CLI `compare`; gives rides Garmin never saw (Coros) `activity_metrics.load_est`
 - cycle: pure, opt-in cycle tracking (women only): period starts (athlete's log wins over Garmin's), typical length, phase per day (counted from

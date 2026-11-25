@@ -252,6 +252,19 @@
   (vec (for [[d {:keys [watts date]}] (m/best-curve rides)]
          {:s d :watts watts :date date})))
 
+(def weigh-in-max-days "A weigh-in older than this no longer says what the athlete weighs." 30)
+
+(defn current-weight
+  "The weight to work with on `today`: {:kg :date} from the last weigh-in of the past `weigh-in-max-days`
+  days, else {:kg} from the Garmin profile; nil with neither."
+  [ds today]
+  (if-let [w (first (db/query ds ["SELECT date, weight_kg FROM weigh_ins WHERE date BETWEEN ? AND ?
+                                   ORDER BY date DESC LIMIT 1"
+                                  (season/add-days today (- weigh-in-max-days)) today]))]
+    {:kg (:weight_kg w) :date (:date w)}
+    (when-let [kg (some-> (db/get-state ds :weight_kg) parse-double)]
+      {:kg kg})))
+
 (defn cycling-power
   "The Cycling power section: power curves (90 days, the 90 before, all
   time), the bike FTP now and where it comes from, W/kg and the VO2 max
@@ -264,7 +277,7 @@
             recent (within (day (dec m/eftp-window-days)) today)
             th     (thresholds-at (db/thresholds ds) today)
             ftp    (:ftp th)
-            weight (some-> (db/get-state ds :weight_kg) parse-double)
+            {weight :kg weighed :date} (current-weight ds today)
             p5     (get (update-vals (m/best-curve recent) :watts) 300)]
         {:curve_90d      (curve-of recent)
          :curve_prev_90d (curve-of (within (day (dec (* 2 m/eftp-window-days))) (day m/eftp-window-days)))
@@ -272,6 +285,8 @@
          :ftp            ftp
          :ftp_source     (when ftp (:ftp_source th))
          :weight_kg      weight
+         ;; the day of the weigh-in; nil: the Garmin profile's weight
+         :weight_date    weighed
          :wkg            (when (and ftp weight) (/ (Math/round (* 100.0 (/ ftp weight))) 100.0))
          :vo2max_est     (m/cycling-vo2max p5 weight)
          :eftp_history   (vec (for [r (db/thresholds ds)
@@ -329,6 +344,13 @@
           m.tss, m.tss_method, m.intensity, m.tss_per_hour, m.np, m.ngp_mps, m.vi, m.ef,
           m.decoupling, m.kj, m.hr_zones_s, m.peaks, m.route,
           json_extract(a.raw, '$.detail.workout_rpe') / 10.0 AS garmin_rpe,
+          json_extract(a.raw, '$.detail.anaerobic_training_effect') AS anaerobic_te,
+          json_extract(a.raw, '$.detail.training_effect_label') AS te_label,
+          json_extract(a.raw, '$.detail.recovery_hr_bpm') AS recovery_hr,
+          json_extract(a.raw, '$.detail.body_battery_impact') AS bb_impact,
+          json_extract(a.raw, '$.detail.avg_ground_contact_time_ms') AS gct_ms,
+          json_extract(a.raw, '$.detail.avg_vertical_oscillation_cm') AS vert_osc_cm,
+          json_extract(a.raw, '$.detail.avg_stride_length_cm') AS stride_cm,
           f.rpe, f.pain, f.pain_location, f.note, f.updated_at AS feedback_at
    FROM activities a
    LEFT JOIN activity_metrics m ON m.activity_id = a.id
@@ -353,11 +375,14 @@
     (mapv #(parse-json-cols % [:hr_zones_s :peaks :route])
           (db/query ds (into [sql] (map second where))))))
 
+(declare exercises)
+
 (defn activity [ds id]
   (when-let [a (first (db/query ds [(str activity-select " WHERE a.id = ?") id]))]
     (let [th (some-> (:inputs (first (db/query ds ["SELECT inputs FROM activity_metrics WHERE activity_id = ?" id])))
                      (json/read-str :key-fn keyword))]
-      (cond-> (assoc (parse-json-cols a [:hr_zones_s :peaks :route]) :thresholds th)
+      (cond-> (assoc (parse-json-cols a [:hr_zones_s :peaks :route]) :thresholds th
+                     :exercises (get (exercises ds [id]) id))
         ;; heart rate borrowed from the watch: shown like the activity's own
         (= "watch" (:hr_source th))
         (merge (let [[s src] (stream-with-hr ds a)
@@ -402,13 +427,101 @@
 (def wellness-cols
   "SELECT w.date, w.rhr, w.hrv_avg, w.hrv_weekly_avg, w.hrv_status, w.sleep_score, w.sleep_s,
           w.deep_sleep_s, w.rem_sleep_s, w.readiness, w.readiness_level, w.avg_stress,
-          w.body_battery_high, w.body_battery_low, w.steps, v.value AS vo2max
+          w.body_battery_high, w.body_battery_low, w.steps, w.resp_sleep, w.spo2_avg, w.spo2_low,
+          v.value AS vo2max
    FROM daily_wellness w LEFT JOIN vo2max v ON v.date = w.date AND v.sport = 'running'")
 
 (defn wellness [ds from to]
   (db/query ds [(str wellness-cols " WHERE w.date BETWEEN ? AND ? ORDER BY w.date") from to]))
 
-(def trend-keys [:rhr :hrv_avg :sleep_score :sleep_s :readiness :avg_stress :vo2max])
+(def vital-gap-days "The nights being judged and the ones just before them stay out of the normal." 3)
+
+(defn wellness-with-limits
+  "`wellness` for [from, to], each row with :resp_limit and :spo2_floor, the athlete's normal from the
+  coach.metrics/baseline-days before it (absent with too few nights)."
+  [ds from to]
+  (let [rows (wellness ds (season/add-days from (- m/baseline-days)) to)]
+    (vec
+     (for [r rows :when (>= (compare (:date r) from) 0)
+           :let [lo (season/add-days (:date r) (- m/baseline-days))
+                 hi (season/add-days (:date r) (- vital-gap-days))
+                 normal (filter #(<= (compare lo (:date %)) 0 (compare hi (:date %))) rows)
+                 limit (m/breathing-limit (map :resp_sleep normal))
+                 floor (m/spo2-floor (map :spo2_avg normal))]]
+       (cond-> r
+         limit (assoc :resp_limit limit)
+         floor (assoc :spo2_floor floor))))))
+
+(def available-days "How far back a metric counts as one the athlete's devices measure." 180)
+
+(defn available
+  "The metrics with any data in the `available-days` up to `today`, as a sorted vector of names. A page hides
+  what isn't in it: the watch can't measure it, or nothing was entered. A metric that is in it and missing on
+  one day is a gap, and shown as one. nil (show everything) while there is no health data at all yet."
+  [ds today]
+  (let [from  (season/add-days today (- available-days))
+        row   (first (db/query ds ["SELECT count(*) AS days, count(rhr) AS rhr, count(hrv_avg) AS hrv,
+                                           count(sleep_s) + count(sleep_score) AS sleep,
+                                           count(readiness) AS readiness, count(avg_stress) AS stress,
+                                           count(body_battery_high) AS body_battery, count(steps) AS steps,
+                                           count(resp_sleep) AS respiration, count(spo2_avg) AS spo2
+                                    FROM daily_wellness WHERE date >= ?" from]))
+        table (fn [t] (:n (first (db/query ds [(str "SELECT count(*) AS n FROM " t " WHERE date >= ?") from]))))]
+    (when (pos? (:days row))
+      (vec
+       (sort
+        (concat
+         (for [[k n] (dissoc row :days) :when (pos? n)] (name k))
+         (for [[k t] [["vo2max" "vo2max"] ["endurance" "endurance_score"] ["race_predictions" "race_predictions"]
+                      ["training_status" "training_status"]]
+               :when (pos? (table t))]
+           k)))))))
+
+(def acclimation-max-days "Acclimation fades: an older reading says nothing." 14)
+
+(defn acclimation
+  "The latest heat and altitude acclimation on or before `today` ({:date :heat_pct :altitude_m}, only the values
+  above zero), nil without a recent one."
+  [ds today]
+  (when-let [r (first (db/query ds ["SELECT date, heat_pct, altitude_m FROM acclimation
+                                     WHERE date BETWEEN ? AND ? ORDER BY date DESC LIMIT 1"
+                                    (season/add-days today (- acclimation-max-days)) today]))]
+    (let [out (into {:date (:date r)} (filter (fn [[_ v]] (and v (pos? v))))
+                    (select-keys r [:heat_pct :altitude_m]))]
+      (when (> (count out) 1) out))))
+
+(defn weigh-ins
+  "Weigh-ins in [from, to], oldest first."
+  [ds from to]
+  (db/query ds ["SELECT date, weight_kg, body_fat, muscle_kg FROM weigh_ins
+                 WHERE date BETWEEN ? AND ? ORDER BY date" from to]))
+
+(defn body
+  "What the coach is told about weight: the last weigh-in of the past 90 days, its change over about 4 weeks and
+  the body fat, where there is any. nil without a weigh-in."
+  [ds today]
+  (let [rows (weigh-ins ds (season/add-days today -90) today)]
+    (when-let [now (last rows)]
+      (let [before (last (filter #(<= (compare (:date %) (season/add-days (:date now) -21)) 0) rows))]
+        (into {} (remove (comp nil? val))
+              {:weight_kg (:weight_kg now) :weighed (:date now) :body_fat_pct (:body_fat now)
+               :change_kg (when before (/ (Math/round (* 10.0 (- (:weight_kg now) (:weight_kg before)))) 10.0))
+               :change_since (:date before)})))))
+
+(defn exercises
+  "The exercises of the activities `ids` that have any: id -> summary (coach.garmin-mcp/exercise-summary)."
+  [ds ids]
+  (if (empty? ids)
+    {}
+    (into {}
+          (for [r (db/query ds (into [(str "SELECT activity_id, summary FROM exercise_sets WHERE activity_id IN ("
+                                           (str/join "," (repeat (count ids) "?")) ")")]
+                                     ids))
+                :let [s (json/read-str (:summary r) :key-fn keyword)]
+                :when (seq s)]
+            [(:activity_id r) s]))))
+
+(def trend-keys [:rhr :hrv_avg :sleep_score :sleep_s :readiness :avg_stress :vo2max :resp_sleep :spo2_avg])
 
 (defn trends
   "Rolling averages and baselines per wellness metric. Rows before `from`
@@ -423,7 +536,7 @@
 
 (def vital-keys
   "The wellness metrics the dashboard's detail card can chart."
-  #{:rhr :hrv_avg :sleep_score :sleep_s :readiness :body_battery_high :avg_stress})
+  #{:rhr :hrv_avg :sleep_score :sleep_s :readiness :body_battery_high :avg_stress :resp_sleep :spo2_avg})
 
 (defn vital-trend
   "History of the wellness metrics `ks` (see vital-keys) for [from, to] as
@@ -469,9 +582,10 @@
   (let [from (season/add-days date -6)]
     (mapv (fn [r]
             (let [x (day-extras (db/read-json (:raw r)))]
-              {:date (:date r) :sleep_score (:sleep_score r) :sleep_s (:sleep_s r)
-               :hrv_avg (:hrv_avg r) :hrv_low (:hrv_low x) :hrv_high (:hrv_high x)}))
-          (db/query ds ["SELECT date, sleep_score, sleep_s, hrv_avg, raw FROM daily_wellness
+              (merge {:date (:date r) :sleep_score (:sleep_score r) :sleep_s (:sleep_s r)
+                      :hrv_avg (:hrv_avg r) :hrv_low (:hrv_low x) :hrv_high (:hrv_high x)}
+                     (into {} (remove (comp nil? val)) (select-keys r [:resp_sleep :spo2_avg])))))
+          (db/query ds ["SELECT date, sleep_score, sleep_s, hrv_avg, resp_sleep, spo2_avg, raw FROM daily_wellness
                          WHERE date BETWEEN ? AND ? ORDER BY date" from date]))))
 
 (defn day-summary
@@ -484,6 +598,7 @@
         raw  (db/read-json (:raw (first (db/query ds ["SELECT raw FROM daily_wellness WHERE date = ?" date]))))]
     {:date       date
      :today      (season/today)
+     :has        (available ds (season/today))
      :wellness   (first well)
      :baselines  (into {} (for [[k v] tr] [k (dissoc (first v) :date :value)]))
      :load       (last (pmc ds date date))

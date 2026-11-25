@@ -13,7 +13,8 @@
 
 (defn check
   "`days` are wellness rows, oldest first, ending today (:hrv_avg :hrv_status
-  :rhr :sleep_s :sleep_score :readiness :body_battery_high; :readiness_estimated when
+  :rhr :sleep_s :sleep_score :readiness :body_battery_high; :resp_sleep with :resp_limit, the athlete's normal,
+  where the watch measures breathing; :readiness_estimated when
   :readiness is the app's estimate). `workouts` are
   today's planned workouts. `settings` are the athlete's thresholds (:hrv_low :rhr_high, athlete.md: Baselines);
   a check without its threshold is skipped. `cycle` is the phase (keyword), or {:phase :cycles :hrv_delta :rhr_delta}
@@ -33,6 +34,7 @@
                       (and (:sleep_score t) (< (:sleep_score t) 50)))
         ready-bad (and (:readiness t) (< (:readiness t) 30))
         bb-bad   (and (:body_battery_high t) (< (:body_battery_high t) 30))
+        resp-bad (and (:resp_sleep t) (:resp_limit t) (>= (:resp_sleep t) (:resp_limit t)))
         signals  (cond-> []
                    hrv-bad   (conj (i18n/t "HRV {0} ms is below {1}" (Math/round (double hrv)) hrv_low))
                    rhr-bad   (conj (i18n/t "Resting HR {0} is {1} or higher" rhr rhr_high))
@@ -42,13 +44,15 @@
                                      (i18n/t "Estimated training readiness {0} is below 30 (Garmin has no score this morning)"
                                              (:readiness t))
                                      (i18n/t "Training readiness {0} is below 30" (:readiness t))))
-                   bb-bad    (conj (i18n/t "Body battery {0} this morning is below 30" (:body_battery_high t))))
+                   bb-bad    (conj (i18n/t "Body battery {0} this morning is below 30" (:body_battery_high t)))
+                   resp-bad  (conj (i18n/t "Breathing rate in your sleep ({0} per minute) is above your normal"
+                                           (:resp_sleep t))))
         {:keys [phase cycles hrv_delta rhr_delta]} (if (map? cycle) cycle {:phase cycle})
         no-shift? (and (>= (or cycles 0) 3) (some? hrv_delta) (> hrv_delta -1) (< (or rhr_delta 0) 1))
         luteal?  (and (#{:luteal :late-luteal} phase) (not no-shift?))
         ;; one vital low in the luteal phase, nothing else wrong: the usual shift, not fatigue
         explained? (and luteal? (not= (boolean hrv-bad) (boolean rhr-bad))
-                        (not (or unbal sleep-bad ready-bad bb-bad)))
+                        (not (or unbal sleep-bad ready-bad bb-bad resp-bad)))
         signals  (cond-> signals
                    explained? (conj (i18n/t "Luteal phase: HRV tends to be lower and resting HR higher now, likely cycle-related")))
         rest?    (and hrv-bad rhr-bad)

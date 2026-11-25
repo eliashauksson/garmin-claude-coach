@@ -132,3 +132,13 @@
                                        (ch "add" 0 "2027-01-18" "EASY")]}    ; ok
                             in-scope (constantly {}))]
     (is (= [["change" 1] ["add" 0]] (map (juxt :op :workout_id) (:changes response))))))
+
+(deftest breathing-signal-test
+  (let [night (fn [date resp spo2] {:date date :resp_sleep resp :resp_limit 13.0 :spo2_avg spo2 :spo2_floor 93.0})
+        sigs  #(adapt/signals (assoc calm :wellness %))]
+    (testing "two nights over the athlete's normal"
+      (is (= #{:resp-high :spo2-low}
+             (ids (sigs [(night "2027-01-13" 14.0 92.0) (night "2027-01-14" 13.0 93.0)])))))
+    (testing "one night, or no normal yet, says nothing"
+      (is (empty? (sigs [(night "2027-01-13" 11.0 96.0) (night "2027-01-14" 14.0 92.0)])))
+      (is (empty? (sigs [{:date "2027-01-13" :resp_sleep 20.0} {:date "2027-01-14" :resp_sleep 20.0}]))))))

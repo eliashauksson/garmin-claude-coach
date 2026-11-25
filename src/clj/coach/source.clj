@@ -46,6 +46,19 @@
     "One activity in full: {:activity row (coach.db columns, with :raw)
     :stream columnar stream or nil}."))
 
+(defprotocol HealthSource
+  "Metrics only some watches and athletes have (read-only). A source without them just doesn't implement this."
+  (fetch-sleep-respiration [this start-date end-date]
+    "Breaths per minute during sleep in [start-date, end-date]: date -> value, only the nights measured.")
+  (fetch-weigh-ins [this start-date end-date]
+    "Weigh-ins in [start-date, end-date], the last of each day: [{:date :weight_kg :body_fat :muscle_kg
+    :water_pct :bone_kg :bmi :raw}]. Empty when nothing was weighed.")
+  (fetch-acclimation [this date]
+    "Heat and altitude acclimation as of `date`: {:date :heat_pct :altitude_m :raw}, nil when none.")
+  (fetch-exercise-sets [this activity-id]
+    "A strength activity's exercises: {:summary [{:exercise :sets :reps :max_kg}] :raw}, the summary empty
+    when the watch recorded no recognised exercise."))
+
 (defprotocol CycleSource
   "Menstrual cycle days from the watch's app (read-only, only asked for when the athlete turned cycle tracking on)."
   (fetch-cycle [this start-date end-date]

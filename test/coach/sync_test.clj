@@ -4,7 +4,8 @@
             [coach.db :as db]
             [coach.garmin-mcp :as gm]
             [coach.source :as source]
-            [coach.sync :as sync]))
+            [coach.sync :as sync]
+            [next.jdbc]))
 
 (deftest chunks-test
   (is (= [["2026-10-02" "2026-10-29"] ["2026-09-04" "2026-10-01"]]
@@ -240,3 +241,29 @@
       (is (false? (sync/sync-thresholds! src ds)))
       (is (= 2 (count (db/thresholds ds)))))
     (is (= "75.0" (db/get-state ds :weight_kg)))))
+
+(deftest health-extras-test
+  (let [ds  (temp-ds)
+        src (reify source/HealthSource
+              (fetch-sleep-respiration [_ _ _] {"2030-04-30" 11.0})
+              (fetch-weigh-ins [_ _ _] [{:date "2030-05-01" :weight_kg 70.0 :raw {}}])
+              (fetch-acclimation [_ _] nil)
+              (fetch-exercise-sets [_ _] {:summary [] :raw {}}))]
+    (db/upsert-activities! ds [{:id 1 :date "2030-05-01" :sport "strength_training" :raw {}}
+                               {:id 2 :date "2030-05-01" :sport "running" :raw {}}])
+    (sync/sync-weigh-ins! src ds "2030-04-01" "2030-05-02")
+    (sync/sync-exercise-sets! src ds)
+    (is (= [70.0] (map :weight_kg (db/query ds ["SELECT weight_kg FROM weigh_ins"]))))
+    (testing "only strength activities are asked, and an empty answer is remembered"
+      (is (= [{:activity_id 1 :summary "[]"}]
+             (db/query ds ["SELECT activity_id, summary FROM exercise_sets"]))))
+    (testing "breathing history is filled in once"
+      (db/upsert-wellness! ds [{:date "2030-04-30" :rhr 49 :raw {}}])
+      (sync/catch-up-respiration! src ds "2030-05-02")
+      (is (= [11.0] (map :resp_sleep (db/query ds ["SELECT resp_sleep FROM daily_wellness"]))))
+      (next.jdbc/execute! ds ["DELETE FROM daily_wellness"]))
+    (testing "a failed respiration fetch keeps the stored value"
+      (db/upsert-wellness! ds [{:date "2030-05-01" :resp_sleep 12.0 :rhr 50 :raw {}}])
+      (db/upsert-wellness! ds [{:date "2030-05-01" :rhr 52 :raw {}}])
+      (is (= [{:resp_sleep 12.0 :rhr 52}]
+             (db/query ds ["SELECT resp_sleep, rhr FROM daily_wellness"]))))))
