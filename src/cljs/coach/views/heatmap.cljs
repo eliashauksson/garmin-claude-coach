@@ -93,6 +93,17 @@
                :on {:click [[:heat-colors id]]}}
       [:span.swatch {:style {:background-image (heat/gradient id)}}] (t label)])])
 
+(defn- peaks-switch
+  "Komoot-style switch on the map, bottom left: peaks on or off."
+  [ui]
+  (let [on (peaks? ui)]
+    [:button.map-peaks {:type "button" :role "switch" :aria-checked (str on) :class (when on "on")
+                        :title (if on (t "Hide peaks") (t "Show peaks"))
+                        :on {:click [[:heat-peaks (if on "off" "on")]]}}
+     (ui/nav-icon :mountain)
+     [:span (t "Peaks")]
+     [:span.map-switch {:aria-hidden "true"}]]))
+
 (defn- row [label & controls]
   [:div.map-row [:div.map-row-lab (t label)] (into [:div.map-row-ctl] controls)])
 
@@ -120,8 +131,6 @@
                                 [:heat-show] {:soft? true}))
        (row (tk "Pins") (ui/seg (if (pins? ui) "on" "off") [["on" (tk "Pins on")] ["off" (tk "Pins off")]]
                                 [:heat-pins] {:soft? true}))
-       (row (tk "Peaks") (ui/seg (if (peaks? ui) "on" "off") [["on" (tk "Peaks on")] ["off" (tk "Peaks off")]]
-                                 [:heat-peaks] {:soft? true}))
        (row (tk "Colours") (palette-picker (palette ui)))
        (row (tk "Map") (ui/seg (ground ui tracestrack-key) (grounds tracestrack-key) [:heat-base] {:soft? true}))
        (row (tk "View") (ui/seg (dim ui) [["2d" (tk "2D")] ["3d" (tk "3D")]] [:heat-dim] {:soft? true}))
@@ -148,4 +157,5 @@
                         [:div.heat-base {:class [g (when (own-colours? g) "own-colours")]}
                          (if (= "3d" (dim ui)) (heat/map-3d props) (heat/map-2d props))
                          (overlay {:empty? (empty? items) :n (count shown) :span span :sport sport :present present
-                                  :sync sync :ui ui :tracestrack-key tkey})]))]))
+                                  :sync sync :ui ui :tracestrack-key tkey})
+                         (peaks-switch ui)]))]))
