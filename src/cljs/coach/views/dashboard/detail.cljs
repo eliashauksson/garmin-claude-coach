@@ -90,8 +90,16 @@
         d (when (array? v) (aget v 0))]
     (when (ui/iso-date? d) (set! (.-hash js/location) (str "#/day/" d)))))
 
+;; with more rows than this, daily values are drawn as a cloud of faint dots instead of a line
+(def ^:private dense-rows 120)
+;; and with more than this, the trend line is the 28-day average (the 7-day one is still too jittery)
+(def ^:private long-rows 400)
+
 (defn- history-chart [rows {:keys [k color title] :as opts} label]
-  (let [by-date (into {} (map (juxt :date identity)) rows)
+  (let [dense?  (> (count rows) dense-rows)
+        long?   (> (count rows) long-rows)
+        [trend-k trend] (if long? [:avg28 (t "28-day average")] [:avg7 (t "7-day average")])
+        by-date (into {} (map (juxt :date identity)) rows)
         vs      (concat (keep :value rows) (keep :base_low rows) (keep :base_high rows))
         banded  (filter #(and (ui/num? (:base_low %)) (ui/num? (:base_high %))) rows)
         [lo hi] (padded-range vs)
@@ -108,6 +116,8 @@
                             (c/tooltip-rows (ui/date-long (:date r))
                                             [{:label shown :value (fmt (:value r) opts) :color (c/css-var color)}
                                              {:label (t "7-day average") :value (fmt (:avg7 r) opts)}
+                                             (when long?
+                                               {:label trend :value (fmt (:avg28 r) opts)})
                                              {:label (t "Normal range")
                                               :value (when (and (ui/num? (:base_low r)) (ui/num? (:base_high r)))
                                                        (str (ui/fixed (:base_low r) (or (:dec opts) 0)) "–"
@@ -117,11 +127,15 @@
                          {:type "line" :stack "band" :symbol "none" :silent true :lineStyle {:opacity 0}
                           :areaStyle {:color (c/css-var color) :opacity 0.14}
                           :data (mapv (fn [r] [(:date r) (- (:base_high r) (:base_low r))]) banded)}
-                         (c/line shown color (mapv (juxt :date :value) rows)
-                                 :lineStyle {:width 1} :showSymbol true :symbolSize 4 :connectNulls true
-                                 :sampling nil)
-                         (c/line (t "7-day average") color (mapv (juxt :date :avg7) rows)
-                                 :lineStyle {:width 3} :connectNulls true :sampling nil)]}))})))
+                         (if dense?
+                           {:type "scatter" :name shown :symbolSize (if long? 3 4)
+                            :itemStyle {:color (c/css-var color) :opacity 0.35} :emphasis {:disabled true}
+                            :data (into [] (comp (filter #(ui/num? (:value %))) (map (juxt :date :value))) rows)}
+                           (c/line shown color (mapv (juxt :date :value) rows)
+                                   :lineStyle {:width 1} :showSymbol true :symbolSize 4 :connectNulls true
+                                   :sampling nil))
+                         (c/line trend color (mapv (juxt :date trend-k) rows)
+                                 :lineStyle {:width (if dense? 2.5 3)} :connectNulls true :sampling nil)]}))})))
 
 ;; ---------------------------------------------------------------------------
 

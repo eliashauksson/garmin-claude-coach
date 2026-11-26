@@ -101,7 +101,7 @@
       :read (tk "Breathing rate hardly moves from night to night, so a rise of a breath or more over your normal can be an early sign of illness or heavy fatigue. After two such nights the coach suggests keeping it easy. Blood oxygen falls at altitude and also reads low with a loose watch. Neither is a medical measurement.")}
      {:id "vital-history" :name (tk "History, 7-day average and normal range") :src :app
       :what (tk "Tap a card under the readiness ring to see how that value has moved over 30 days, 90 days, a year or all time.")
-      :how (tk "The line is the value of each day. The 7-day average smooths out the ups and downs. The shaded band is your normal range: the average of your last 60 days, give or take one typical swing (one standard deviation). It is worked out here from your own data, and is not Garmin's balanced range for HRV.")
+      :how (tk "The thin line is the value of each day, and the 7-day average smooths out the ups and downs. Over longer than about four months each day is a faint dot instead, and over more than about 13 months the thick line is the 28-day average. The shaded band is your normal range: the average of your last 60 days, give or take one typical swing (one standard deviation). It is worked out here from your own data, and is not Garmin's balanced range for HRV.")
       :read (tk "A day inside the band is an ordinary day for you. A day outside it is unusual, and several in a row are worth noticing. For resting heart rate, above the band is the worrying side. For HRV and sleep, below it is.")
       :see ["basics-trends"]}
      {:id "week-progress" :name (tk "This week") :src :app
