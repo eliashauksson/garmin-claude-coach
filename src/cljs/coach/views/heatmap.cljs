@@ -24,10 +24,20 @@
       "90"   (ui/add-days today -90)
       nil)))
 
+(def defaults
+  "The map settings every time the Map tab is opened (time range and sport are URL params: all, all)."
+  {:heat-show "on" :heat-pins "on" :heat-peaks "off"
+   :heat-colors "fire" :heat-base "satellite" :heat-dim "2d"})
+
+(defn- setting
+  "A map setting: what was picked since the Map tab was opened, else its default."
+  [ui k]
+  (get ui k (defaults k)))
+
 (defn palette
-  "The chosen heatmap colours (remembered in this browser)."
+  "The chosen heatmap colours."
   [ui]
-  (or (:heat-colors ui) (.getItem js/localStorage "heat-colors") "blue"))
+  (setting ui :heat-colors))
 
 (def map-keys-url settings/map-keys-url)
 
@@ -45,11 +55,11 @@
             [id label]))))
 
 (defn ground
-  "What's under the heat: one of `grounds` (remembered in this browser; light at first or when the
-  remembered one is gone, e.g. the Tracestrack key was removed)."
+  "What's under the heat: one of `grounds` (the default when the picked one is gone, e.g. the
+  Tracestrack key was removed)."
   [ui tracestrack-key]
-  (let [g (or (:heat-base ui) (.getItem js/localStorage "heat-base"))]
-    (if (some #(= g (first %)) (grounds tracestrack-key)) g "light")))
+  (let [g (setting ui :heat-base)]
+    (if (some #(= g (first %)) (grounds tracestrack-key)) g (:heat-base defaults))))
 
 (defn- own-colours?
   "Whether the ground keeps its own colours (not OpenStreetMap dark/light or satellite)."
@@ -57,24 +67,24 @@
   (contains? (set heat/extra-grounds) g))
 
 (defn heat?
-  "Whether the heat is shown (remembered in this browser; off at first)."
+  "Whether the heat is shown."
   [ui]
-  (= "on" (or (:heat-show ui) (.getItem js/localStorage "heat-show"))))
+  (= "on" (setting ui :heat-show)))
 
 (defn pins?
-  "Whether the activity pins are shown (remembered in this browser; off at first)."
+  "Whether the activity pins are shown."
   [ui]
-  (= "on" (or (:heat-pins ui) (.getItem js/localStorage "heat-pins"))))
+  (= "on" (setting ui :heat-pins)))
 
 (defn peaks?
-  "Whether the peaks are shown (remembered in this browser; on at first)."
+  "Whether the peaks are shown."
   [ui]
-  (not= "off" (or (:heat-peaks ui) (.getItem js/localStorage "heat-peaks"))))
+  (= "on" (setting ui :heat-peaks)))
 
 (defn dim
-  "\"2d\" or \"3d\" (remembered in this browser)."
+  "\"2d\" or \"3d\"."
   [ui]
-  (if (= "3d" (or (:heat-dim ui) (.getItem js/localStorage "heat-dim"))) "3d" "2d"))
+  (setting ui :heat-dim))
 
 (defn- palette-picker [current]
   [:div.seg.heat-colors

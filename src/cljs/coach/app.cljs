@@ -532,10 +532,9 @@
     (js/setTimeout #(fetch! status/backup-url {:force true}) ms)))
 
 (defn- heat-setting
-  "An action that stores a heatmap setting in localStorage and in the UI state."
+  "An action that sets a heatmap setting, until the Map tab is opened again."
   [k]
   (fn [[v]]
-    (.setItem js/localStorage (name k) v)
     (swap! state assoc-in [:ui k] v)))
 
 (defn- scroll-to! [[id]]
@@ -621,7 +620,10 @@
    :square-download   (fn [_] (let [sel (get-in @state [:ui :squares :selected])]
                                 (swap! state assoc-in [:ui :squares :selected] #{})
                                 (api! "POST" peaks/squares-url {:squares (vec sel)})))
-   :show-peak         (fn [[lat lng]] (heat/show-at! lat lng) (set-hash! "#/map"))
+   :show-peak         (fn [[lat lng]]
+                        (heat/show-at! lat lng)
+                        (swap! state assoc-in [:ui :heat-next] {:heat-peaks "on"}) ; or the peak would be hidden
+                        (set-hash! "#/map"))
    :heat-dim          (heat-setting :heat-dim)
    :heat-base         (heat-setting :heat-base)
    :heat-colors       (heat-setting :heat-colors)
@@ -724,8 +726,18 @@
 (defn render! []
   (r/render (js/document.getElementById "app") (view @state)))
 
+(defn- enter-route
+  "The state on `route`. Coming to the Map tab from elsewhere (or loading it) puts its settings back to
+  their defaults, plus what the link there asked for (`:heat-next`)."
+  [s route]
+  (cond-> (assoc s :route route)
+    (and (= :map (:page route)) (not= :map (get-in s [:route :page])))
+    (update :ui (fn [ui]
+                  (-> (apply dissoc ui :heat-next (keys heatmap/defaults))
+                      (merge (:heat-next ui)))))))
+
 (defn on-hash! []
-  (swap! state assoc :route (parse-route (.-hash js/location)))
+  (swap! state enter-route (parse-route (.-hash js/location)))
   (load-route!))
 
 (defn ^:dev/after-load reload! [] (render!))
